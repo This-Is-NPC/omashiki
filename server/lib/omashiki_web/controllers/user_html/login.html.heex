@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="omashiki-dark" class="h-full" style="color-scheme: dark;">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <title>Sign in · Omashiki</title>
+    <link rel="stylesheet" href={~p"/assets/app.css"} />
+  </head>
+  <body class="h-full bg-surface text-on-surface antialiased">
+    <main class="min-h-screen flex items-center justify-center px-6">
+      <section class="w-full max-w-md border border-outline-variant bg-surface-container p-10">
+        <header class="mb-8">
+          <p class="font-label text-label-md tracking-[0.3em] uppercase text-on-surface-variant mb-3">
+            Omashiki
+          </p>
+          <h1 class="font-headline italic text-4xl text-on-surface leading-none">
+            Sign in
+          </h1>
+          <p class="font-body text-sm text-on-surface-variant mt-4">
+            Use your email or username and the password you chose at signup.
+          </p>
+        </header>
+
+        <%= if @reason == "invalid" do %>
+          <.alert_banner kind={:error} class="mb-6">
+            Invalid credentials.
+          </.alert_banner>
+        <% end %>
+
+        <%= if @reason == "expired" do %>
+          <.alert_banner kind={:warning} class="mb-6">
+            Your session expired. Sign in again.
+          </.alert_banner>
+        <% end %>
+
+        <%= if @reason == "signed_out" do %>
+          <.alert_banner kind={:info} class="mb-6">
+            Signed out.
+          </.alert_banner>
+        <% end %>
+
+        <%= if Phoenix.Flash.get(@flash, :error) do %>
+          <.alert_banner kind={:error} class="mb-6">
+            {Phoenix.Flash.get(@flash, :error)}
+          </.alert_banner>
+        <% end %>
+
+        <form action="/login" method="post" class="space-y-5">
+          <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+
+          <div>
+            <label
+              for="identifier"
+              class="block font-label text-label-md tracking-[0.3em] uppercase text-on-surface-variant mb-2"
+            >
+              Email or username
+            </label>
+            <.text_input
+              id="identifier"
+              type="text"
+              name="identifier"
+              value={@identifier}
+              required
+              autocomplete="username"
+              autofocus
+            />
+          </div>
+
+          <div>
+            <label
+              for="password"
+              class="block font-label text-label-md tracking-[0.3em] uppercase text-on-surface-variant mb-2"
+            >
+              Password
+            </label>
+            <.text_input
+              id="password"
+              type="password"
+              name="password"
+              required
+              autocomplete="current-password"
+            />
+          </div>
+
+          <.button type="submit" class="w-full">Sign in</.button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

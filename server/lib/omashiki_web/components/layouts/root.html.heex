@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="omashiki-dark" class="[scrollbar-gutter:stable] bg-surface">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <link rel="icon" type="image/svg+xml" href={~p"/favicon.svg"} />
+    <link rel="alternate icon" href={~p"/favicon.ico"} />
+    <.live_title default="Omashiki">
+      {assigns[:page_title]}
+    </.live_title>
+    <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
+    <script defer phx-track-static type="text/javascript" src={~p"/assets/app.js"}>
+    </script>
+  </head>
+  <body class={[
+    "omashiki-sandbox bg-surface text-on-surface font-body antialiased",
+    assigns[:fluid_layout] && "h-screen overflow-hidden flex flex-col"
+  ]}>
+    {@inner_content}
+  </body>
+</html>

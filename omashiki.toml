@@ -1,0 +1,120 @@
+# Local Omashiki configuration.
+#
+# Single source of declared repositories, harnesses, environments, caches,
+# credentials, and limits. The database stores what happens: jobs, queues, and
+# events. Restart Omashiki after changing this file.
+#
+# Also read by:
+#   .scripts/omashiki.py       injects configured ports into Compose and Mix
+#   server/config/runtime.exs  applies ports and authentication to Endpoint/Ecto
+#
+# Infrastructure precedence: environment variable > this file > code default.
+# Execution declarations come only from this file through `Omashiki.Config`.
+
+[app]
+# Phoenix HTTP port.
+port = 4010
+
+# Bind interface. Containers reach the gateway through host.docker.internal on
+# the bridge, for example 172.17.0.1. Loopback-only binding leaves agents with
+# no route. 0.0.0.0 serves the browser on 127.0.0.1 and containers through the
+# bridge. Restrict access with a firewall on shared networks.
+host = "0.0.0.0"
+
+[db]
+# PostgreSQL host port. The container always listens on 5432 internally; this
+# value is only the external mapping used by Compose and Ecto. Port 5432 is
+# commonly occupied by other local projects.
+port = 5442
+
+[auth]
+# false disables login completely: LiveView and API requests use the local
+# operator. This maps to the existing `:auth_mode` (`:bearer` when true,
+# `:none` when false), keeping one authentication concept.
+#
+# With false and no database user, boot creates a local owner so screens that
+# depend on `current_user` continue to work.
+enabled = false
+
+# ---------------------------------------------------------------------------
+# Execution registry
+# ---------------------------------------------------------------------------
+
+[limits]
+max_concurrent_containers = 8
+cpu_per_container = 2.0
+memory_per_container = "2GB"
+pids_limit = 256
+
+[caches.global]
+host = "~/.cache/omashiki/global"
+max_size_mb = 8192
+
+[caches.global.env]
+MISE_DATA_DIR = "/omashiki-cache/global/mise/data"
+MISE_CACHE_DIR = "/omashiki-cache/global/mise/cache"
+XDG_CACHE_HOME = "/omashiki-cache/global/xdg"
+npm_config_cache = "/omashiki-cache/global/npm"
+CARGO_HOME = "/omashiki-cache/global/cargo"
+GOMODCACHE = "/omashiki-cache/global/go/mod"
+UV_CACHE_DIR = "/omashiki-cache/global/uv"
+PIP_CACHE_DIR = "/omashiki-cache/global/pip"
+MIX_HOME = "/omashiki-cache/global/mix"
+HEX_HOME = "/omashiki-cache/global/hex"
+
+# Supply-chain policy is opt-in. In allowlist mode, configure the internal
+# Docker network before attaching this cache.
+# [caches.global.policy]
+# mode = "allowlist" # off | audit | allowlist
+#
+# [caches.global.policy.registries.npm.public]
+# url = "https://registry.npmjs.org"
+#
+# [caches.global.policy.registries.cargo.public]
+# url = "https://index.crates.io"
+# download_url = "https://static.crates.io/crates/{crate}/{crate}-{version}.crate"
+#
+# [caches.global.policy.registries.go.public]
+# url = "https://proxy.golang.org"
+#
+# [caches.global.policy.packages.npm]
+# "example-package" = "1.0.0"
+#
+# [caches.global.policy.packages.cargo]
+# serde = "1.0.*"
+#
+# [caches.global.policy.packages.go]
+# "example.com/module" = "v1.2.3"
+
+[repositories.omashiki]
+path = "."
+base_branch = "master"
+
+[harnesses.opencode]
+adapter = "opencode"
+runtime = "docker"
+image = "omashiki/agent:latest"
+
+[harnesses.claude-code]
+adapter = "claude-code"
+runtime = "docker"
+image = "omashiki/agent-claude:latest"
+
+[environments.opencode]
+harness = "opencode"
+executables = ["mise", "git"]
+credentials = []
+caches = ["global"]
+timeout_ms = 1800000
+network = "none"
+mounts = []
+post_steps = []
+pre_steps = [{ argv = ["mise", "install", "--yes"], condition = "always", timeout_ms = 600000 }]
+
+[environments.opencode.policy]
+mode = "off"
+
+[environments.opencode.resources]
+cpus = 2.0
+memory = "2GB"
+pids = 256

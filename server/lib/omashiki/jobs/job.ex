@@ -1,0 +1,131 @@
+defmodule Omashiki.Jobs.JsonValue do
+  @moduledoc false
+  @behaviour Ecto.Type
+
+  def type, do: :map
+
+  def cast(value), do: if(json_value?(value), do: {:ok, value}, else: :error)
+  def dump(value), do: if(json_value?(value), do: {:ok, value}, else: :error)
+  def load(value), do: {:ok, value}
+  def embed_as(_format), do: :self
+  def equal?(left, right), do: left == right
+
+  defp json_value?(nil), do: true
+  defp json_value?(value) when is_binary(value), do: String.valid?(value)
+  defp json_value?(value) when is_boolean(value) or is_integer(value), do: true
+  defp json_value?(value) when is_float(value), do: value == value
+  defp json_value?(value) when is_list(value), do: Enum.all?(value, &json_value?/1)
+
+  defp json_value?(value) when is_map(value) do
+    Enum.all?(value, fn {key, nested} -> is_binary(key) and json_value?(nested) end)
+  end
+
+  defp json_value?(_), do: false
+end
+
+defmodule Omashiki.Jobs.Job do
+  @moduledoc "Durable admitted job and its immutable execution snapshot."
+
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
+  @statuses ~w(blocked queued provisioning running succeeded failed cancelled)
+  @admission_fields [
+    :user_id,
+    :api_token_id,
+    :parent_job_id,
+    :schema_version,
+    :idempotency_key,
+    :correlation_id,
+    :repository,
+    :environment,
+    :payload,
+    :payload_hash,
+    :repository_snapshot,
+    :repository_digest,
+    :environment_snapshot,
+    :environment_digest,
+    :registry_digest,
+    :queue,
+    :priority
+  ]
+  @state_fields [
+    :status,
+    :current_attempt,
+    :queued_at,
+    :started_at,
+    :finished_at,
+    :terminal_result,
+    :terminal_error
+  ]
+
+  schema "jobs" do
+    field :schema_version, :integer, default: 1
+    field :idempotency_key, :string
+    field :correlation_id, :string
+    field :repository, :string
+    field :environment, :string
+    field :payload, Omashiki.Jobs.JsonValue
+    field :payload_hash, :string
+    field :repository_snapshot, :map
+    field :repository_digest, :string
+    field :environment_snapshot, :map
+    field :environment_digest, :string
+    field :registry_digest, :string
+    field :queue, :string, default: "default"
+    field :priority, :integer, default: 0
+    field :status, :string
+    field :current_attempt, :integer, default: 1
+    field :queued_at, :utc_datetime_usec
+    field :started_at, :utc_datetime_usec
+    field :finished_at, :utc_datetime_usec
+    field :terminal_result, :map
+    field :terminal_error, :map
+
+    belongs_to :user, Omashiki.Accounts.User
+    belongs_to :api_token, Omashiki.ApiTokens.Token
+    belongs_to :parent_job, __MODULE__
+    has_many :attempts, Omashiki.Jobs.JobAttempt
+    has_many :events, Omashiki.Jobs.JobEvent
+
+    timestamps(type: :utc_datetime_usec)
+  end
+
+  def changeset(job, attrs) do
+    fields =
+      if job.__meta__.state == :built, do: @admission_fields ++ @state_fields, else: @state_fields
+
+    job
+    |> cast(attrs, fields)
+    |> validate_required([
+      :user_id,
+      :idempotency_key,
+      :correlation_id,
+      :repository,
+      :environment,
+      :payload,
+      :payload_hash,
+      :repository_snapshot,
+      :repository_digest,
+      :environment_snapshot,
+      :environment_digest,
+      :registry_digest,
+      :queue,
+      :priority,
+      :status,
+      :current_attempt
+    ])
+    |> validate_inclusion(:status, @statuses)
+    |> validate_number(:priority, greater_than_or_equal_to: 0, less_than_or_equal_to: 3)
+    |> validate_number(:current_attempt, greater_than: 0)
+    |> unique_constraint([:user_id, :idempotency_key])
+    |> foreign_key_constraint(:user_id)
+    |> foreign_key_constraint(:api_token_id)
+    |> foreign_key_constraint(:api_token_id, name: :jobs_api_token_owner_fkey)
+    |> foreign_key_constraint(:parent_job_id)
+    |> foreign_key_constraint(:parent_job_id, name: :jobs_parent_owner_fkey)
+    |> check_constraint(:status, name: :jobs_terminal_shape)
+  end
+end

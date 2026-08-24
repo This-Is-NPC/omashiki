@@ -1,0 +1,62 @@
+/*
+ * Container queries for library components.
+ *
+ * Prefer @container over viewport breakpoints: a capacity_card in a sidebar
+ * must react to the sidebar width, not the window. No Tailwind plugin — pure
+ * CSS so we do not add an npm dependency. Tokens stay via var(--…).
+ *
+ * Usage: put `cq` on a node that already has a **definite inline size from
+ * layout** (block width, grid track, flex item with basis / `flex-1`), then
+ * `cq-md-*` / `cq-sm-*` on **descendants**. Thresholds: sm ≈ 20rem, md ≈ 28rem.
+ *
+ * Never put `cq` (`container-type: inline-size`) on a content-sized flex/grid
+ * item — containment sizes that item as if it had no content (intrinsic
+ * inline size → 0). That collapsed `<.stat>` labels (`TOTAL`/`TOKENS`) and
+ * was the same class of bug `kv_row` already fixed (outer `cq`, inner layout).
+ * Rule: containment context ≠ the node that needs content-based sizing.
+ */
+
+.cq {
+  container-type: inline-size;
+}
+
+@container (min-width: 20rem) {
+  .cq-sm-grid-cols-kv-2 {
+    grid-template-columns: minmax(6rem, 10rem) 1fr;
+  }
+
+  .cq-sm-gap-3 {
+    gap: var(--space-3);
+  }
+}
+
+@container (min-width: 28rem) {
+  .cq-md-grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cq-md-grid-cols-kv {
+    grid-template-columns: minmax(8rem, 12rem) 1fr auto;
+  }
+
+  .cq-md-text-3xl {
+    font-size: 1.875rem;
+    line-height: 2.25rem;
+  }
+
+  .cq-md-flex-row {
+    flex-direction: row;
+  }
+
+  .cq-md-items-baseline {
+    align-items: baseline;
+  }
+
+  .cq-md-justify-between {
+    justify-content: space-between;
+  }
+
+  .cq-md-gap-3 {
+    gap: var(--space-3);
+  }
+}

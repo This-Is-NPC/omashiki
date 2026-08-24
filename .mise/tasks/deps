@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+#MISE description="Fetch Elixir dependencies"
+#MISE sources=["server/mix.exs", "server/mix.lock"]
+#MISE outputs=["server/deps/.mise-deps-ok"]
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / ".scripts"))
+from omashiki import SERVER, mix
+
+mix("deps.get")
+stamp = SERVER / "deps" / ".mise-deps-ok"
+stamp.parent.mkdir(parents=True, exist_ok=True)
+stamp.touch()

@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+#MISE description="Stop the database container"
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / ".scripts"))
+from omashiki import compose
+
+compose("stop", "db")

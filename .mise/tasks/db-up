@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+#MISE description="Start Postgres and wait until it accepts connections"
+import subprocess, sys, time, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / ".scripts"))
+from omashiki import SERVER, compose, task_env
+
+compose("up", "db", "-d", "--wait")
+
+# The compose healthcheck is pg_isready, but the container reports healthy a
+# moment before the socket accepts our first pool connection.
+print("\n⏳ Waiting for Postgres to accept connections...", flush=True)
+for _ in range(30):
+    probe = subprocess.run(
+        ["docker", "compose", "exec", "-T", "db",
+         "pg_isready", "-U", "postgres", "-d", "omashiki_dev"],
+        cwd=SERVER, capture_output=True, env=task_env(),
+    )
+    if probe.returncode == 0:
+        print("✔ Postgres is ready", flush=True)
+        sys.exit(0)
+    time.sleep(0.5)
+
+print("✖ Postgres did not become ready in time", file=sys.stderr)
+sys.exit(1)

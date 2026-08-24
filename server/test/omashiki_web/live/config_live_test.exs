@@ -1,0 +1,25 @@
+defmodule OmashikiWeb.ConfigLiveTest do
+  use OmashikiWeb.ConnCase, async: false
+
+  import Phoenix.LiveViewTest
+
+  test "renders repository, environment, runtime, and host declarations read-only", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, ~p"/config")
+
+    assert html =~ "Runtime configuration"
+    assert html =~ "Host limits"
+    assert html =~ "Repositories"
+    assert html =~ "Environments"
+    assert html =~ "Read-only"
+    assert html =~ "restart to change"
+    refute html =~ "Save"
+    refute html =~ "Edit"
+    refute html =~ "Persona"
+  end
+
+  test "cache purge action is available only for configured groups", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/config")
+    html = render_click(view, "purge_cache", %{"group" => "not-configured"})
+    assert html =~ "requires a configured group"
+  end
+end

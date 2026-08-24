@@ -1,0 +1,74 @@
+<header class="bg-surface-container-lowest border-b border-outline-variant px-4 sm:px-6 lg:px-8">
+  <div class="flex items-center justify-between gap-6 py-4 text-sm">
+    <div class="flex items-center gap-8">
+      <a
+        href="/"
+        class="font-headline italic text-xl text-primary-container tracking-tight"
+      >
+        Omashiki
+      </a>
+      <nav class="flex flex-wrap items-center gap-6" aria-label="Primary">
+        <.link
+          navigate="/"
+          class={nav_link_class(:overview, assigns)}
+          aria-current={if assigns[:active_tab] == :overview, do: "page", else: nil}
+        >
+          Overview
+        </.link>
+        <.link
+          navigate="/queue"
+          class={nav_link_class(:queue, assigns)}
+          aria-current={if assigns[:active_tab] == :queue, do: "page", else: nil}
+        >
+          Queue
+        </.link>
+        <.link
+          navigate="/config"
+          class={nav_link_class(:config, assigns)}
+          aria-current={if assigns[:active_tab] == :config, do: "page", else: nil}
+        >
+          Config
+        </.link>
+      </nav>
+    </div>
+
+    <%= if assigns[:current_user] do %>
+      <div class="flex items-center gap-4 shrink-0">
+        <span
+          class="font-label text-label-md tracking-[0.3em] uppercase text-on-surface max-w-[12rem] truncate inline-block"
+          title={@current_user.username}
+        >
+          {@current_user.username}
+        </span>
+        <span class="text-outline-variant" aria-hidden="true">·</span>
+        <form action="/logout" method="post" class="inline">
+          <input type="hidden" name="_method" value="delete" />
+          <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+          <button
+            type="submit"
+            class="font-label text-label-md tracking-[0.3em] uppercase px-3 py-1 transition-colors text-status-failed border border-status-failed/40 hover:border-status-failed hover:bg-status-failed/10"
+          >
+            Sign out
+          </button>
+        </form>
+      </div>
+    <% end %>
+  </div>
+</header>
+<main class={[
+  "bg-surface",
+  if(assigns[:fluid_layout],
+    do: "p-0 flex-1 min-h-0",
+    else: "px-4 py-8 sm:px-6 lg:px-8"
+  )
+]}>
+  <div class={
+    if(assigns[:fluid_layout],
+      do: "w-full h-full flex flex-col min-h-0",
+      else: "mx-auto max-w-7xl"
+    )
+  }>
+    <.flash_group flash={@flash} />
+    {@inner_content}
+  </div>
+</main>

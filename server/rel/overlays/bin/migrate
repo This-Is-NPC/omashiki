@@ -1,0 +1,11 @@
+#!/bin/sh
+# Production release entrypoint.
+# Runs Ecto migrations to head, then hands off to the long-running
+# `bin/omashiki start`. Idempotent — re-running with no pending migrations
+# is a no-op.
+set -e
+
+cd "$(dirname "$0")/.."
+
+./bin/omashiki eval 'Omashiki.Release.migrate()'
+exec ./bin/omashiki start "$@"

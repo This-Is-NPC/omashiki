@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+#MISE description="Run the Phoenix server in the foreground"
+#MISE depends=["migrate", "assets-install", "images"]
+import socket
+import sys
+import pathlib
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / ".scripts"))
+from omashiki import compose, config, mix
+
+
+def already_listening(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.5)
+        return probe.connect_ex((host, port)) == 0
+
+
+cfg = config()
+host = cfg.get("app", {}).get("host", "127.0.0.1")
+port = int(cfg.get("app", {}).get("port", 4000))
+
+# Running `up` against an app that is already up has to be harmless. Without
+# this the endpoint fails with :eaddrinuse, and — worse — the cleanup below
+# used to run anyway and stop the database out from under the instance that
+# was serving fine.
+if already_listening(host, port):
+    print(f"✔ already running at http://{host}:{port} — nothing to do", flush=True)
+    sys.exit(0)
+
+# Only past that check do we own the lifecycle, so stopping the database on
+# exit is safe: clean shutdown, Ctrl-C or crash all belong to this process.
+# A failure in one of the dependencies leaves the database up, which is what
+# you want while debugging the failure.
+try:
+    mix("phx.server")
+finally:
+    compose("stop", "db", check=False)

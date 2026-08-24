@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+# Claude Code 2.1.240 agent sandbox, using the same hardened base as OpenCode.
+ARG OMATERM_BASE=ghcr.io/omacom-io/omaterm@sha256:180f5884ab8573b1235595eeefef605ad10ffdfbdef9eb96dfebd801e0f9215a
+FROM ${OMATERM_BASE}
+
+ARG CLAUDE_CODE_VERSION=2.1.240
+
+USER 1000
+RUN mise trust /home/omaterm/.config/mise/config.toml \
+    && npm install --global --no-fund --no-audit --allow-scripts=@anthropic-ai/claude-code "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+    && claude --version | grep -F "${CLAUDE_CODE_VERSION}" \
+    && install -m 0755 "$(npm root --global)/@anthropic-ai/claude-code/bin/claude.exe" /tmp/omashiki-claude-bin \
+    && install -m 0755 "$(mise which node)" /tmp/omashiki-node-bin
+
+USER root
+RUN install -m 0755 /tmp/omashiki-claude-bin /usr/local/bin/claude \
+    && install -m 0755 /tmp/omashiki-node-bin /usr/local/bin/node \
+    && rm /tmp/omashiki-claude-bin /tmp/omashiki-node-bin \
+    && /usr/local/bin/node --version \
+    && /usr/local/bin/claude --version | grep -F "${CLAUDE_CODE_VERSION}"
+COPY claude_code_runner.mjs /usr/local/bin/omashiki-claude-runner
+COPY claude_entrypoint.sh /usr/local/bin/omashiki-claude-entrypoint
+RUN chmod 0755 /usr/local/bin/omashiki-claude-runner /usr/local/bin/omashiki-claude-entrypoint
+
+ENV PATH="/usr/local/bin:${PATH}"
+
+USER 1000:1000
+ENTRYPOINT ["/usr/local/bin/omashiki-claude-entrypoint"]

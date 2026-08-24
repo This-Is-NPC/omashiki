@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="omashiki-dark" class="h-full" style="color-scheme: dark;">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content={get_csrf_token()} />
+    <title>Sign up · Omashiki</title>
+    <link rel="stylesheet" href={~p"/assets/app.css"} />
+  </head>
+  <body class="h-full bg-surface text-on-surface antialiased">
+    <main class="min-h-screen flex items-center justify-center px-6">
+      <section class="w-full max-w-md border border-outline-variant bg-surface-container p-10">
+        <header class="mb-8">
+          <p class="font-label text-label-md tracking-[0.3em] uppercase text-on-surface-variant mb-3">
+            Omashiki · First boot
+          </p>
+          <h1 class="font-headline italic text-4xl text-on-surface leading-none">
+            Create the operator
+          </h1>
+          <p class="font-body text-sm text-on-surface-variant mt-4">
+            One human runs this Omashiki. Pick credentials. The password
+            is hashed with Argon2id and never leaves the host.
+          </p>
+        </header>
+
+        <%= if Phoenix.Flash.get(@flash, :error) do %>
+          <.alert_banner kind={:error} class="mb-6">
+            {Phoenix.Flash.get(@flash, :error)}
+          </.alert_banner>
+        <% end %>
+
+        <.form
+          :let={f}
+          for={@changeset}
+          action="/signup"
+          as={:user}
+          class="space-y-5"
+        >
+          <div>
+            <label
+              for="user_email"
+              class="block font-label text-label-md tracking-[0.3em] uppercase text-on-surface-variant mb-2"
+            >
+              Email
+            </label>
+            <.text_input field={f[:email]} type="email" required autocomplete="email" autofocus />
+            <%= for msg <- translate_errors(f.source.errors, :email) do %>
+              <p class="font-mono text-xs text-status-failed mt-1">{msg}</p>
+            <% end %>
+          </div>
+
+          <div>
+            <label
+              for="user_username"
+              class="block font-label text-label-md tracking-[0.3em] uppercase text-on-surface-variant mb-2"
+            >
+              Username
+            </label>
+            <.text_input field={f[:username]} type="text" required autocomplete="username" />
+            <%= for msg <- translate_errors(f.source.errors, :username) do %>
+              <p class="font-mono text-xs text-status-failed mt-1">{msg}</p>
+            <% end %>
+          </div>
+
+          <div>
+            <label
+              for="user_password"
+              class="block font-label text-label-md tracking-[0.3em] uppercase text-on-surface-variant mb-2"
+            >
+              Password
+            </label>
+            <.text_input
+              field={f[:password]}
+              type="password"
+              required
+              autocomplete="new-password"
+              minlength="8"
+            />
+            <%= for msg <- translate_errors(f.source.errors, :password) do %>
+              <p class="font-mono text-xs text-status-failed mt-1">{msg}</p>
+            <% end %>
+            <p class="font-mono text-xs text-on-surface-variant mt-2">
+              Minimum 8 characters. Pick something a password manager would generate.
+            </p>
+          </div>
+
+          <.button type="submit" class="w-full">Create account &amp; sign in</.button>
+        </.form>
+      </section>
+    </main>
+  </body>
+</html>

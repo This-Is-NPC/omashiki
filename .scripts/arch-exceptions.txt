@@ -1,0 +1,12 @@
+# Declared exceptions for the architecture gate (.scripts/arch_check.sh)
+#
+# Format: <CHECK_ID>|<path relative to server/>|<reason + removal item>
+#
+# An exception is tracked debt, not a silenced check. The gate reports how many
+# are active on every run. Delete the row when its cause is removed; the gate
+# does not report exceptions that have become unnecessary.
+#
+# Known CHECK_IDs: LLM_EGRESS, TOOL_EGRESS, ADAPTER_EVENTS, ENGINE_DIRECT,
+# PORT_VENDOR, ENGINE_RUNTIME
+#
+# No active exceptions.

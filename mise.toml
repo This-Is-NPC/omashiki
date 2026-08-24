@@ -1,0 +1,213 @@
+[tools]
+elixir = "1.17.3-otp-27"
+erlang  = "27.2"
+python  = "3.12"
+rebar   = "3.27.0"
+
+[env]
+MIX_REBAR3 = "rebar3"
+
+[tasks.up]
+description = "Start db + migrate + assets + images, then run Phoenix (foreground)"
+depends     = ["server"]
+run         = "true"
+
+[tasks."up:fresh"]
+description = "Nuke everything, then start fresh"
+depends     = ["nuke"]
+run         = "mise run up"
+
+[tasks.stop]
+description = "Stop the database container"
+depends     = ["db-stop"]
+run         = "true"
+
+# --- Local CI ---
+#
+# Suite taxonomy:
+#   ci:server              Backwards-compatible alias: full mix test (fast + integration)
+#   ci:server:fast         ExUnit excluding :integration and real providers
+#   ci:server:integration  ExUnit only :integration
+#   ci:server:real-provider Opt-in OpenCode provider E2E
+#   ci:server:assets       Compile Tailwind/esbuild assets in test env
+#   ci:server:vuln         Reject vulnerable or retired Hex dependencies
+#   ci:server:cover        mix test --cover (non-blocking, prints summary)
+#   ci:docker:server       Dry-run build of server image
+#   ci:docker:agent        Dry-run build of opencode agent image
+#   ci:docker              Composite: docker:server + both agent images
+
+[tasks."ci:server"]
+description = "Start DB, compile server with warnings-as-errors, run full mix test"
+run         = """
+mise run db-up
+cd server
+MIX_ENV=test mix deps.compile
+MIX_ENV=test mix compile --warnings-as-errors
+MIX_ENV=test mix test
+"""
+
+[tasks."ci:server:fast"]
+description = "Server tests excluding :integration and real providers"
+run         = """
+mise run db-up
+cd server
+MIX_ENV=test mix deps.compile
+MIX_ENV=test mix compile --warnings-as-errors
+MIX_ENV=test mix test --exclude integration --exclude real_opencode --exclude real_claude
+"""
+
+[tasks."ci:server:integration"]
+description = "Server :integration tests only (no real provider)"
+run         = """
+mise run db-up
+cd server
+MIX_ENV=test mix test --only integration
+"""
+
+[tasks."ci:server:real-provider"]
+description = "Run the prepared overture real-provider E2E"
+run         = "mise run e2e:overture:opencode"
+
+[tasks."ci:server:assets"]
+description = "Compile Tailwind + esbuild bundles in test env (asset validation)"
+dir         = "server"
+run         = """
+MIX_ENV=test mix tailwind omashiki
+MIX_ENV=test mix esbuild omashiki
+"""
+
+[tasks."ci:server:vuln"]
+description = "Reject vulnerable or retired Hex dependencies"
+dir         = "server"
+run         = "mix hex.audit"
+
+[tasks."ci:server:cover"]
+description = "Server tests with coverage summary (non-blocking)"
+run         = """
+mise run db-up
+cd server
+MIX_ENV=test mix test --cover --exclude integration --exclude real_opencode --exclude real_claude
+"""
+
+[tasks."ci:docker:server"]
+description = "Build production server Docker image (dry-run, no push)"
+run         = "docker build -t omashiki/server:ci-check -f server/Dockerfile server/"
+
+[tasks."ci:docker:agent"]
+description = "Build production opencode agent Docker image (dry-run, no push)"
+run         = "docker build -t omashiki/agent:ci-check agent/"
+
+[tasks."ci:docker:claude"]
+description = "Build pinned Claude Code agent Docker image (dry-run, no push)"
+run         = "docker build -t omashiki/agent-claude:ci-check -f agent/Dockerfile.claude agent/"
+
+[tasks."ci:docker"]
+description = "Build server + agent Docker images (dry-run, no push)"
+depends     = ["ci:docker:server", "ci:docker:agent", "ci:docker:claude"]
+
+[tasks.ci]
+description = "Run the full local CI matrix"
+run         = ".scripts/ci.sh"
+
+# --- Agent container images (rebuild after changes under agent/) ---
+
+[tasks."arch:check"]
+description = "Run static and ExUnit architecture consistency checks"
+run         = ".scripts/arch_check.sh"
+
+[tasks."arch:check:fast"]
+description = "Run only the static architecture checks"
+run         = ".scripts/arch_check.sh --fast"
+
+[tasks."arch:check:strict"]
+description = "Show all violations, ignoring .scripts/arch-exceptions.txt"
+run         = ".scripts/arch_check.sh --fast --strict"
+
+[tasks."hooks:install"]
+description = "Install the versioned pre-push hook that runs local CI"
+run         = ".scripts/install-hooks.sh"
+
+[tasks."skill:install"]
+description = "Install the Omashiki Agent Skill in ~/.agents/skills"
+run         = "install -Dm0644 .agents/skills/omashiki/SKILL.md \"${HOME:?HOME must be set}/.agents/skills/omashiki/SKILL.md\""
+
+[tasks."agent:build"]
+description = "Build omashiki/agent:latest from agent/ (idempotent — Docker caches layers)"
+run         = "docker build -t omashiki/agent:latest agent/"
+
+[tasks."agent:claude:build"]
+description = "Build omashiki/agent-claude:latest with Claude Code 2.1.240"
+run         = "docker build -t omashiki/agent-claude:latest -f agent/Dockerfile.claude agent/"
+
+[tasks."agent:cache-smoke"]
+description = "Validate cold/warm/offline and concurrent mise/npm cache use"
+depends     = ["agent:build"]
+run         = "bash agent/test-cache.sh"
+
+[tasks."overture:wipe"]
+description = "Recreate the ignored overture Git fixture safely"
+run         = "python .scripts/overture_e2e.py wipe"
+
+[tasks."e2e:prepare"]
+description = "Prepare overture, both provider snapshots and database for E2E"
+run         = """
+mise run overture:wipe
+python .scripts/overture_e2e.py prepare all
+mise run deps
+mise run db-up
+cd server
+MIX_ENV=test mix ecto.reset
+"""
+
+[tasks."e2e:prepare:opencode"]
+description = "Prepare isolated OpenCode overture fixture"
+run         = """
+mise run overture:wipe
+python .scripts/overture_e2e.py prepare opencode
+mise run deps
+mise run db-up
+cd server
+MIX_ENV=test mix ecto.reset
+"""
+
+[tasks."e2e:prepare:claude"]
+description = "Prepare isolated Claude Code overture fixture"
+run         = """
+mise run overture:wipe
+python .scripts/overture_e2e.py prepare claude
+mise run deps
+mise run db-up
+cd server
+MIX_ENV=test mix ecto.reset
+"""
+
+[tasks."e2e:overture:opencode"]
+description = "Run the real queue-only Docker/OpenCode E2E against overture"
+run         = """
+mise run e2e:prepare:opencode
+mise run agent:build
+cd server
+OMASHIKI_REAL_PROVIDER_E2E=1 \
+OMASHIKI_AGENT_NETWORK_MODE=bridge \
+MIX_ENV=test \
+mix test test/integration/queue_real_provider_e2e_test.exs --include real_opencode --exclude real_claude
+"""
+
+[tasks."e2e:overture:claude"]
+description = "Run the real queue-only Docker/Claude Code E2E against overture"
+run         = """
+mise run e2e:prepare:claude
+mise run agent:claude:build
+cd server
+OMASHIKI_REAL_PROVIDER_E2E=1 \
+OMASHIKI_AGENT_NETWORK_MODE=bridge \
+MIX_ENV=test \
+mix test test/integration/queue_real_provider_e2e_test.exs --include real_claude --exclude real_opencode
+"""
+
+[tasks."e2e:overture"]
+description = "Run both real provider E2Es sequentially with isolated fixture preparation"
+run         = """
+mise run e2e:overture:opencode
+mise run e2e:overture:claude
+"""

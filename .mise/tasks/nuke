@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+#MISE description="Wipe omashiki containers, volumes, images and build output"
+"""
+Return the project to a clean checkout.
+
+Everything here is scoped by the `omashiki/` image prefix on purpose. This
+machine hosts other projects, and `docker image prune -a` or a bare
+`system prune` would take their images and volumes with it.
+"""
+import shutil
+import subprocess
+import sys
+import pathlib
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / ".scripts"))
+from omashiki import ASSETS, ROOT, SERVER, compose, docker_lines
+
+
+def nuke_containers() -> None:
+    """Sandbox containers the orchestrator spawned outside compose, which
+    `down --remove-orphans` therefore never sees."""
+    names = [
+        line.split("\t")[0]
+        for line in docker_lines(
+            ["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Image}}"]
+        )
+        if line.split("\t")[-1].startswith("omashiki/")
+    ]
+    if not names:
+        return
+    print(f"\n▶ removing {len(names)} omashiki container(s)", flush=True)
+    subprocess.run(["docker", "rm", "-f", *names], capture_output=True)
+
+
+def nuke_images() -> None:
+    tags = [
+        line
+        for line in docker_lines(["docker", "images", "--format", "{{.Repository}}:{{.Tag}}"])
+        if line.startswith("omashiki/")
+    ]
+    if not tags:
+        return
+    print(f"\n▶ removing {len(tags)} omashiki image(s): {', '.join(tags)}", flush=True)
+    subprocess.run(["docker", "rmi", "-f", *tags], capture_output=True)
+
+
+def nuke_caches() -> None:
+    """Remove build output, but leave the downloaded tool binaries alone.
+
+    _build holds two different things: the compiled artifacts, under one
+    directory per MIX_ENV, and the tailwind and esbuild executables that the
+    Elixir wrappers fetch once and keep at the top level. Deleting the second
+    kind bricks the checkout on any machine that cannot reach GitHub over TLS
+    — which is how this task took the dev server down the first time it ran.
+    So only the per-environment directories go.
+    """
+    targets = [p for p in (SERVER / "_build").glob("*") if p.is_dir()]
+    targets += [
+        SERVER / "deps",
+        ASSETS / "node_modules",
+        ROOT / ".omashiki" / "agent-demo",
+    ]
+    for path in targets:
+        if path.exists():
+            print(f"▶ removing {path.relative_to(ROOT)}", flush=True)
+            shutil.rmtree(path, ignore_errors=True)
+
+
+compose("down", "-v", "--remove-orphans", check=False)
+nuke_containers()
+nuke_images()
+nuke_caches()
+print("\n✔ nuked — `mise run up` will rebuild images, deps and assets", flush=True)

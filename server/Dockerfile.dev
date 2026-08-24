@@ -1,0 +1,29 @@
+FROM elixir:1.17-alpine
+
+RUN apk add --no-cache build-base git nodejs npm inotify-tools postgresql-client
+
+WORKDIR /app
+
+# Install hex + rebar
+RUN mix local.hex --force && mix local.rebar --force
+
+ENV MIX_ENV=dev
+
+# Install dependencies first for caching
+COPY mix.exs mix.lock ./
+COPY apps/omashiki/mix.exs apps/omashiki/mix.exs
+COPY apps/omashiki_web/mix.exs apps/omashiki_web/mix.exs
+COPY config/config.exs config/dev.exs config/
+RUN mix deps.get
+
+# Copy the rest of the application
+COPY . .
+
+RUN mix deps.compile
+
+# Install JS dependencies for esbuild/tailwind
+RUN mix assets.setup
+
+EXPOSE 4000
+
+CMD ["sh", "-c", "mix ecto.setup && mix phx.server"]

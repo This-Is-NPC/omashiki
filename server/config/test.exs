@@ -1,0 +1,49 @@
+import Config
+
+# Argon2 — drop cost knobs to the lowest valid values for tests so that
+# `setup_user/1` and password-roundtrip tests don't dominate runtime.
+config :argon2_elixir, t_cost: 1, m_cost: 8
+
+# Keep tests independent of the developer's omashiki.toml.
+config :omashiki, :skip_toml_config, true
+
+# Configure your database
+#
+# The MIX_TEST_PARTITION environment variable can be used
+# to provide built-in test partitioning in CI environment.
+# Run `mix help test` for more information.
+config :omashiki, Omashiki.Repo,
+  username: "postgres",
+  password: "postgres",
+  hostname: "localhost",
+  port: String.to_integer(System.get_env("OMASHIKI_DB_PORT") || "5432"),
+  database: "omashiki_test#{System.get_env("MIX_TEST_PARTITION")}",
+  pool: Ecto.Adapters.SQL.Sandbox,
+  pool_size: System.schedulers_online() * 2
+
+# The real-provider E2E needs a host listener so its Docker container can
+# reach the LLM gateway. All other tests keep the endpoint in-process only.
+real_provider_e2e? = System.get_env("OMASHIKI_REAL_PROVIDER_E2E") in ["1", "true"]
+
+config :omashiki, OmashikiWeb.Endpoint,
+  http: [ip: if(real_provider_e2e?, do: {0, 0, 0, 0}, else: {127, 0, 0, 1}), port: 4002],
+  secret_key_base: "jSFNlVDVIxgZfZLWyf5VWNo2dpYxAVeg2GVvf0ljqPdJyeR03ShT9UtkaZXJ/mfx",
+  server: real_provider_e2e?
+
+# Print only warnings and errors during test
+config :logger, level: :warning
+
+# Initialize plugs at runtime for faster test compilation
+config :phoenix, :plug_init_mode, :runtime
+
+# Enable helpful, but potentially expensive runtime checks
+config :phoenix_live_view,
+  enable_expensive_runtime_checks: true
+
+# Skip on-boot orphan cleanup (no Docker socket / repo dirs in unit tests).
+config :omashiki, :run_orphan_cleanup_on_boot, false
+config :omashiki, :enable_job_recovery, false
+
+# Oban — manual testing mode: jobs are not auto-executed; tests call
+# `Oban.drain_queue/1` or `perform_job/2` explicitly.
+config :omashiki, Oban, testing: :manual

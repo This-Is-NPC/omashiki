@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+#MISE description="Build any sandbox image that is missing locally"
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / ".scripts"))
+from omashiki import AGENT_IMAGES, ROOT, image_exists, run
+
+# Rebuilds after a code change stay deliberate. This only fills in images that
+# are absent locally.
+for tag, build_args in AGENT_IMAGES.items():
+    if image_exists(tag):
+        continue
+    print(f"\n⏳ Building {tag} (missing locally)...", flush=True)
+    run(["docker", "build", "-t", tag, *build_args], cwd=ROOT)

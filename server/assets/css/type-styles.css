@@ -1,0 +1,84 @@
+/* Copied from foll-components@e3e77189ca1b49e5b1be19092b76a7cc2b2520ef — src/global/type-styles.css
+   Omashiki is self-contained: do not import, re-copy on update. */
+
+/* Type styles — the closed combination, not the loose property.
+ *
+ * Each class carries the five properties that define a label treatment: family,
+ * size, leading, tracking and case. A component applies the ROLE NAME; it does
+ * not pick size and tracking separately.
+ *
+ * Imported by the CSS of every component that labels something — Stencil inlines
+ * a local import at build, so the rules land inside each shadow root.
+ *
+ * See docs/architecture.md §3.3.
+ */
+
+/* Running text. The only role without uppercase or tracking — it exists so a
+ * component that switches between body and label (foll-link, inline vs pill)
+ * can change role without keeping a raw declaration that competes with the
+ * class. */
+.type-body {
+  font-family: var(--font-body);
+  font-size: var(--text-body-md);
+  line-height: var(--leading-body-sm);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+/* Opens a section or names a block. The widest tracking in the scale. */
+.type-caption {
+  font-family: var(--font-label);
+  font-size: var(--text-label-md);
+  line-height: var(--leading-label-md);
+  letter-spacing: var(--tracking-caption);
+  text-transform: uppercase;
+}
+
+/* Labels a field, a column or a navigation destination. */
+.type-label {
+  font-family: var(--font-label);
+  font-size: var(--text-label-md);
+  line-height: var(--leading-label-md);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+/* Text that lives inside a control and shares its box. */
+.type-control {
+  font-family: var(--font-label);
+  font-size: var(--text-label-md);
+  line-height: var(--leading-label-md);
+  letter-spacing: var(--tracking-control);
+  text-transform: uppercase;
+}
+
+/* Button label. */
+.type-action {
+  font-family: var(--font-label);
+  font-size: var(--text-label-md);
+  line-height: var(--leading-label-md);
+  letter-spacing: var(--tracking-action);
+  text-transform: uppercase;
+}
+
+/* Dense chrome: side navigation, data-table header. */
+.type-chrome {
+  font-family: var(--font-label);
+  font-size: var(--text-label-md);
+  line-height: var(--leading-label-md);
+  letter-spacing: var(--tracking-chrome);
+  text-transform: uppercase;
+}
+
+/* Chrome inside a table cell, where row height is the constraint.
+ *
+ * Crosses the `sm` size step with the `xs` leading: the nominal pair for sm
+ * (14px) overflows the foll-data-table tag cell. That crossing is the reason
+ * this role exists — without it, `chrome` would do. */
+.type-chrome-dense {
+  font-family: var(--font-label);
+  font-size: var(--text-label-sm);
+  line-height: var(--leading-label-xs);
+  letter-spacing: var(--tracking-chrome);
+  text-transform: uppercase;
+}

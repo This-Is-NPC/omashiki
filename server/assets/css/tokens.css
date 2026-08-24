@@ -1,0 +1,378 @@
+/* Copied from foll-components@e3e77189ca1b49e5b1be19092b76a7cc2b2520ef — src/global/tokens.css
+   Omashiki is self-contained: do not import, re-copy on update. */
+
+/* =============================================================================
+ * Omashiki Design Tokens  (ported verbatim into foll-components)
+ * =============================================================================
+ *
+ * Three-tier architecture (Material Design 3 + Omashiki extensions):
+ *
+ *   Tier 1 — Reference   (--ref-*)        Raw palettes; never consumed by UI.
+ *   Tier 2 — Semantic    (--md-sys-color-* + --app-color-*)
+ *                        MD3 system color roles + Omashiki extensions.
+ *                        This is the layer components consume.
+ *   Tier 3 — Component   (commented placeholder)
+ *                        Reserved for component-specific tokens.
+ *
+ * The active theme is selected by the `data-theme` attribute on `<html>`.
+ * `omashiki-dark` is the default (also under :root for SSR safety). An
+ * `omashiki-light` block ships as a proof of concept of the swap mechanism.
+ *
+ * --- VISUAL IDENTITY (must remain stable) ---
+ *   Background surface : #121212  (--md-sys-color-surface)
+ *   Primary accent     : #39ff14  (--md-sys-color-primary-container, neon)
+                        The LIGHT theme uses #1a6f0d for the same role: neon on
+                        a light surface reads at 1.2:1 and the checked state
+                        disappears.
+ *   On-surface text    : #e5e2e1  (--md-sys-color-on-surface)
+ *   Sharp corners      : border-radius: 0
+ *   Type stack         : Newsreader (headline), Inter (body),
+ *                        Space Grotesk (label)
+ * ===========================================================================*/
+
+/* -----------------------------------------------------------------------------
+ * Tier 1 — Reference palettes
+ * ---------------------------------------------------------------------------*/
+:root {
+  /* Neutrals — anchor of the dark surface hierarchy */
+  --ref-color-neutral-0:   #000000;
+  --ref-color-neutral-5:   #0e0e0e;
+  --ref-color-neutral-10:  #121212;
+  --ref-color-neutral-15:  #1a1a19;
+  --ref-color-neutral-20:  #1e1e1d;
+  --ref-color-neutral-25:  #282827;
+  --ref-color-neutral-30:  #353534;
+  --ref-color-neutral-40:  #494543;
+  --ref-color-neutral-50:  #6f6b69;
+  --ref-color-neutral-60:  #938f8e;
+  --ref-color-neutral-70:  #a8a29e;
+  --ref-color-neutral-80:  #c9c5c4;
+  --ref-color-neutral-90:  #e5e2e1;
+  --ref-color-neutral-95:  #f4f1f0;
+  --ref-color-neutral-100: #ffffff;
+
+  /* Primary — neon green Omashiki signature */
+  /* Verde apagado do tema claro. Existe porque a rampa não tinha degrau para
+   * "acento de menor ênfase" sobre fundo claro: no escuro isso é um verde mais
+   * CLARO, no claro tem de ser menos SATURADO — clarear falharia contraste. */
+  --ref-color-primary-20:  #2e5428;
+  --ref-color-primary-30:  #1a6f0d;
+  --ref-color-primary-40:  #2dcc10;
+  --ref-color-primary-60:  #39ff14;
+  --ref-color-primary-80:  #a0e87a;
+
+  /* Error — failure red */
+  --ref-color-error-40:    #b8362b;
+  --ref-color-error-60:    #ff5544;
+  --ref-color-error-80:    #ff8c80;
+
+  /* Warning — awaiting amber */
+  --ref-color-warning-40:  #976400;
+  --ref-color-warning-60:  #ffb347;
+  --ref-color-warning-80:  #ffd28b;
+
+  /* Info — running sky */
+  --ref-color-info-40:     #27769a;
+  --ref-color-info-60:     #7ad8ff;
+  --ref-color-info-80:     #b6e8ff;
+
+  /* Categorical accents */
+  --ref-color-magenta-60:  #fa6dff;
+  --ref-color-violet-60:   #9d8aff;
+  --ref-color-orange-60:   #ff8c4a;
+}
+
+/* -----------------------------------------------------------------------------
+ * Tier 2 — Semantic tokens
+ * ---------------------------------------------------------------------------*/
+:root,
+:root[data-theme="omashiki-dark"] {
+  /* --- MD3 system colour roles --- */
+  --md-sys-color-primary:                     var(--ref-color-primary-60);
+  --md-sys-color-on-primary:                  var(--ref-color-neutral-10);
+  --md-sys-color-primary-container:           var(--ref-color-primary-60);
+  --md-sys-color-on-primary-container:        var(--ref-color-neutral-10);
+  --md-sys-color-primary-fixed-dim:           var(--ref-color-primary-80);
+
+  --md-sys-color-secondary:                   var(--ref-color-neutral-80);
+  --md-sys-color-on-secondary:                var(--ref-color-neutral-10);
+  --md-sys-color-secondary-container:         var(--ref-color-neutral-25);
+  --md-sys-color-on-secondary-container:      var(--ref-color-neutral-90);
+
+  --md-sys-color-tertiary:                    var(--ref-color-info-60);
+  --md-sys-color-on-tertiary:                 var(--ref-color-neutral-10);
+  --md-sys-color-tertiary-container:          var(--ref-color-info-40);
+  --md-sys-color-on-tertiary-container:       var(--ref-color-info-80);
+
+  --md-sys-color-error:                       var(--ref-color-error-60);
+  --md-sys-color-on-error:                    var(--ref-color-neutral-10);
+  --md-sys-color-error-container:             var(--ref-color-error-40);
+  --md-sys-color-on-error-container:          var(--ref-color-error-80);
+
+  --md-sys-color-surface:                     var(--ref-color-neutral-10);
+  --md-sys-color-on-surface:                  var(--ref-color-neutral-90);
+  --md-sys-color-surface-variant:             var(--ref-color-neutral-25);
+  --md-sys-color-on-surface-variant:          var(--ref-color-neutral-80);
+
+  --md-sys-color-surface-container-lowest:    var(--ref-color-neutral-5);
+  --md-sys-color-surface-container-low:       var(--ref-color-neutral-15);
+  --md-sys-color-surface-container:           var(--ref-color-neutral-20);
+  --md-sys-color-surface-container-high:      var(--ref-color-neutral-25);
+  --md-sys-color-surface-container-highest:   var(--ref-color-neutral-30);
+
+  --md-sys-color-inverse-surface:             var(--ref-color-neutral-90);
+  --md-sys-color-inverse-on-surface:          var(--ref-color-neutral-10);
+  --md-sys-color-inverse-primary:             var(--ref-color-primary-40);
+
+  --md-sys-color-outline:                     var(--ref-color-neutral-60);
+  --md-sys-color-outline-variant:             var(--ref-color-neutral-40);
+
+  --md-sys-color-scrim:                       var(--ref-color-neutral-0);
+  --md-sys-color-shadow:                      var(--ref-color-neutral-0);
+  --md-sys-color-surface-tint:                var(--ref-color-primary-60);
+
+  /* --- Omashiki extensions (status & categorical accents) --- */
+  --app-color-status-success:                 var(--ref-color-primary-60);
+  --app-color-status-failed:                  var(--ref-color-error-60);
+  --app-color-status-cancelled:               var(--ref-color-neutral-70);
+  --app-color-status-awaiting:                var(--ref-color-warning-60);
+  --app-color-status-running:                 var(--ref-color-info-60);
+
+  --app-color-accent-sky:                     var(--ref-color-info-60);
+  --app-color-accent-amber:                   var(--ref-color-warning-60);
+  --app-color-accent-magenta:                 var(--ref-color-magenta-60);
+  --app-color-accent-violet:                  var(--ref-color-violet-60);
+
+  /* --- Typography scale (ported from tailwind.config.js) --- */
+  --font-headline: 'Newsreader', serif;
+  --font-body: 'Inter', sans-serif;
+  --font-label: 'Space Grotesk', sans-serif;
+  --font-mono: 'Space Grotesk', ui-monospace, 'SFMono-Regular', 'Menlo', monospace;
+
+  /* --- Label — Space Grotesk ---
+   * TWO steps, not five. The previous scale ran 8 to 12px with ratios of 1.09
+   * to 1.13 — steps so close that none read as different — and two of them (8px
+   * and 11px) had no consumer at all. A label has one default size and one
+   * density exception; the rest was a fake scale. */
+  --text-label-sm: 10px;  --leading-label-sm: 14px;
+  --text-label-md: 12px;  --leading-label-md: 16px;
+
+  /* Tight leading with no size step of its own. Exists only for the
+   * `chrome-dense` crossing, where cell height is the constraint. */
+  --leading-label-xs: 12px;
+
+  /* --- Body — Inter ---
+   * DIVERGENCE KEPT: 14px appears with leading 20 and with 22. Two tokens
+   * because they are two real values. See §3.2.
+   *
+   * `xs` is small prose — item description, empty state, supporting line. It
+   * used to live on the LABEL scale (`--text-label-xl`) across 15 sites that
+   * are not labels: the label scale held two jobs, and so could not be governed
+   * as a label scale. */
+  --text-body-xs: 12px;
+  --text-body-sm: 13px;
+  --text-body-md: 14px;
+  --leading-body-xs: 16px;
+  --leading-body-sm: 20px;
+  --leading-body-md: 22px;
+
+  /* --- Headline — Newsreader ---
+   * Same divergence kept: 20px appears with leading 26 and with 28. */
+  --text-headline-sm: 20px;
+  --text-headline-md: 30px;
+  --text-headline-lg: 48px;
+  --leading-headline-sm: 26px;
+  --leading-headline-md: 28px;
+
+  /* Label tracking, named by ROLE rather than by size step.
+   *
+   * The measurement that fixed these names: the same `--text-label-md` appeared
+   * with six different trackings, so tracking is not a function of size here —
+   * it is a function of what the text does. The values are consumed by the type
+   * styles in `src/global/type-styles.css`, never by a component. See §3.3. */
+  --tracking-caption: 0.3em;
+  --tracking-label: 0.2em;
+  --tracking-control: 0.15em;
+  --tracking-action: 0.1em;
+  --tracking-chrome: 0.08em;
+
+  /* --- Spacing rhythm (4px base grid, as used by the app's Tailwind) --- */
+  --space-0: 0;
+  /* Half step, deliberately off the 4px grid: used where the text's line height
+   * already dominates the box and a whole step would overflow it (e.g. badge). */
+  --space-05: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* 1px optical adjustment, off the grid. Aligns text to a neighbouring hairline. */
+  --space-nudge: 1px;
+
+  /* Font-relative measures, not grid-relative. Named exception — §3.1. */
+  --space-inline-em: 0.35em;
+
+  /* --- Shape ---
+   * Two steps is the whole scale: sharp corner, and pill for what is
+   * semantically a label. The missing middle step is a choice — §3.1. */
+  --radius-none: 0;
+  --radius-full: 9999px;
+
+  /* --- Panel width ---
+   * Shared step scale for boxed overlay content. Both the centred dialog and
+   * the side-sheet placement of `foll-modal` render the same `.panel`, so they
+   * are one real consumer, not two — the sm/md/lg steps below are what its
+   * `size` attribute resolves to. A component with its own width purpose (the
+   * sidebar's nav rail, for one) still keeps a private `--foll-<tag>-width` —
+   * it only moves into this scale if a second component ever needs the same
+   * three steps for the same reason (§3.1). */
+  --panel-width-sm: 24rem;   /* 384px */
+  --panel-width-md: 32.5rem; /* 520px — the historical foll-modal width */
+  --panel-width-lg: 48rem;   /* 768px */
+
+  /* --- Size ---
+   * Only what shares a PURPOSE across components. Geometry belonging to one
+   * component lives as `--foll-<tag>-*` on its own `:host` — §3.1. */
+  /* Minimum pointer target — WCAG 2.2 AA 2.5.8 (24x24 CSS px). This is a floor
+   * on the CLICKABLE AREA, not on glyph size: the checkbox box stays 18px, and
+   * what grows is the whole row, which is what receives the click. */
+  --size-touch: 24px;
+  --size-icon: 16px;
+  /* Checkbox and radio box — same target, same drawing. */
+  --size-control: 18px;
+  /* Visually hidden native input that stays in the focus and form flow.
+   * `display: none` would take it out of the keyboard and out of FormData;
+   * 1px + overflow keeps it reachable and invisible. It is an idiom, not a
+   * measurement — hence a name of its own. */
+  --size-hidden: 1px;
+
+  /* --- Border width ---
+   * Measured in the repo before it was written: 1px in 64 sites, 2px in 21,
+   * 3px in 3. That is the scale; there is no fourth value because there is no
+   * fourth use. */
+  --border-none: 0;
+  /* Divider, surface outline. The hairline is this theme's structural unit. */
+  --border-hairline: 1px;
+  /* Focus ring and active-tab underline — has to beat the hairline visually. */
+  --border-thick: 2px;
+  /* Selection indicator bar. */
+  --border-accent: 3px;
+  /* Focus ring offset, off the grid. Three values: ordinary control, large
+   * target, and an element flush with its container edge (ring drawn inside). */
+  --focus-offset: 2px;
+  --focus-offset-loose: 3px;
+  --focus-offset-inset: -2px;
+
+  /* --- Motion ---
+   * Two groups that do not share a scale: transition and loop. */
+  --duration-instant: 80ms;
+  --duration-fast: 120ms;
+  --duration-base: 150ms;
+  --duration-slow: 220ms;
+  --duration-slower: 250ms;
+
+  --duration-spin: 700ms;
+  --duration-spin-slow: 1s;
+  --duration-pulse: 1200ms;
+  --duration-shimmer: 1400ms;
+  /* Under `prefers-reduced-motion` the loop does not disappear — it slows until
+   * it stops flickering, because the indicator still has to say "in progress". */
+  --duration-spin-reduced: 2400ms;
+  --duration-pulse-reduced: 2800ms;
+
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-in-out: ease-in-out;
+  --ease-linear: linear;
+
+  /* --- Opacity / state --- */
+  --opacity-none: 0;
+  /* Disabled control. One value across 11 sites: it is what makes "disabled"
+   * look like the same thing everywhere in the system. */
+  --opacity-disabled: 0.4;
+  /* Secondary text or icon that must still be legible. */
+  --opacity-muted: 0.3;
+  --opacity-full: 1;
+
+  /* --- Layer ---
+   * A component's INTERNAL stacking. Overlay goes to the top layer and does not
+   * use this family — §10.1. */
+  --z-raised: 1;
+  --z-above: 2;
+
+  /* --- Elevation ---
+   * Composed over `--md-sys-color-shadow`, so it follows the theme. */
+  --elevation-1: 0 4px 12px color-mix(in srgb, var(--md-sys-color-shadow) 30%, transparent);
+  --elevation-2: 0 12px 32px color-mix(in srgb, var(--md-sys-color-shadow) 50%, transparent);
+  --elevation-3: 0 24px 64px color-mix(in srgb, var(--md-sys-color-shadow) 60%, transparent);
+}
+
+/* -----------------------------------------------------------------------------
+ * `omashiki-light` — Theme swap proof of concept
+ * ---------------------------------------------------------------------------*/
+:root[data-theme="omashiki-light"] {
+  color-scheme: light;
+
+  --md-sys-color-primary:                     var(--ref-color-primary-30);
+  --md-sys-color-on-primary:                  var(--ref-color-neutral-100);
+  --md-sys-color-primary-container:           var(--ref-color-primary-30);
+  --md-sys-color-on-primary-container:        var(--ref-color-neutral-100);
+  --md-sys-color-primary-fixed-dim:           var(--ref-color-primary-20);
+
+  --md-sys-color-secondary:                   var(--ref-color-neutral-30);
+  --md-sys-color-on-secondary:                var(--ref-color-neutral-100);
+  --md-sys-color-secondary-container:         var(--ref-color-neutral-90);
+  --md-sys-color-on-secondary-container:      var(--ref-color-neutral-10);
+
+  --md-sys-color-tertiary:                    var(--ref-color-info-40);
+  --md-sys-color-on-tertiary:                 var(--ref-color-neutral-100);
+  --md-sys-color-tertiary-container:          var(--ref-color-info-80);
+  --md-sys-color-on-tertiary-container:       var(--ref-color-neutral-10);
+
+  --md-sys-color-error:                       var(--ref-color-error-40);
+  --md-sys-color-on-error:                    var(--ref-color-neutral-100);
+  --md-sys-color-error-container:             var(--ref-color-error-80);
+  --md-sys-color-on-error-container:          var(--ref-color-neutral-10);
+
+  --md-sys-color-surface:                     var(--ref-color-neutral-95);
+  --md-sys-color-on-surface:                  var(--ref-color-neutral-10);
+  --md-sys-color-surface-variant:             var(--ref-color-neutral-90);
+  --md-sys-color-on-surface-variant:          var(--ref-color-neutral-30);
+
+  --md-sys-color-surface-container-lowest:    var(--ref-color-neutral-100);
+  --md-sys-color-surface-container-low:       var(--ref-color-neutral-95);
+  --md-sys-color-surface-container:           var(--ref-color-neutral-90);
+  --md-sys-color-surface-container-high:      var(--ref-color-neutral-80);
+  --md-sys-color-surface-container-highest:   var(--ref-color-neutral-70);
+
+  --md-sys-color-inverse-surface:             var(--ref-color-neutral-10);
+  --md-sys-color-inverse-on-surface:          var(--ref-color-neutral-95);
+  --md-sys-color-inverse-primary:             var(--ref-color-primary-60);
+
+  --md-sys-color-outline:                     var(--ref-color-neutral-50);
+  --md-sys-color-outline-variant:             var(--ref-color-neutral-80);
+
+  --md-sys-color-scrim:                       var(--ref-color-neutral-0);
+  --md-sys-color-shadow:                      var(--ref-color-neutral-0);
+  --md-sys-color-surface-tint:                var(--ref-color-primary-30);
+
+  --app-color-status-success:                 var(--ref-color-primary-30);
+  --app-color-status-failed:                  var(--ref-color-error-40);
+  --app-color-status-cancelled:               var(--ref-color-neutral-50);
+  --app-color-status-awaiting:                var(--ref-color-warning-40);
+  --app-color-status-running:                 var(--ref-color-info-40);
+
+  --app-color-accent-sky:                     var(--ref-color-info-40);
+  --app-color-accent-amber:                   var(--ref-color-warning-40);
+  --app-color-accent-magenta:                 var(--ref-color-magenta-60);
+  --app-color-accent-violet:                  var(--ref-color-violet-60);
+}
+
+/* -----------------------------------------------------------------------------
+ * Tier 3 — Component tokens (placeholder)
+ *   Add only when at least two component instances share an override point.
+ * ---------------------------------------------------------------------------*/

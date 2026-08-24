@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+#MISE description="Install npm packages and the tailwind/esbuild binaries"
+#MISE depends=["deps"]
+#MISE sources=["server/assets/package.json", "server/assets/package-lock.json"]
+#MISE outputs=["server/assets/node_modules/.mise-assets-ok"]
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / ".scripts"))
+from omashiki import ASSETS, mix, run
+
+# The stylesheets @import @fontsource/* straight out of node_modules, so
+# tailwind cannot resolve a font without this.
+run(["npm", "install"], cwd=ASSETS)
+
+# Both installers are --if-missing. They reach GitHub over Erlang's TLS
+# stack, which fails on some machines ("Unsupported Certificate"), so a
+# failure here is not fatal: the binaries may already be in _build, and if
+# they are not, the message below is more useful than a stack trace at the
+# first asset build.
+if mix("assets.setup", check=False) != 0:
+    print(
+        "\n⚠ could not fetch the tailwind/esbuild binaries.\n"
+        "  If server/_build already has tailwind-linux-x64 and esbuild-linux-x64\n"
+        "  this is harmless. Otherwise fetch them by hand — see the tailwind and\n"
+        "  esbuild hex docs — and drop them in server/_build/.",
+        flush=True,
+    )
+
+stamp = ASSETS / "node_modules" / ".mise-assets-ok"
+stamp.parent.mkdir(parents=True, exist_ok=True)
+stamp.touch()

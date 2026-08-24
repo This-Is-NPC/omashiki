@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: omashiki_dev
+    ports:
+      - "${OMASHIKI_DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omashiki_dev"]
+      interval: 1s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    environment:
+      DATABASE_URL: "ecto://postgres:postgres@db/omashiki_dev"
+      SECRET_KEY_BASE: "vh5B4AZ+oKh5S1IBm0+/4ouLoL/WJBDvq1caXOQCZPliI3AEbtEeE1JztGvKd1m6"
+      PHX_HOST: localhost
+      PORT: 4000
+      HOME: "${HOME}"
+    ports:
+      - "4000:4000"
+    volumes:
+      - .:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "${HOME}/.cache/omashiki:${HOME}/.cache/omashiki"
+    depends_on:
+      - db
+
+volumes:
+  pgdata:

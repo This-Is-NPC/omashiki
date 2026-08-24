@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "@fontsource/inter": "^5.0.18",
+    "@fontsource/newsreader": "^5.0.20",
+    "@fontsource/space-grotesk": "^5.0.19"
+  }
+}

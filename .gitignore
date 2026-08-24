@@ -1,0 +1,18 @@
+
+.workflow/
+
+.opencode
+.claude
+.crush
+opencode.json
+
+# Local secrets generated on first boot — never commit.
+.omashiki/
+.omashiki-worktrees/
+.temp/
+/overture/
+/omashiki.e2e.toml
+
+# Python bytecode from the mise task scripts
+__pycache__/
+*.pyc
