@@ -79,7 +79,22 @@ config :omashiki, Oban,
     webhooks: 5
   ],
   plugins: [
-    {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 30}
+    {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 30},
+    # A node that dies mid-`perform` leaves its dispatch parked in `executing`.
+    # Nothing else reclaims it: `executing` is one of Oban's *incomplete* states,
+    # so `DispatchWorker`'s uniqueness still counts it as live and
+    # `Jobs.recover_orphaned_dispatches/1` deliberately skips it. Lifeline is the
+    # only thing that returns those rows to `available`, which is why the
+    # multi-node orphan case is handled here rather than in the sweep.
+    #
+    # `rescue_after` must stay above the longest legitimate run, or Lifeline
+    # rescues jobs that are still executing on a live node — it ages rows by
+    # `attempted_at` and does not check node liveness. The harness ceiling is
+    # `timeout_ms = 1_800_000` (30 min) plus pre-steps, so the 60 minute default
+    # is the floor, not a number to trim. A premature rescue is not a double
+    # container run in any case: the re-dispatch finds the job past `queued` and
+    # `Jobs.claim/3` refuses it, so the retry is a no-op.
+    {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(60)}
   ]
 
 # Import environment specific config. This must remain at the bottom

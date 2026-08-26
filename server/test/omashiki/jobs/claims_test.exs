@@ -446,6 +446,179 @@ defmodule Omashiki.Jobs.ClaimsTest do
     assert Repo.aggregate(from(a in JobAttempt, where: a.job_id == ^job.id), :count, :id) == 1
   end
 
+  describe "orphaned dispatch recovery" do
+    test "a discarded dispatch cancels both the job row and its queued attempt", %{token: token} do
+      {:ok, job} = Jobs.Admission.admit(token, request("orphan-discarded"))
+
+      # The premise this sweep is built on: admission leaves an attempt behind.
+      assert %JobAttempt{number: 1, status: "queued"} = current_attempt(job)
+      assert Repo.get!(Job, job.id).status == "queued"
+
+      discard_dispatch!(job.id)
+
+      # `recover_stale/1` is blind to this: it only scans attempts in
+      # `provisioning`/`running`, and this attempt is still `queued`.
+      assert {:ok, 0} = Jobs.recover_stale(past_grace())
+      assert Repo.get!(Job, job.id).status == "queued"
+
+      assert {:ok, 1} = Jobs.recover_orphaned_dispatches(past_grace())
+
+      # Both rows, not just the job row.
+      assert %Job{status: "cancelled", finished_at: %DateTime{}, terminal_error: job_error} =
+               Repo.get!(Job, job.id)
+
+      assert job_error["code"] == "orphaned_dispatch"
+
+      assert %JobAttempt{
+               number: 1,
+               status: "cancelled",
+               finished_at: %DateTime{},
+               error: attempt_error,
+               capacity_reserved: false,
+               lease_token: nil,
+               lease_expires_at: nil
+             } = current_attempt(job)
+
+      assert attempt_error["code"] == "orphaned_dispatch"
+
+      # No attempt of this job is left in a non-terminal state.
+      assert Repo.aggregate(
+               from(a in JobAttempt,
+                 where:
+                   a.job_id == ^job.id and a.status not in ["succeeded", "failed", "cancelled"]
+               ),
+               :count,
+               :id
+             ) == 0
+
+      assert Repo.aggregate(
+               from(e in JobEvent, where: e.job_id == ^job.id and e.status == "cancelled"),
+               :count,
+               :event_id
+             ) == 1
+    end
+
+    test "the sweep is idempotent and releases no capacity it never held", %{token: token} do
+      {:ok, job} = Jobs.Admission.admit(token, request("orphan-idempotent"))
+      discard_dispatch!(job.id)
+
+      assert {:ok, 1} = Jobs.recover_orphaned_dispatches(past_grace())
+      assert {:ok, 0} = Jobs.recover_orphaned_dispatches(past_grace())
+
+      # A queued job never reserved a slot, so recovery must not release one.
+      assert Repo.get!(ExecutionCapacity, 1).active == 0
+    end
+
+    test "a job whose dispatch was pruned away entirely is recovered", %{token: token} do
+      {:ok, job} = Jobs.Admission.admit(token, request("orphan-pruned"))
+      {1, _} = Repo.delete_all(dispatch_query(job.id))
+
+      assert {:ok, 1} = Jobs.recover_orphaned_dispatches(past_grace())
+      assert Repo.get!(Job, job.id).status == "cancelled"
+      assert %JobAttempt{status: "cancelled"} = current_attempt(job)
+    end
+
+    for state <- ~w(available scheduled retryable executing) do
+      test "a dispatch still #{state} is left alone", %{token: token} do
+        {:ok, job} = Jobs.Admission.admit(token, request("orphan-live-#{unquote(state)}"))
+        set_dispatch_state!(job.id, unquote(state))
+
+        assert {:ok, 0} = Jobs.recover_orphaned_dispatches(past_grace())
+        assert Repo.get!(Job, job.id).status == "queued"
+        assert %JobAttempt{status: "queued"} = current_attempt(job)
+      end
+    end
+
+    test "a freshly admitted job is protected by the grace period", %{token: token} do
+      {:ok, job} = Jobs.Admission.admit(token, request("orphan-grace"))
+      discard_dispatch!(job.id)
+
+      # Inside the grace window nothing is touched, even with no live dispatch.
+      assert {:ok, 0} = Jobs.recover_orphaned_dispatches(DateTime.utc_now())
+      assert Repo.get!(Job, job.id).status == "queued"
+
+      assert {:ok, 1} = Jobs.recover_orphaned_dispatches(past_grace())
+      assert Repo.get!(Job, job.id).status == "cancelled"
+    end
+
+    test "a claimed job is never swept, even with its dispatch discarded", %{token: token} do
+      {:ok, job} = Jobs.Admission.admit(token, request("orphan-claimed"))
+      {:ok, _attempt} = Jobs.claim(job, "orphan-runner")
+      discard_dispatch!(job.id)
+
+      # Past `queued` the row belongs to the lease, and so to `recover_stale/1`.
+      assert {:ok, 0} = Jobs.recover_orphaned_dispatches(past_grace())
+      assert Repo.get!(Job, job.id).status == "provisioning"
+
+      assert {:ok, _} = Jobs.cancel(job)
+      assert Repo.get!(ExecutionCapacity, 1).active == 0
+    end
+
+    test "one Recovery tick runs the orphan sweep alongside the stale sweep", %{token: token} do
+      {:ok, job} = Jobs.Admission.admit(token, request("orphan-tick"))
+      discard_dispatch!(job.id)
+
+      # Age the row out of the grace window so a tick using the real clock sees
+      # it, then drive exactly one tick of the GenServer that owns both sweeps.
+      backdate_queued_at!(job.id, 120)
+
+      assert {:noreply, nil} = Jobs.Recovery.handle_info(:recover, nil)
+
+      assert Repo.get!(Job, job.id).status == "cancelled"
+      assert %JobAttempt{status: "cancelled"} = current_attempt(job)
+    end
+
+    test "a cancelled dispatch is swept, since Oban will never run it", %{token: token} do
+      {:ok, job} = Jobs.Admission.admit(token, request("orphan-cancelled"))
+      set_dispatch_state!(job.id, "cancelled")
+
+      assert {:ok, 1} = Jobs.recover_orphaned_dispatches(past_grace())
+      assert Repo.get!(Job, job.id).status == "cancelled"
+      assert %JobAttempt{status: "cancelled"} = current_attempt(job)
+    end
+  end
+
+  defp current_attempt(%Job{} = job) do
+    job = Repo.get!(Job, job.id)
+
+    Repo.one!(
+      from(a in JobAttempt, where: a.job_id == ^job.id and a.number == ^job.current_attempt)
+    )
+  end
+
+  defp dispatch_query(job_id) do
+    from(o in Oban.Job,
+      where:
+        o.worker == "Omashiki.Jobs.DispatchWorker" and
+          fragment("(?->>'job_id')", o.args) == ^job_id
+    )
+  end
+
+  defp discard_dispatch!(job_id), do: set_dispatch_state!(job_id, "discarded")
+
+  defp set_dispatch_state!(job_id, state) do
+    {1, _} =
+      Repo.update_all(dispatch_query(job_id),
+        set: [state: state, discarded_at: nil, cancelled_at: nil]
+      )
+
+    :ok
+  end
+
+  # The sweep holds stranded rows for a grace period; look at the world from far
+  # enough in the future that the window has closed.
+  defp past_grace, do: DateTime.add(DateTime.utc_now(), 60, :second)
+
+  # The inverse of `past_grace/0`, for the paths that must use the real clock.
+  defp backdate_queued_at!(job_id, seconds) do
+    {1, _} =
+      Repo.update_all(from(j in Job, where: j.id == ^job_id),
+        set: [queued_at: DateTime.add(DateTime.utc_now(), -seconds, :second)]
+      )
+
+    :ok
+  end
+
   defp load_config!(root, limits) do
     Config.load_map!(
       %{

@@ -18,6 +18,21 @@ defmodule Omashiki.Jobs do
     "running" => ~w(succeeded failed cancelled)
   }
   @default_lease_ms 30_000
+
+  # Liveness of a dispatch is decided by Oban's own `:incomplete` set — the very
+  # set `DispatchWorker`'s uniqueness keys on. Deriving it from
+  # `Oban.Job.unique_states/1` keeps the sweep and the uniqueness rule from
+  # drifting apart: when no dispatch exists in one of these states, no dispatch
+  # can ever run for that job again, and a re-insert would be permitted.
+  @oban_incomplete_states Enum.map(Oban.Job.unique_states(:incomplete), &Atom.to_string/1)
+
+  # Every path that parks a job at `queued` inserts its dispatch in the same
+  # transaction, so the two become visible atomically and a grace period is not
+  # strictly required. It is kept as defence in depth: cancelling a live job by
+  # mistake destroys user work, whereas delaying an already-stranded row by half
+  # a minute costs nothing. The asymmetry justifies the wait.
+  @orphan_grace_ms 30_000
+
   @event_data_keys %{
     "blocked" => ~w(parent_job_id),
     "queued" => ~w(parent_job_id unlock_event_id retry),
@@ -200,6 +215,26 @@ defmodule Omashiki.Jobs do
     at = at || now()
 
     Repo.transaction(fn -> recover_stale_locked(at) end)
+    |> normalize_transaction_result()
+  end
+
+  @doc """
+  Cancel queued jobs whose Oban dispatch is gone, together with their queued attempt.
+
+  `recover_stale/1` cannot see these rows. It scans attempts `where: a.status in
+  @active`, and a job that was never claimed still carries its attempt at
+  `queued` — `Jobs.Admission` inserts attempt number 1 alongside the job row. So
+  the loss is two rows deep: the job *and* its attempt are parked at `queued`
+  with no dispatch left to move either of them. Both are driven to a terminal
+  state here; sweeping only the job row would leave the attempt orphaned.
+
+  Terminal state is `cancelled`, never `failed`: a job that never started has a
+  null `started_at`, which `jobs_start_timestamps` forbids for `failed`.
+  """
+  def recover_orphaned_dispatches(at \\ nil) do
+    at = at || now()
+
+    Repo.transaction(fn -> recover_orphaned_locked(at) end)
     |> normalize_transaction_result()
   end
 
@@ -549,6 +584,121 @@ defmodule Omashiki.Jobs do
         recovered
       end
     end)
+  end
+
+  defp recover_orphaned_locked(at) do
+    cutoff = DateTime.add(at, -@orphan_grace_ms, :millisecond)
+
+    cutoff
+    |> orphaned_job_ids()
+    |> Enum.reduce(0, fn job_id, recovered ->
+      job = locked_job(job_id)
+
+      # Re-check under the row lock. Between the scan and the lock a dispatch
+      # may have been re-inserted, or the job claimed outright, and either makes
+      # this row somebody else's business again.
+      with %Job{status: "queued"} <- job,
+           false <- incomplete_dispatch?(job.id),
+           %JobAttempt{status: "queued"} = attempt <- locked_current_attempt(job) do
+        cancel_orphaned!(job, attempt)
+        recovered + 1
+      else
+        nil ->
+          recovered
+
+        %JobAttempt{} = attempt ->
+          # The job says `queued` but its attempt disagrees. Claiming moves both
+          # together, so this is a torn row rather than a stranded one; leave it
+          # rather than force a terminal state over a state we do not understand.
+          Logger.warning(
+            "job #{job_id} is queued but attempt #{attempt.number} is #{attempt.status}; skipping orphan sweep"
+          )
+
+          recovered
+
+        _ ->
+          recovered
+      end
+    end)
+  end
+
+  # A `queued` job with no dispatch in any incomplete state: Oban discarded or
+  # cancelled it, or the Pruner removed it outright. Nothing will ever move it.
+  defp orphaned_job_ids(cutoff) do
+    live_dispatch =
+      from(o in Oban.Job,
+        where:
+          o.worker == "Omashiki.Jobs.DispatchWorker" and
+            fragment("? ->> 'job_id' = ?::text", o.args, parent_as(:job).id) and
+            o.state in ^@oban_incomplete_states,
+        select: 1
+      )
+
+    from(j in Job,
+      as: :job,
+      where: j.status == "queued" and j.queued_at < ^cutoff,
+      where: not exists(live_dispatch),
+      order_by: [asc: j.queued_at, asc: j.id],
+      select: j.id
+    )
+    |> Repo.all()
+  end
+
+  defp incomplete_dispatch?(job_id) do
+    from(o in Oban.Job,
+      where:
+        o.worker == "Omashiki.Jobs.DispatchWorker" and
+          fragment("(?->>'job_id')", o.args) == ^job_id and
+          o.state in ^@oban_incomplete_states
+    )
+    |> Repo.exists?()
+  end
+
+  defp locked_current_attempt(%Job{} = job) do
+    from(a in JobAttempt,
+      where: a.job_id == ^job.id and a.number == ^job.current_attempt,
+      lock: "FOR UPDATE"
+    )
+    |> Repo.one()
+  end
+
+  defp cancel_orphaned!(%Job{} = job, %JobAttempt{} = attempt) do
+    error = %{
+      "code" => "orphaned_dispatch",
+      "message" => "no dispatch remains for this queued job",
+      "details" => %{"attempt" => attempt.number}
+    }
+
+    now = now()
+
+    updated =
+      update_job!(job, %{
+        status: "cancelled",
+        finished_at: now,
+        terminal_result: nil,
+        terminal_error: error
+      })
+
+    completed_attempt =
+      update_attempt!(attempt, %{
+        status: "cancelled",
+        finished_at: now,
+        error: error,
+        capacity_reserved: false,
+        lease_token: nil,
+        lease_expires_at: nil
+      })
+
+    release_capacity_if_reserved!(attempt)
+
+    record_event!(
+      updated,
+      "cancelled",
+      %{"error_code" => "orphaned_dispatch", "recovered" => true},
+      completed_attempt
+    )
+
+    updated
   end
 
   defp reserve_capacity! do

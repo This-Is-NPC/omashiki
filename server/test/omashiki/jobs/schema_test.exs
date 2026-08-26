@@ -314,8 +314,17 @@ defmodule Omashiki.Jobs.SchemaTest do
       assert indexes[name] =~ "USING brin"
     end
 
-    assert [{Oban.Plugins.Pruner, options}] = Application.fetch_env!(:omashiki, Oban)[:plugins]
+    assert [{Oban.Plugins.Pruner, options}, {Oban.Plugins.Lifeline, lifeline}] =
+             Application.fetch_env!(:omashiki, Oban)[:plugins]
+
     assert options[:max_age] == 60 * 60 * 24 * 30
+
+    # Lifeline is what reclaims a dispatch orphaned in `executing` by a dead
+    # node; `Jobs.recover_orphaned_dispatches/1` deliberately leaves those rows
+    # alone because `executing` is an incomplete state. `rescue_after` has to
+    # stay above the longest legitimate run (harness `timeout_ms` is 30 min plus
+    # pre-steps) or a live attempt gets rescued out from under itself.
+    assert lifeline[:rescue_after] >= :timer.minutes(60)
   end
 
   defp persist_user do
