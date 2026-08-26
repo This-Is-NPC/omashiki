@@ -4,8 +4,8 @@ defmodule OmashikiWeb.OverviewLive do
   use OmashikiWeb, :live_view
 
   alias Omashiki.Config
+  alias Omashiki.Jobs
   alias Omashiki.Jobs.Api
-  alias Omashiki.HostSettings
   alias Omashiki.Runtimes.CacheMaintenance
   alias OmashikiWeb.OperationHelpers, as: Ops
 
@@ -52,8 +52,14 @@ defmodule OmashikiWeb.OverviewLive do
     |> assign(:cache, cache)
   end
 
+  # The ceiling is the sum of every node's capacity row, not this host's
+  # `[limits].max_concurrent_containers`. That number describes the machine the
+  # operator happens to have the console open on and says nothing about the rest
+  # of the cluster; on a two-node deployment it under-reports the queue's real
+  # ceiling by half, which is exactly the number an operator reads to decide
+  # whether the queue is saturated or starved.
   defp safe_slots(jobs) do
-    capacity = HostSettings.get_max_concurrent_containers()
+    capacity = Jobs.cluster_capacity().capacity
     in_use = Enum.count(jobs, &(&1.status in ["provisioning", "running"]))
     %{capacity: capacity, in_use: in_use, free: max(capacity - in_use, 0), waiting: 0}
   rescue
@@ -168,9 +174,9 @@ defmodule OmashikiWeb.OverviewLive do
           </p>
         </.panel>
 
-        <.panel title="Runtime capacity" meta="current host limits">
+        <.panel title="Runtime capacity" meta="summed across nodes">
           <dl class="grid grid-cols-2 gap-x-4 gap-y-3 font-mono text-xs">
-            <dt class="text-on-surface-variant">container limit</dt><dd class="text-right text-on-surface">
+            <dt class="text-on-surface-variant">cluster limit</dt><dd class="text-right text-on-surface">
               {@slots.capacity}
             </dd>
             <dt class="text-on-surface-variant">active</dt><dd class="text-right text-on-surface">

@@ -126,25 +126,48 @@ implicit local node".
 
 ## Phase 3 — Capacity Per Node
 
-The central change. `execution_capacity` is a single row guarded by
-`CHECK (id = 1)`
-(`priv/repo/migrations/20260101000000_initial_schema.exs:183`), and
-`Jobs.sync_capacity/0` writes `[limits].max_concurrent_containers` into it at
-boot — so the second node to start overwrites the first node's capacity.
+The central change. `execution_capacity` was a single row guarded by
+`CHECK (id = 1)`, and `Jobs.sync_capacity/0` wrote
+`[limits].max_concurrent_containers` into it at boot — so the second node to
+start overwrote the first node's capacity.
 
-- [ ] Migration: drop `CHECK (id = 1)`, key the table by `node_id`, one row per
-      node
-- [ ] `reserve_capacity!/0` (`jobs.ex:553`) reserves against the **own** node's
-      row. The `UPDATE ... WHERE active < capacity` pattern does not change, so
-      the whole existing correctness argument carries over
-- [ ] `release_capacity!/0` releases against the row that reserved, which is why
-      Phase 2 comes first
-- [ ] `sync_capacity/0` reconciles only its own row at boot
-- [ ] `Recovery` releases against the right row when a lease expires
-- [ ] Aggregate cluster capacity in the operator UI, as the sum of the rows
+Status: **done.**
+
+- [x] Migration: drop `CHECK (id = 1)`, key the table by `node_id`, one row per
+      node. The surviving row is re-keyed to `'local'`, which is where a
+      pre-node install's outstanding reservations were counted and therefore
+      where attempts with a NULL `node_id` are released
+- [x] `reserve_capacity!/1` reserves against the **own** node's row. The
+      `UPDATE ... WHERE active < capacity` pattern does not change — it is still
+      one row and one atomic compare-and-swap — so the whole existing
+      correctness argument carries over. This is a re-key, not a new
+      concurrency design
+- [x] `release_capacity!/1` releases against the row that *reserved*, read from
+      the attempt's own `node_id`, which is why Phase 2 comes first. A sweep is
+      cluster-wide, so the machine failing an expired attempt is routinely not
+      the machine holding its slot
+- [x] `sync_capacity/0` reconciles only its own row at boot, and creates it: a
+      node's row has no other origin, so the table no longer ships a seeded
+      singleton for new machines
+- [x] `Recovery` releases against the right row when a lease expires — it goes
+      through the same `release_capacity_if_reserved!/1`, so it inherited this
+- [x] Aggregate cluster capacity in the operator UI, as the sum of the rows
+      (`Jobs.cluster_capacity/0`)
+
+**Capacity is not a `[nodes.*]` option.** A machine's budget is
+`[limits].max_concurrent_containers` in that machine's own `omashiki.toml`,
+alongside the rest of its host limits. Declaring it centrally as well would give
+one fact two sources that can disagree, and the central copy is the one no
+operator would think to update when they change the machine.
 
 **Done when:** two nodes with `max_concurrent_containers = 10` each run 20
 simultaneous attempts, and killing one does not affect the other's capacity.
+Covered by `Omashiki.Jobs.NodeCapacityTest`. That suite is a proxy, and says so
+in its own moduledoc: one BEAM becomes each node in turn, because
+`Config.current_node/0` is process-global, so it exercises the real reserve,
+release, sync and recovery code against two real `node_id` rows but not two real
+machines. Simultaneous cross-host contention, partitions, and clock skew are not
+covered.
 
 ## Phase 4 — Per-Node Configuration and Roles
 
