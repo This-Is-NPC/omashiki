@@ -4,8 +4,8 @@
 Omashiki.Test.Dotenv.load(Path.expand("../.env", __DIR__))
 
 # Exclude integration tests that spin up real Docker containers + hit a real
-# LLM providers. Run them explicitly with `mix test --only real_opencode` or
-# `mix test --only real_claude`.
-ExUnit.start(exclude: [:real_opencode, :real_claude, :ollama, :real_container])
+# LLM providers. Run them explicitly with `mix test --only real_opencode`,
+# `mix test --only real_claude`, or `mix test --only real_jcode`.
+ExUnit.start(exclude: [:real_opencode, :real_claude, :real_jcode, :ollama, :real_container])
 
 Ecto.Adapters.SQL.Sandbox.mode(Omashiki.Repo, :manual)

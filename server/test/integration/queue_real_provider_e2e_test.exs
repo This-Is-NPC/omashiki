@@ -6,6 +6,10 @@ defmodule Omashiki.Integration.QueueRealProviderE2ETest do
   Run from the repository root with `mise run e2e:overture`. The preparation
   task recreates the ignored nested repository and stages read-only snapshots
   of the host OpenCode configuration and authentication.
+
+  The jcode case stages no snapshot: it holds no provider credential at all and
+  reaches the model through the gateway, so it needs
+  `OMASHIKI_LOCAL_LLM_BASE_URL` pointing at the local OpenAI-compatible server.
   """
 
   use OmashikiWeb.ConnCase, async: false
@@ -46,6 +50,14 @@ defmodule Omashiki.Integration.QueueRealProviderE2ETest do
     run_provider(ctx, "claude-code", "e2e-claude", "overture-hello-world-claude")
   end
 
+  # jcode has no host-auth route: it reaches the model only through the gateway,
+  # which forwards to the local OpenAI-compatible server declared by
+  # `credentials.local-llm`. `mise run e2e:overture:jcode` is what stages it.
+  @tag :real_jcode
+  test "jcode creates and executes committed Python hello world", ctx do
+    run_provider(ctx, "jcode", "e2e-jcode", "overture-hello-world-jcode")
+  end
+
   defp run_provider(
          %{conn: conn, repo: repo, token_plaintext: token},
          harness,
@@ -53,7 +65,11 @@ defmodule Omashiki.Integration.QueueRealProviderE2ETest do
          idempotency_key
        ) do
     image =
-      if harness == "opencode", do: "omashiki/agent:latest", else: "omashiki/agent-claude:latest"
+      case harness do
+        "opencode" -> "omashiki/agent:latest"
+        "claude-code" -> "omashiki/agent-claude:latest"
+        "jcode" -> "omashiki/agent-jcode:latest"
+      end
 
     assert {_, 0} = System.cmd("docker", ["image", "inspect", image])
 

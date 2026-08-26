@@ -21,6 +21,7 @@ LOCK_PATH = ROOT / ".omashiki" / "e2e.lock"
 OPENCODE_CONFIG = Path.home() / ".config" / "opencode" / "opencode.json"
 OPENCODE_AUTH = Path.home() / ".local" / "share" / "opencode" / "auth.json"
 CLAUDE_CREDENTIALS = Path.home() / ".claude" / ".credentials.json"
+LOCAL_LLM_BASE_URL_VAR = "OMASHIKI_LOCAL_LLM_BASE_URL"
 
 
 def run(*argv: str, cwd: Path | None = None, capture: bool = False) -> str:
@@ -117,7 +118,7 @@ def prepare(provider: str) -> None:
 
 
 def prepare_locked(provider: str) -> None:
-    if provider not in ("all", "opencode", "claude"):
+    if provider not in ("all", "opencode", "claude", "jcode"):
         raise SystemExit(f"unknown provider preparation target: {provider}")
 
     assert_safe_existing_repo()
@@ -126,6 +127,7 @@ def prepare_locked(provider: str) -> None:
     os.chmod(SNAPSHOT_ROOT, 0o700)
     opencode_ready = False
     claude_ready = False
+    jcode_ready = False
 
     if provider in ("all", "opencode"):
         copy_private_file(OPENCODE_CONFIG, SNAPSHOT_ROOT / "opencode.json", "OpenCode config")
@@ -139,6 +141,17 @@ def prepare_locked(provider: str) -> None:
             "Claude Code credentials",
         )
         claude_ready = True
+
+    # jcode stages no host credential: it has no host-auth route and reaches the
+    # model only through the gateway, which resolves the local server's address
+    # from the environment. Fail here rather than at Config.load! in the test.
+    if provider in ("all", "jcode"):
+        if not os.environ.get(LOCAL_LLM_BASE_URL_VAR):
+            raise SystemExit(
+                f"{LOCAL_LLM_BASE_URL_VAR} is unset; jcode needs the local model server, "
+                f"for example {LOCAL_LLM_BASE_URL_VAR}=http://<host>:8080/v1"
+            )
+        jcode_ready = True
 
     base = (ROOT / "omashiki.toml").read_text(encoding="utf-8").rstrip()
     additions = """
@@ -196,6 +209,28 @@ cpus = 2.0
 memory = "2GB"
 pids = 256
 """
+    if jcode_ready:
+        additions += """
+
+[environments.e2e-jcode]
+harness = "jcode"
+executables = ["git"]
+credentials = ["local-llm"]
+caches = []
+timeout_ms = 900000
+network = "restricted"
+mounts = []
+pre_steps = []
+post_steps = []
+
+[environments.e2e-jcode.policy]
+mode = "off"
+
+[environments.e2e-jcode.resources]
+cpus = 1.0
+memory = "1GB"
+pids = 256
+"""
     E2E_CONFIG.write_text(base + additions, encoding="utf-8")
     print(f"snapshots ready: {SNAPSHOT_ROOT}")
     print(f"config ready: {E2E_CONFIG}")
@@ -203,6 +238,8 @@ pids = 256
         print("OpenCode snapshots ready")
     if claude_ready:
         print("Claude Code credentials snapshot ready")
+    if jcode_ready:
+        print(f"jcode gateway target ready: {LOCAL_LLM_BASE_URL_VAR}")
 
 
 def validate(provider: str) -> None:

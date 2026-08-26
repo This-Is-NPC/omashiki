@@ -65,10 +65,11 @@ Install the hook once per checkout with `mise run hooks:install`.
 
 | Command | What it runs |
 |---------|--------------|
-| `mise run ci:server:fast` | ExUnit excluding `:integration`, `:real_opencode`, and `:real_claude`. |
+| `mise run ci:server:fast` | ExUnit excluding `:integration`, `:real_opencode`, `:real_claude`, and `:real_jcode`. |
 | `mise run ci:server:integration` | ExUnit `--only integration` (no real provider). |
 | `mise run e2e:overture:opencode` | Opt-in OpenCode E2E using isolated host snapshots. |
 | `mise run e2e:overture:claude` | Opt-in Claude Code E2E using the isolated credentials snapshot. |
+| `mise run e2e:overture:jcode` | Opt-in jcode E2E against the local model server named by `OMASHIKI_LOCAL_LLM_BASE_URL`. |
 | `mise run ci:server:assets` | Tailwind + esbuild bundle build in test env. |
 | `mise run ci:server:cover` | `mix test --cover` summary (non-blocking). |
 | `mise run ci:docker:server` | Dry-run build of the server image. |
@@ -82,7 +83,9 @@ Coverage is reported but **not** threshold-enforced. The coverage task prints
 line totals so trends stay visible. Real-provider tests stay opt-in: they are
 not part of the local CI script. They
 snapshot provider-specific host files and do not read provider API keys from
-`server/.env`. OpenCode snapshots and Claude invocations are read-only. Claude
+`server/.env`. jcode is the exception that snapshots nothing: it has no
+host-auth route and reaches the model only through the gateway, so its E2E
+needs `OMASHIKI_LOCAL_LLM_BASE_URL` exported and nothing else. OpenCode snapshots and Claude invocations are read-only. Claude
 OAuth uses a single isolated writable file under `.omashiki/e2e` so refresh
 token rotation persists without mounting or modifying the host `~/.claude`
 directory. The first run bootstraps it from `~/.claude/.credentials.json`;

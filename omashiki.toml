@@ -157,6 +157,57 @@ memory = "2GB"
 pids = 256
 
 # ---------------------------------------------------------------------------
+# Gateway credentials
+# ---------------------------------------------------------------------------
+# Reached by the gateway on the host. The container is handed a job-bound token
+# and the gateway's own base URL, never these values.
+#
+# `${env:VAR}` is resolved when this file loads and fails the boot naming the
+# variable, so a private LAN address never lands in this git-tracked file.
+# Export it before starting Omashiki:
+#
+#   export OMASHIKI_LOCAL_LLM_BASE_URL=http://<host>:8080/v1
+#
+# Use the *instruct* build. The 0.5B GGUF is the base model: it never emits a
+# stop token under an agent system prompt and generates until the slot context
+# is exhausted (29k tokens / 121 s per turn). The 1.5B instruct answers the
+# same prompt in 0.7 s with finish_reason=stop.
+
+[credentials.local-llm]
+provider = "llamacpp"
+model = "qwen2.5-coder-1.5b-instruct"
+base_url = "${env:OMASHIKI_LOCAL_LLM_BASE_URL}"
+api_key = "unused-by-llama-server"
+
+[harnesses.jcode]
+adapter = "jcode"
+runtime = "docker"
+image = "omashiki/agent-jcode:latest"
+options = { timeout_ms = 1800000 }
+
+# jcode is a single static binary: no mise, no npm, no cache mounts, and no
+# host-auth route — it always reaches the model through the gateway, so the
+# network must not be "none" and the credential must be a gateway credential.
+[environments.jcode]
+harness = "jcode"
+executables = ["git"]
+credentials = ["local-llm"]
+caches = []
+timeout_ms = 1800000
+network = "restricted"
+mounts = []
+post_steps = []
+pre_steps = []
+
+[environments.jcode.policy]
+mode = "off"
+
+[environments.jcode.resources]
+cpus = 1.0
+memory = "1GB"
+pids = 256
+
+# ---------------------------------------------------------------------------
 # Host credential origins
 # ---------------------------------------------------------------------------
 # Read fresh at every attempt and copied into a private per-attempt directory
