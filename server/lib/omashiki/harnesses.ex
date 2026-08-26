@@ -9,7 +9,8 @@ defmodule Omashiki.Harnesses do
     "opencode" => Omashiki.Harness.OpenCode,
     "claude-code" => Omashiki.Harness.ClaudeCode,
     "codex" => Omashiki.Harness.Codex,
-    "jcode" => Omashiki.Harness.Jcode
+    "jcode" => Omashiki.Harness.Jcode,
+    "pi" => Omashiki.Harness.Pi
   }
   @adapter_callbacks [{:validate_options, 1}, {:launch_plan, 1}, {:prepare, 2}, {:invoke, 2}]
 
