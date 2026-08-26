@@ -108,12 +108,24 @@ defmodule Omashiki.ApiTokens do
 
   def find_active_by_plaintext(_), do: :error
 
+  # Coarse on purpose. Every authenticated request used to issue an
+  # unconditional UPDATE on this one row, so N concurrent requests carrying the
+  # same token serialized on its row lock — each holding a pool connection while
+  # it waited. Under a few hundred requests per second that convoy drains the
+  # pool and the API starts answering 500. `last_used_at` only ever feeds a
+  # "last seen" column in the tokens screen, so one write per @use_resolution is
+  # all the precision it needs, and the guard makes the no-op case skip the lock
+  # entirely.
+  @use_resolution 60
+
   def record_use(%Token{id: id}) do
     Task.start(fn ->
       now = DateTime.utc_now(:microsecond)
+      cutoff = DateTime.add(now, -@use_resolution, :second)
 
       Token
-      |> where(id: ^id)
+      |> where([t], t.id == ^id)
+      |> where([t], is_nil(t.last_used_at) or t.last_used_at < ^cutoff)
       |> Repo.update_all(set: [last_used_at: now])
     end)
 
