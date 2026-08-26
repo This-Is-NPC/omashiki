@@ -1,7 +1,12 @@
 # syntax=docker/dockerfile:1
 # OpenAI Codex CLI 0.149.1 agent sandbox, using the same hardened base as OpenCode.
 ARG OMATERM_BASE=ghcr.io/omacom-io/omaterm@sha256:180f5884ab8573b1235595eeefef605ad10ffdfbdef9eb96dfebd801e0f9215a
-FROM ${OMATERM_BASE}
+
+# The global npm install unpacks every @openai/codex platform vendor tree into
+# the mise-managed node prefix. Copying the one matching vendor dir out
+# afterwards does not reclaim the rest, so the install runs in its own stage
+# and only the selected binaries cross into the final image.
+FROM ${OMATERM_BASE} AS codex-build
 
 ARG CODEX_VERSION=0.149.1
 
@@ -15,10 +20,14 @@ RUN mise trust /home/omaterm/.config/mise/config.toml \
     && cp -a "${CODEX_VENDOR_BIN}/." /tmp/omashiki-codex-bin/ \
     && install -m 0755 "$(mise which node)" /tmp/omashiki-node-bin
 
+FROM ${OMATERM_BASE}
+
+ARG CODEX_VERSION=0.149.1
+
 USER root
-RUN install -m 0755 -t /usr/local/bin /tmp/omashiki-codex-bin/* \
-    && install -m 0755 /tmp/omashiki-node-bin /usr/local/bin/node \
-    && rm -rf /tmp/omashiki-codex-bin /tmp/omashiki-node-bin \
+COPY --from=codex-build /tmp/omashiki-codex-bin/ /usr/local/bin/
+COPY --from=codex-build /tmp/omashiki-node-bin /usr/local/bin/node
+RUN chmod 0755 /usr/local/bin/node /usr/local/bin/codex \
     && /usr/local/bin/node --version \
     && /usr/local/bin/codex --version | grep -F "${CODEX_VERSION}"
 COPY codex_runner.mjs /usr/local/bin/omashiki-codex-runner

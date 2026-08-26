@@ -1,7 +1,12 @@
 # syntax=docker/dockerfile:1
 # Claude Code 2.1.240 agent sandbox, using the same hardened base as OpenCode.
 ARG OMATERM_BASE=ghcr.io/omacom-io/omaterm@sha256:180f5884ab8573b1235595eeefef605ad10ffdfbdef9eb96dfebd801e0f9215a
-FROM ${OMATERM_BASE}
+
+# The global npm install unpacks the whole @anthropic-ai/claude-code tree plus
+# its dependencies into the mise-managed node prefix. Copying `claude.exe` out
+# afterwards does not reclaim that tree, so the install runs in its own stage
+# and only the two binaries cross into the final image.
+FROM ${OMATERM_BASE} AS claude-build
 
 ARG CLAUDE_CODE_VERSION=2.1.240
 
@@ -12,10 +17,14 @@ RUN mise trust /home/omaterm/.config/mise/config.toml \
     && install -m 0755 "$(npm root --global)/@anthropic-ai/claude-code/bin/claude.exe" /tmp/omashiki-claude-bin \
     && install -m 0755 "$(mise which node)" /tmp/omashiki-node-bin
 
+FROM ${OMATERM_BASE}
+
+ARG CLAUDE_CODE_VERSION=2.1.240
+
 USER root
-RUN install -m 0755 /tmp/omashiki-claude-bin /usr/local/bin/claude \
-    && install -m 0755 /tmp/omashiki-node-bin /usr/local/bin/node \
-    && rm /tmp/omashiki-claude-bin /tmp/omashiki-node-bin \
+COPY --from=claude-build /tmp/omashiki-claude-bin /usr/local/bin/claude
+COPY --from=claude-build /tmp/omashiki-node-bin /usr/local/bin/node
+RUN chmod 0755 /usr/local/bin/claude /usr/local/bin/node \
     && /usr/local/bin/node --version \
     && /usr/local/bin/claude --version | grep -F "${CLAUDE_CODE_VERSION}"
 COPY claude_code_runner.mjs /usr/local/bin/omashiki-claude-runner

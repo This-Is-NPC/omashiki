@@ -1,6 +1,25 @@
 # syntax=docker/dockerfile:1
 # Arch + mise agent sandbox, shimmed from omaterm.
 ARG OMATERM_BASE=ghcr.io/omacom-io/omaterm@sha256:180f5884ab8573b1235595eeefef605ad10ffdfbdef9eb96dfebd801e0f9215a
+
+# Pin the OpenCode release while using the image user's trusted mise config.
+# This runs in its own stage: `mise use -g` unpacks the release into the mise
+# data dir, and a later `install` into /usr/local/bin does not free it — the
+# unpacked copy stays in the layer below. Only the binary crosses the stage
+# boundary, so that ~369MB of duplicate never reaches the final image.
+FROM ${OMATERM_BASE} AS opencode-build
+
+ARG OPENCODE_VERSION=1.18.21
+
+ENV MISE_DATA_DIR=/home/omaterm/.local/share/mise \
+    MISE_CACHE_DIR=/home/omaterm/.local/cache/mise \
+    MISE_CONFIG_DIR=/home/omaterm/.config/mise
+
+USER 1000
+RUN mise use -g -y "opencode@${OPENCODE_VERSION}" \
+    && opencode --version | grep -F "${OPENCODE_VERSION}" \
+    && install -m 0755 "$(mise where opencode)/opencode" /tmp/omashiki-opencode-bin
+
 FROM ${OMATERM_BASE}
 
 ARG OPENCODE_VERSION=1.18.21
@@ -10,15 +29,10 @@ ENV OPENCODE_PORT=4096 \
     MISE_CACHE_DIR=/home/omaterm/.local/cache/mise \
     MISE_CONFIG_DIR=/home/omaterm/.config/mise
 
-# Pin the OpenCode release while using the image user's trusted mise config.
-USER 1000
-RUN mise use -g -y "opencode@${OPENCODE_VERSION}" \
-    && opencode --version | grep -F "${OPENCODE_VERSION}" \
-    && install -m 0755 "$(mise where opencode)/opencode" /tmp/omashiki-opencode-bin
-
 USER root
-RUN install -m 0755 /tmp/omashiki-opencode-bin /usr/local/bin/opencode \
-    && rm /tmp/omashiki-opencode-bin
+COPY --from=opencode-build /tmp/omashiki-opencode-bin /usr/local/bin/opencode
+RUN chmod 0755 /usr/local/bin/opencode \
+    && /usr/local/bin/opencode --version | grep -F "${OPENCODE_VERSION}"
 COPY entrypoint.sh /entrypoint.sh
 COPY supply-chain-relay.py /usr/local/bin/supply-chain-relay
 RUN chmod +x /entrypoint.sh /usr/local/bin/supply-chain-relay
