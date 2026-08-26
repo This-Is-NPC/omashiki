@@ -92,9 +92,12 @@ HEX_HOME = "/omashiki-cache/global/hex"
 # every path behaves as it did before nodes existed. Declare it only when more
 # than one machine shares the queue.
 #
-# A name is the whole declaration. Per-node capacity and per-node Docker
-# endpoint are added by the changes that read them; an option nothing consumes
-# would be a lie in this file.
+# A name is the whole declaration. Capacity is deliberately not one of its
+# options: a machine's container budget is [limits].max_concurrent_containers in
+# that machine's own omashiki.toml, which is where the rest of its host limits
+# already live. Each node reconciles its own execution_capacity row at boot from
+# that value, so declaring the number here as well would be two sources for one
+# fact. Per-node Docker endpoint arrives with the change that reads it.
 #
 # The name must be kebab-case, like every other registry section. A process
 # picks its own node from OMASHIKI_NODE, falling back to the hostname, so a

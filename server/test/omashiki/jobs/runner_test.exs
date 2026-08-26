@@ -263,7 +263,7 @@ defmodule Omashiki.Jobs.RunnerTest do
              Runner.run(attempt, container: ProvisionFailureContainer, adapter: FakeHarness)
 
     assert failed.status == "failed"
-    assert Repo.get!(Omashiki.Jobs.ExecutionCapacity, 1).active == 0
+    assert capacity_row().active == 0
     assert Repo.aggregate(JobStep, :count, :id) == 8
   end
 

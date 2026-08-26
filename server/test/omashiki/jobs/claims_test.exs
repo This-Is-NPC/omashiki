@@ -41,12 +41,12 @@ defmodule Omashiki.Jobs.ClaimsTest do
              :id
            ) == 1
 
-    assert Repo.get!(ExecutionCapacity, 1).active == 1
+    assert capacity_row().active == 1
 
     assert {:ok, _} =
              Jobs.complete(attempt, attempt.lease_token, :failed, %{error: error("worker_exit")})
 
-    assert Repo.get!(ExecutionCapacity, 1).active == 0
+    assert capacity_row().active == 0
   end
 
   # The production caller is `DispatchWorker`, which passes only a runner id
@@ -54,6 +54,10 @@ defmodule Omashiki.Jobs.ClaimsTest do
   # from the claim path's own view of this host, or it is never recorded at all.
   test "a claim records the declared node that ran the attempt", %{root: root, token: token} do
     load_config!(root, %{}, %{"builder-01" => %{}})
+    # Boot order: config, then the node's own capacity row. A node with no row
+    # has no budget and claims nothing, so the claim below would fail for a
+    # reason that has nothing to do with what this test asserts.
+    assert {:ok, _} = Jobs.sync_capacity()
     {:ok, job} = Jobs.Admission.admit(token, request("declared-node"))
 
     assert {:ok, attempt} = Jobs.claim(job, "oban:1")
@@ -81,6 +85,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     end)
 
     load_config!(root, %{})
+    assert {:ok, _} = Jobs.sync_capacity()
     refute Enum.any?(Config.nodes(), &(&1.name == "builder-01"))
     {:ok, job} = Jobs.Admission.admit(token, request("implicit-node"))
 
@@ -101,7 +106,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     assert_receive :before_claim
     assert_receive {:DOWN, ^ref, :process, ^pid, :simulated_crash}
     assert Repo.get!(Job, job.id).status == "queued"
-    assert Repo.get!(ExecutionCapacity, 1).active == 0
+    assert capacity_row().active == 0
   end
 
   test "worker crash during provisioning is recovered once", %{token: token} do
@@ -130,7 +135,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     assert {:ok, 1} = Jobs.recover_stale(DateTime.add(attempt.lease_expires_at, 1, :millisecond))
     assert {:ok, 0} = Jobs.recover_stale(DateTime.add(attempt.lease_expires_at, 1, :millisecond))
     assert Repo.get!(Job, job.id).status == "failed"
-    assert Repo.get!(ExecutionCapacity, 1).active == 0
+    assert capacity_row().active == 0
   end
 
   test "worker crash during execution is recovered once", %{token: token} do
@@ -159,7 +164,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     assert_receive {:DOWN, ^ref, :process, ^pid, :simulated_crash}
     assert {:ok, 1} = Jobs.recover_stale(DateTime.add(attempt.lease_expires_at, 1, :millisecond))
     assert Repo.get!(Job, job.id).status == "failed"
-    assert Repo.get!(ExecutionCapacity, 1).active == 0
+    assert capacity_row().active == 0
   end
 
   test "heartbeat and running transition reject a stale fencing token", %{token: token} do
@@ -195,7 +200,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
 
     assert length(claims) == 8
     assert Enum.count(results, &match?({:error, :capacity_exhausted}, &1)) == 1
-    assert Repo.get!(ExecutionCapacity, 1).active == 8
+    assert capacity_row().active == 8
 
     Enum.each(claims, fn attempt ->
       assert {:ok, _} =
@@ -204,7 +209,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
                })
     end)
 
-    assert Repo.get!(ExecutionCapacity, 1).active == 0
+    assert capacity_row().active == 0
   end
 
   test "declared max_concurrent_containers raises the budget past the seeded default", %{
@@ -235,7 +240,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
 
     assert length(claims) == 12
     assert Enum.count(results, &match?({:error, :capacity_exhausted}, &1)) == 1
-    assert Repo.get!(ExecutionCapacity, 1).active == 12
+    assert capacity_row().active == 12
 
     Enum.each(claims, fn attempt ->
       assert {:ok, _} =
@@ -267,7 +272,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
       end)
 
     assert log =~ "execution capacity held at 3"
-    assert Repo.get!(ExecutionCapacity, 1).capacity == 3
+    assert capacity_row().capacity == 3
 
     Enum.each(attempts, fn attempt ->
       assert {:ok, _} =
@@ -281,7 +286,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     assert {:error, :invalid_capacity} = Jobs.set_capacity(0)
     assert {:error, :invalid_capacity} = Jobs.set_capacity(-1)
     assert {:error, :invalid_capacity} = Jobs.set_capacity("12")
-    assert Repo.get!(ExecutionCapacity, 1).capacity == 8
+    assert capacity_row().capacity == 8
   end
 
   test "cancellation is idempotent in blocked queued provisioning and running states", %{
@@ -309,7 +314,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     assert {:ok, _} = Jobs.cancel(running)
 
     assert Repo.get!(Job, parent.id).status == "queued"
-    assert Repo.get!(ExecutionCapacity, 1).active == 0
+    assert capacity_row().active == 0
 
     for job <- [blocked, queued, provisioning, running] do
       assert Repo.aggregate(
@@ -348,7 +353,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     assert {:ok, 1} = Jobs.recover_stale(recovery_time)
     assert {:ok, 0} = Jobs.recover_stale(recovery_time)
     assert Repo.get!(Job, job.id).status == "failed"
-    assert Repo.get!(ExecutionCapacity, 1).active == 0
+    assert capacity_row().active == 0
 
     assert Repo.aggregate(
              from(e in JobEvent, where: e.job_id == ^job.id and e.status == "failed"),
@@ -370,7 +375,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     # must leave the expired attempt, its job, and its reserved slot untouched.
     assert Repo.get!(Job, stale_job.id).status == "provisioning"
     assert Repo.get!(JobAttempt, stale_attempt.id).status == "provisioning"
-    assert Repo.get!(ExecutionCapacity, 1).active == 2
+    assert capacity_row().active == 2
 
     # The job therefore reports its live status, not a recovery-induced one.
     assert {:error, {:not_queued, "provisioning"}} = Jobs.claim(stale_job, "second-runner")
@@ -378,7 +383,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     recovery_time = DateTime.add(stale_attempt.lease_expires_at, 1, :millisecond)
     assert {:ok, 1} = Jobs.recover_stale(recovery_time)
     assert Repo.get!(Job, stale_job.id).status == "failed"
-    assert Repo.get!(ExecutionCapacity, 1).active == 1
+    assert capacity_row().active == 1
   end
 
   test "repeated terminal completion has one effect", %{token: token} do
@@ -401,7 +406,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
              :event_id
            ) == 1
 
-    assert Repo.get!(ExecutionCapacity, 1).active == 0
+    assert capacity_row().active == 0
   end
 
   test "a second terminal outcome is a no-op for the same attempt", %{token: token} do
@@ -416,7 +421,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
 
     assert same_attempt.status == "failed"
     assert Repo.get!(Job, job.id).status == "failed"
-    assert Repo.get!(ExecutionCapacity, 1).active == 0
+    assert capacity_row().active == 0
 
     assert Repo.aggregate(
              from(e in JobEvent,
@@ -441,7 +446,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
 
     assert Repo.get!(Job, job.id).status == "provisioning"
     assert Repo.get!(JobAttempt, attempt.id).status == "provisioning"
-    assert Repo.get!(ExecutionCapacity, 1).active == 1
+    assert capacity_row().active == 1
     assert Repo.aggregate(from(e in JobEvent, where: e.job_id == ^job.id), :count, :event_id) == 2
 
     assert {:ok, %JobAttempt{status: "succeeded"}} =
@@ -545,7 +550,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
       assert {:ok, 0} = Jobs.recover_orphaned_dispatches(past_grace())
 
       # A queued job never reserved a slot, so recovery must not release one.
-      assert Repo.get!(ExecutionCapacity, 1).active == 0
+      assert capacity_row().active == 0
     end
 
     test "a job whose dispatch was pruned away entirely is recovered", %{token: token} do
@@ -590,7 +595,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
       assert Repo.get!(Job, job.id).status == "provisioning"
 
       assert {:ok, _} = Jobs.cancel(job)
-      assert Repo.get!(ExecutionCapacity, 1).active == 0
+      assert capacity_row().active == 0
     end
 
     test "one Recovery tick runs the orphan sweep alongside the stale sweep", %{token: token} do

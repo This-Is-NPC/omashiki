@@ -75,6 +75,21 @@ defmodule Omashiki.Fixtures do
     Config.get_credential(name)
   end
 
+  @doc """
+  The `execution_capacity` row of a node, defaulting to the one this process
+  runs as.
+
+  Reads the node from `Config.current_node/0` rather than naming it, so a test
+  that switches node identity keeps asserting against the row that identity
+  actually reserves from.
+  """
+  def capacity_row(node \\ nil) do
+    Omashiki.Repo.get!(
+      Omashiki.Jobs.ExecutionCapacity,
+      node || Config.current_node().name
+    )
+  end
+
   defp put_config_map!(map) do
     :persistent_term.put(@config_key, map)
     Config.load_map!(map)

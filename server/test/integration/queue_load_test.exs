@@ -84,7 +84,7 @@ defmodule Omashiki.Integration.QueueLoadTest do
         end)
 
       assert length(claims) == @capacity
-      assert Repo.get!(ExecutionCapacity, 1).active == @capacity
+      assert capacity_row().active == @capacity
 
       assert Repo.aggregate(
                from(j in Job, where: j.status == "provisioning"),
@@ -117,7 +117,7 @@ defmodule Omashiki.Integration.QueueLoadTest do
 
     assert length(terminal_counts) == @job_count
     assert Enum.all?(terminal_counts, &(&1 == 1))
-    assert Repo.get!(ExecutionCapacity, 1).active == 0
+    assert capacity_row().active == 0
   end
 
   defp batch(requests),

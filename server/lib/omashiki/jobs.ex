@@ -20,6 +20,12 @@ defmodule Omashiki.Jobs do
   }
   @default_lease_ms 30_000
 
+  # The node name the pre-node singleton capacity row was re-keyed to. It is the
+  # release target for attempts claimed before `job_attempts.node_id` existed,
+  # and nothing else: no live claim ever reserves against it unless a machine is
+  # actually called `local`.
+  @legacy_node "local"
+
   # Liveness of a dispatch is decided by Oban's own `:incomplete` set — the very
   # set `DispatchWorker`'s uniqueness keys on. Deriving it from
   # `Oban.Job.unique_states/1` keeps the sweep and the uniqueness rule from
@@ -251,7 +257,14 @@ defmodule Omashiki.Jobs do
     |> normalize_transaction_result()
   end
 
-  @doc "Reconcile the slot budget with `[limits].max_concurrent_containers`."
+  @doc """
+  Reconcile *this node's* slot budget with `[limits].max_concurrent_containers`.
+
+  Each machine owns one row and reconciles only that row, so a second node
+  booting no longer overwrites the first node's budget. The row is created here
+  if it does not exist yet: boot is the only place a node's capacity row is
+  written into being.
+  """
   def sync_capacity do
     requested = HostSettings.get_max_concurrent_containers()
 
@@ -273,34 +286,65 @@ defmodule Omashiki.Jobs do
   end
 
   @doc """
-  Set the global execution slot count.
+  Set this node's execution slot count, creating its row if it has none.
 
   Clamped up to the reservations already outstanding so the row never
   violates `active <= capacity`; the surplus drains on the next boot.
+
+  An upsert rather than an update, because a node's row has no other origin: the
+  schema no longer ships a seeded singleton, and a machine joining the cluster
+  must be able to declare its own budget without an operator inserting a row by
+  hand. `active` is only supplied on insert — a conflicting row keeps the count
+  it already holds.
   """
   def set_capacity(capacity) when is_integer(capacity) and capacity > 0 do
-    query =
+    now = now()
+
+    on_conflict =
       from(c in ExecutionCapacity,
-        where: c.id == 1,
         update: [
           set: [
-            capacity: fragment("GREATEST(?, ?)", type(^capacity, :integer), c.active),
-            updated_at: ^now()
+            capacity: fragment("GREATEST(EXCLUDED.capacity, ?)", c.active),
+            updated_at: ^now
           ]
-        ],
-        select: c
+        ]
       )
 
-    case Repo.update_all(query, []) do
-      {1, [row]} -> {:ok, row}
-      {0, []} -> {:error, :not_found}
-    end
+    Repo.insert(
+      %ExecutionCapacity{
+        node_id: Config.current_node().name,
+        capacity: capacity,
+        active: 0,
+        inserted_at: now,
+        updated_at: now
+      },
+      on_conflict: on_conflict,
+      conflict_target: :node_id,
+      returning: true
+    )
   end
 
   def set_capacity(_), do: {:error, :invalid_capacity}
 
+  @doc """
+  Total declared slots across every node, and the total currently reserved.
+
+  The cluster ceiling is the sum of the rows, not any one machine's
+  `[limits].max_concurrent_containers`: that value describes the host it is
+  declared on and says nothing about the rest of the cluster.
+  """
+  def cluster_capacity do
+    from(c in ExecutionCapacity,
+      select: %{capacity: coalesce(sum(c.capacity), 0), active: coalesce(sum(c.active), 0)}
+    )
+    |> Repo.one()
+  end
+
   defp claim_locked(%Job{} = job, runner_id, now, lease_ms) do
-    reserve_capacity!()
+    # One read of this host's identity feeds both the reservation and the stamp,
+    # so the row that was decremented is always the row the attempt names.
+    node = Config.current_node().name
+    reserve_capacity!(node)
     token = new_lease_token()
     expires_at = lease_until(now, lease_ms)
     attempt = current_attempt!(job)
@@ -310,7 +354,7 @@ defmodule Omashiki.Jobs do
     update_attempt!(attempt, %{
       status: "provisioning",
       runner_id: runner_id,
-      node_id: Config.current_node().name,
+      node_id: node,
       lease_token: token,
       lease_expires_at: expires_at,
       heartbeat_at: now,
@@ -717,10 +761,15 @@ defmodule Omashiki.Jobs do
     updated
   end
 
-  defp reserve_capacity! do
+  # Still one row, still one atomic compare-and-swap — `active < capacity` and
+  # the increment are the same statement, so two claimers racing for the last
+  # slot cannot both win. The predicate selects this machine's row instead of
+  # the singleton, which is the whole of the change. A node with no row has no
+  # budget and claims nothing; boot is what gives it one.
+  defp reserve_capacity!(node) do
     query =
       from(c in ExecutionCapacity,
-        where: c.id == 1 and c.active < c.capacity,
+        where: c.node_id == ^node and c.active < c.capacity,
         update: [inc: [active: 1]],
         select: c
       )
@@ -731,14 +780,24 @@ defmodule Omashiki.Jobs do
     end
   end
 
-  defp release_capacity_if_reserved!(%JobAttempt{capacity_reserved: true}) do
-    release_capacity!()
+  # Release on the row of the node that *reserved*, which is the attempt's own
+  # `node_id` — never `current_node/0`. Every caller here also runs on the node
+  # that did not claim: `recover_stale/1` sweeps expired leases cluster-wide, so
+  # node B routinely fails an attempt node A is holding a slot for. Releasing
+  # against the sweeper would leave A one slot short forever and drive B's
+  # counter below the reservations it actually holds — both rows wrong, silently.
+  #
+  # A `nil` node predates `job_attempts.node_id` and therefore predates any
+  # cluster: those reservations were counted in the singleton this table's
+  # migration re-keyed to `'local'`, so that is where they are given back.
+  defp release_capacity_if_reserved!(%JobAttempt{capacity_reserved: true} = attempt) do
+    release_capacity!(attempt.node_id || @legacy_node)
   end
 
   defp release_capacity_if_reserved!(_), do: :ok
 
-  defp release_capacity! do
-    case Repo.update_all(from(c in ExecutionCapacity, where: c.id == 1 and c.active > 0),
+  defp release_capacity!(node) do
+    case Repo.update_all(from(c in ExecutionCapacity, where: c.node_id == ^node and c.active > 0),
            inc: [active: -1]
          ) do
       {1, _} -> :ok
