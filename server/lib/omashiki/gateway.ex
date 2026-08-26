@@ -246,6 +246,10 @@ defmodule Omashiki.Gateway do
       request_id: request_id,
       job_id: job_id,
       turn: turn,
+      # Separates gateway spend from engine-reported spend. `UsageLedger`
+      # documents this and `Entry` validates it — the writer must set it or
+      # any query filtering on `source` silently misses every gateway row.
+      source: "gateway",
       provider: cred.provider,
       model: model,
       input_tokens: usage.input_tokens || 0,

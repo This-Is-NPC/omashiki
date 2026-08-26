@@ -186,12 +186,10 @@ defmodule Omashiki.GatewayTest do
       assert entry.provider_request_id == "chatcmpl-1"
       assert entry.request_id == "gateway:chatcmpl-1"
 
-      # DEFECT (reported, not fixed here): `UsageLedger` documents gateway rows
-      # as `source: "gateway"` and `Entry` validates that value, but
-      # `Gateway.record_usage/4` never sets it. Any consumer that separates
-      # gateway spend from engine-reported spend by `source` silently misses
-      # every gateway row. Flip this to `== "gateway"` when the fix lands.
-      assert entry.source == nil
+      # Gateway rows carry their `source` so a consumer can separate gateway
+      # spend from engine-reported spend. `UsageLedger` documents this and
+      # `Entry` validates it (task 2807).
+      assert entry.source == "gateway"
     end
 
     test "accepts atom-keyed claims from in-process callers",
