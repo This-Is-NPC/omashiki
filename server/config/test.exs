@@ -40,6 +40,13 @@ config :phoenix, :plug_init_mode, :runtime
 config :phoenix_live_view,
   enable_expensive_runtime_checks: true
 
+# `ApiTokens.record_use/1` hands its `last_used_at` write to a supervised task
+# in every environment that serves requests. Under `Ecto.Adapters.SQL.Sandbox`
+# that task is not the process that owns the connection, so its checkout fails
+# with "owner exited" once the test ends. Run it inline here: same statement,
+# same guard, but on the owner process.
+config :omashiki, :api_token_use_write, :inline
+
 # Skip on-boot orphan cleanup (no Docker socket / repo dirs in unit tests).
 config :omashiki, :run_orphan_cleanup_on_boot, false
 config :omashiki, :enable_job_recovery, false

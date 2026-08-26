@@ -22,6 +22,13 @@ defmodule Omashiki.Application do
         {Phoenix.PubSub, name: Omashiki.PubSub},
         {Registry, keys: :unique, name: Omashiki.Runtime.AttemptRegistry},
         {Task.Supervisor, name: Omashiki.Runtime.TaskSupervisor},
+        # Fire-and-forget `last_used_at` writes for api tokens. Separate from the
+        # runtime supervisor so an auth-path burst cannot starve container work,
+        # and bounded so an overload sheds those writes — they carry 60s of
+        # resolution, so dropping one is cheaper than spawning without limit.
+        {Task.Supervisor,
+         name: Omashiki.ApiTokens.TaskSupervisor,
+         max_children: Application.get_env(:omashiki, :api_token_use_max_children, 512)},
         Omashiki.Runtime.AttemptSupervisor,
         Omashiki.Runtime.PortAllocator,
         Omashiki.Runtime.LeaseRenewer,

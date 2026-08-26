@@ -5,6 +5,8 @@ defmodule Omashiki.ApiTokens do
 
   import Ecto.Query
 
+  require Logger
+
   alias Omashiki.Repo
   alias Omashiki.ApiTokens.{Hash, Token}
   alias Omashiki.Accounts.User
@@ -114,22 +116,82 @@ defmodule Omashiki.ApiTokens do
   # it waited. Under a few hundred requests per second that convoy drains the
   # pool and the API starts answering 500. `last_used_at` only ever feeds a
   # "last seen" column in the tokens screen, so one write per @use_resolution is
-  # all the precision it needs, and the guard makes the no-op case skip the lock
-  # entirely.
+  # all the precision it needs.
+  #
+  # Measured, 400 concurrent callers sharing one token, 24-connection pool
+  # (`bench/record_use_bench.exs`, task #2793):
+  #
+  #   * the guard is what kills the convoy. Postgres does NOT take the row lock
+  #     to evaluate a predicate that does not match — a competing writer holding
+  #     the row uncommitted delays the guarded no-op by 0.1s and the
+  #     unguarded UPDATE by the full 2s. Unconditional p50 was ~48x the guarded
+  #     p50 for exactly that reason.
+  #   * the guard does not make the statement free. It is still one pool
+  #     checkout and one round trip on the request path, and running it inline
+  #     costs the caller an order of magnitude more than handing it off.
+  #
+  # So both halves stay: the guard, and keeping the write off the caller. The
+  # hand-off is supervised and bounded rather than a bare `Task.start` — under
+  # saturation `record_use` sheds the write instead of spawning without limit,
+  # which is the right trade for a 60s-resolution "last seen" column.
   @use_resolution 60
 
+  @doc """
+  Records that `token` was just presented, at `@use_resolution` granularity.
+
+  Always returns `:ok`: failing to note a last-seen timestamp must never fail
+  the request that carried the token. Failures are logged, not raised and not
+  dropped on the floor.
+  """
   def record_use(%Token{id: id}) do
-    Task.start(fn ->
-      now = DateTime.utc_now(:microsecond)
-      cutoff = DateTime.add(now, -@use_resolution, :second)
-
-      Token
-      |> where([t], t.id == ^id)
-      |> where([t], is_nil(t.last_used_at) or t.last_used_at < ^cutoff)
-      |> Repo.update_all(set: [last_used_at: now])
-    end)
-
+    run_use_write(fn -> touch_last_used(id) end)
     :ok
+  end
+
+  # `:async` in every environment that serves requests. `config/test.exs` picks
+  # `:inline` so the write runs in the caller — which under `Ecto.Adapters.SQL.
+  # Sandbox` is the process that owns the connection. A detached task is not,
+  # and checking out from it is what produced the "owner exited" /
+  # `DBConnection.ConnectionError` noise in the suite log.
+  defp run_use_write(fun) do
+    case Application.get_env(:omashiki, :api_token_use_write, :async) do
+      :inline ->
+        fun.()
+
+      :async ->
+        case Task.Supervisor.start_child(Omashiki.ApiTokens.TaskSupervisor, fun) do
+          {:ok, _pid} ->
+            :ok
+
+          other ->
+            Logger.warning("[ApiTokens] dropped a last_used_at write: #{inspect(other)}")
+            :ok
+        end
+    end
+  end
+
+  defp touch_last_used(id) do
+    now = DateTime.utc_now(:microsecond)
+    cutoff = DateTime.add(now, -@use_resolution, :second)
+
+    Token
+    |> where([t], t.id == ^id)
+    |> where([t], is_nil(t.last_used_at) or t.last_used_at < ^cutoff)
+    |> Repo.update_all(set: [last_used_at: now])
+  rescue
+    error ->
+      log_failed_write(id, Exception.message(error))
+  catch
+    # A pool checkout that loses its queue slot exits rather than raising, so
+    # `rescue` alone would let it through — and inline, that exit would take the
+    # caller with it. `record_use/1` promises `:ok` either way.
+    :exit, reason ->
+      log_failed_write(id, inspect(reason))
+  end
+
+  defp log_failed_write(id, detail) do
+    Logger.warning("[ApiTokens] last_used_at write failed for #{id}: #{detail}")
+    {0, nil}
   end
 
   def accessible?(%User{}, _resource), do: true
