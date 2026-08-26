@@ -47,3 +47,11 @@ config :omashiki, :enable_job_recovery, false
 # Oban — manual testing mode: jobs are not auto-executed; tests call
 # `Oban.drain_queue/1` or `perform_job/2` explicitly.
 config :omashiki, Oban, testing: :manual
+
+# Host credential copies stay inside the test sandbox, never /dev/shm.
+config :omashiki,
+       :host_credential_root,
+       Path.join(
+         System.tmp_dir!(),
+         "omashiki-credentials-test#{System.get_env("MIX_TEST_PARTITION")}"
+       )
