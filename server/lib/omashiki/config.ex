@@ -10,6 +10,24 @@ defmodule Omashiki.Config do
   `[nodes]` is optional. Without it there is exactly one implicit node — this
   machine — and every path behaves as it did before nodes existed.
 
+  ## Generations
+
+  `reload/1` re-reads the file into `:persistent_term` without a restart, and
+  every successful write bumps `generation/0`. Exactly **one** generation lives
+  in `:persistent_term` at a time — the live one, which admission resolves
+  against. The generations still owed to running work are not held in memory at
+  all: each job captured its own `repository_snapshot`, `environment_snapshot`
+  and `registry_digest` at admission, so the prior generation lives durably in
+  the `jobs` row that needs it. That is what bounds the writes. `:persistent_term.put/2`
+  scans every process holding a reference to the old term, so it is paid once
+  per successful reload and never per job, per attempt or on a timer.
+
+  A failed reload writes nothing. `load!/1` builds the whole snapshot — parsing,
+  validating and resolving every `${env:VAR}` — *before* it reaches
+  `put_snapshot!/1`, so an unset variable raises with the previous generation
+  still in `:persistent_term` and still serving. A stale config is recoverable;
+  a half-applied one is not.
+
   ## Failures
 
   `load!/1` raises `Omashiki.Config.Error` (never a raw `KeyError`) when:
@@ -43,6 +61,13 @@ defmodule Omashiki.Config do
   # Domain sections that must appear in a real TOML file. `credentials` is
   # optional when jobs use host-authenticated providers.
   @required_sections ~w(repositories environments harnesses limits)
+
+  # How a hot reload lands. `[limits]` is per-container resource budget and
+  # `HostSettings` takes exactly four keys out of it; a rollout strategy is not
+  # one of those, so it gets its own optional section rather than riding along.
+  @default_reload_policy %{mode: :gradual, drain_timeout_ms: 300_000}
+  @reload_modes %{"gradual" => :gradual, "drain_all" => :drain_all}
+
   @empty %{
     credentials: [],
     host_credentials: [],
@@ -54,6 +79,9 @@ defmodule Omashiki.Config do
     current_node: nil,
     registry_digest: nil,
     limits: %{},
+    reload_policy: @default_reload_policy,
+    generation: 0,
+    loaded_at: nil,
     path: nil,
     source: :empty
   }
@@ -96,8 +124,58 @@ defmodule Omashiki.Config do
     put_snapshot!(build_snapshot!(map, path, :map, require_sections?: require_sections?))
   end
 
-  defp put_snapshot!(%{} = snapshot) do
-    :persistent_term.put(@persistent_key, normalize_snapshot(snapshot))
+  @doc """
+  Re-read `path` into the live generation. Never raises.
+
+  Returns `{:ok, info}` with the new `:generation`, `:digest` and whether the
+  registry digest actually moved, or `{:error, message}` with the previous
+  generation untouched and still serving.
+  """
+  def reload(path \\ default_path()) when is_binary(path) do
+    previous = snapshot()
+
+    try do
+      load!(path)
+    rescue
+      error -> {:error, Exception.message(error)}
+    else
+      :ok ->
+        current = snapshot()
+
+        {:ok,
+         %{
+           generation: current.generation,
+           digest: current.registry_digest,
+           previous_digest: previous.registry_digest,
+           changed?: current.registry_digest != previous.registry_digest
+         }}
+    end
+  end
+
+  @doc "Monotonic counter of successful snapshot writes."
+  def generation, do: snapshot().generation
+
+  @doc "When the live generation was written, or nil before the first load."
+  def loaded_at, do: snapshot().loaded_at
+
+  @doc """
+  Declared `[reload]` policy: `%{mode: :gradual | :drain_all, drain_timeout_ms: pos_integer}`.
+  """
+  def reload_policy, do: snapshot().reload_policy
+
+  # The single `:persistent_term` write. Everything above it can raise; nothing
+  # below it can, so the term is either the whole previous generation or the
+  # whole new one.
+  defp put_snapshot!(%{} = built) do
+    generation = snapshot().generation + 1
+
+    next =
+      built
+      |> normalize_snapshot()
+      |> Map.put(:generation, generation)
+      |> Map.put(:loaded_at, DateTime.utc_now())
+
+    :persistent_term.put(@persistent_key, next)
     :ok
   end
 
@@ -312,6 +390,7 @@ defmodule Omashiki.Config do
       )
 
     limits = build_limits(section_map(map, "limits"))
+    reload_policy = build_reload_policy!(section_map(map, "reload"))
 
     %{
       credentials: credentials,
@@ -324,9 +403,39 @@ defmodule Omashiki.Config do
       current_node: resolve_current_node!(registry.nodes),
       registry_digest: registry.registry_digest,
       limits: limits,
+      reload_policy: reload_policy,
       path: path,
       source: source
     }
+  end
+
+  defp build_reload_policy!(section) when map_size(section) == 0, do: @default_reload_policy
+
+  defp build_reload_policy!(section) do
+    section = stringify_keys(section)
+    reject_unknown_fields!(section, ~w(mode drain_timeout_ms), "reload")
+
+    mode =
+      case Map.get(section, "mode", "gradual") do
+        value when is_binary(value) ->
+          Map.get(@reload_modes, value) ||
+            raise Error,
+                  "reload.mode must be one of #{inspect(Map.keys(@reload_modes))}, got #{inspect(value)}"
+
+        other ->
+          raise Error, "reload.mode must be a string, got #{type_name(other)}"
+      end
+
+    drain_timeout_ms =
+      case Map.get(section, "drain_timeout_ms", @default_reload_policy.drain_timeout_ms) do
+        n when is_integer(n) and n > 0 ->
+          n
+
+        other ->
+          raise Error, "reload.drain_timeout_ms must be a positive integer, got #{inspect(other)}"
+      end
+
+    %{mode: mode, drain_timeout_ms: drain_timeout_ms}
   end
 
   defp section(map, key) do
