@@ -791,16 +791,18 @@ defmodule Omashiki.Runtime.ContainerManager do
     end)
   end
 
+  # The model the harness is pointed at comes from the snapshot the job was
+  # admitted with, not from the live generation. A job can sit queued across a
+  # hot reload; provisioning it against the *new* model would run it on
+  # configuration it was never admitted under, while its own `jobs` row and its
+  # digest still say otherwise. Only `api_key` is read live — admission strips
+  # it so it never reaches the database.
   defp credential_for_environment(environment) do
     environment
     |> Map.get(:credentials, Map.get(environment, "credentials", []))
     |> List.wrap()
     |> List.first()
-    |> case do
-      %{name: name} when is_binary(name) -> Omashiki.Config.get_credential(name)
-      %{"name" => name} when is_binary(name) -> Omashiki.Config.get_credential(name)
-      _ -> nil
-    end
+    |> Omashiki.Credentials.pin()
   end
 
   defp environment_policy(nil), do: nil

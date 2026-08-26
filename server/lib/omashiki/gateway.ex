@@ -108,14 +108,14 @@ defmodule Omashiki.Gateway do
       claims["credential"] || claims[:credential] || claims["credential_id"] ||
         claims[:credential_id]
 
-    with {:ok, %{job: job}} <- Claims.authorize("gateway", claims),
+    with {:ok, %{job: job, environment: environment}} <- Claims.authorize("gateway", claims),
          %Credential{} = cred <-
-           Credentials.get_credential(credential_name) || :credential_missing,
+           Credentials.admitted(environment, credential_name) || :credential_missing,
          :ok <- Claims.authorize_credential(job, credential_name),
          :ok <- Budget.check(job),
          requested <- requested_model(body, cred),
          {:ok, result, used_cred, used_model} <-
-           forward_with_fallback(cred, body, requested, Claims.credential_names(job)) do
+           forward_with_fallback(cred, body, requested, Claims.credential_names(job), environment) do
       _ = record_usage(job, used_cred, used_model, result.usage)
       _ = emit_llm_called(job, used_cred, used_model, result, "ok")
       {:ok, result.response}
@@ -195,8 +195,10 @@ defmodule Omashiki.Gateway do
 
   # Returns `{:ok, result, credential, model}` — the model is returned because
   # each hop resolves its own, and the ledger must record the one that ran.
-  defp forward_with_fallback(%Credential{} = cred, body, requested, allowed_names) do
-    fallbacks = Enum.map(load_fallback_credentials(cred, allowed_names), &{&1, :fallback})
+  defp forward_with_fallback(%Credential{} = cred, body, requested, allowed_names, environment) do
+    fallbacks =
+      Enum.map(load_fallback_credentials(cred, allowed_names, environment), &{&1, :fallback})
+
     chain = [{cred, :primary} | fallbacks]
 
     Enum.reduce_while(chain, {:error, :circuit_open}, fn {c, role}, _acc ->
@@ -221,15 +223,19 @@ defmodule Omashiki.Gateway do
     end)
   end
 
-  defp load_fallback_credentials(%Credential{fallback_chain: ids}, allowed_names)
+  # Resolved against the admitted snapshot for the same reason the primary is:
+  # a fallback hop uses the credential's *own* declared model, and reading that
+  # from the live generation would route a running attempt at a model it was
+  # never admitted with the moment an operator reloads.
+  defp load_fallback_credentials(%Credential{fallback_chain: ids}, allowed_names, environment)
        when is_list(ids) do
     ids
     |> Enum.filter(&(&1 in allowed_names))
-    |> Enum.map(&Credentials.get_credential/1)
+    |> Enum.map(&Credentials.admitted(environment, &1))
     |> Enum.reject(&is_nil/1)
   end
 
-  defp load_fallback_credentials(_, _), do: []
+  defp load_fallback_credentials(_, _, _), do: []
 
   @doc "Delegate for tests / callers that still probe default OAI upstream URLs."
   def upstream_base(cred), do: OpenaiCompat.upstream_base(cred)
