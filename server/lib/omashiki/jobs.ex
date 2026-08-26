@@ -38,8 +38,9 @@ defmodule Omashiki.Jobs do
 
       Repo.transaction(fn ->
         now = now()
-        recover_stale_locked(now)
 
+        # Stale-lease reclamation belongs to `Jobs.Recovery` alone. Running it
+        # inline made every claim scan and `FOR UPDATE` every expired attempt.
         case locked_job(job_id) do
           nil -> Repo.rollback(:not_found)
           %Job{status: "queued"} = job -> claim_locked(job, runner_id, now, lease_ms)

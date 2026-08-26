@@ -318,6 +318,30 @@ defmodule Omashiki.Jobs.ClaimsTest do
            ) == 1
   end
 
+  test "claiming never reclaims an expired attempt inline", %{token: token} do
+    {:ok, stale_job} = Jobs.Admission.admit(token, request("stale-holder"))
+    {:ok, stale_attempt} = Jobs.claim(stale_job, "stale-runner", lease_ms: 1)
+    Process.sleep(5)
+    assert DateTime.compare(DateTime.utc_now(), stale_attempt.lease_expires_at) == :gt
+
+    {:ok, fresh_job} = Jobs.Admission.admit(token, request("fresh-claimer"))
+    assert {:ok, _fresh_attempt} = Jobs.claim(fresh_job, "fresh-runner")
+
+    # `Jobs.Recovery` is the sole owner of stale reclamation: the claim above
+    # must leave the expired attempt, its job, and its reserved slot untouched.
+    assert Repo.get!(Job, stale_job.id).status == "provisioning"
+    assert Repo.get!(JobAttempt, stale_attempt.id).status == "provisioning"
+    assert Repo.get!(ExecutionCapacity, 1).active == 2
+
+    # The job therefore reports its live status, not a recovery-induced one.
+    assert {:error, {:not_queued, "provisioning"}} = Jobs.claim(stale_job, "second-runner")
+
+    recovery_time = DateTime.add(stale_attempt.lease_expires_at, 1, :millisecond)
+    assert {:ok, 1} = Jobs.recover_stale(recovery_time)
+    assert Repo.get!(Job, stale_job.id).status == "failed"
+    assert Repo.get!(ExecutionCapacity, 1).active == 1
+  end
+
   test "repeated terminal completion has one effect", %{token: token} do
     {:ok, job} = Jobs.Admission.admit(token, request("terminal-race"))
     {:ok, attempt} = Jobs.claim(job, "terminal-runner")
