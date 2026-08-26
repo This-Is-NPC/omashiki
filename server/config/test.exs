@@ -44,6 +44,9 @@ config :phoenix_live_view,
 config :omashiki, :run_orphan_cleanup_on_boot, false
 config :omashiki, :enable_job_recovery, false
 
+# The capacity row is owned by the sandbox; tests call `Jobs.sync_capacity/0`.
+config :omashiki, :sync_execution_capacity_on_boot, false
+
 # Oban — manual testing mode: jobs are not auto-executed; tests call
 # `Oban.drain_queue/1` or `perform_job/2` explicitly.
 config :omashiki, Oban, testing: :manual

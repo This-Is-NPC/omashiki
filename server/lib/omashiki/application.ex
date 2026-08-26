@@ -38,9 +38,21 @@ defmodule Omashiki.Application do
     {:ok, sup_pid} = Supervisor.start_link(children, opts)
 
     load_declared_config()
+    sync_execution_capacity()
     run_orphan_cleanup()
 
     {:ok, sup_pid}
+  end
+
+  # `[limits].max_concurrent_containers` owns the database capacity row.
+  defp sync_execution_capacity do
+    if Application.get_env(:omashiki, :sync_execution_capacity_on_boot, true) do
+      _ = Omashiki.Jobs.sync_capacity()
+    end
+
+    :ok
+  rescue
+    e -> Logger.warning("[Application] Execution capacity sync skipped: #{inspect(e)}")
   end
 
   # Declarative config from omashiki.toml. Tests skip the developer file.

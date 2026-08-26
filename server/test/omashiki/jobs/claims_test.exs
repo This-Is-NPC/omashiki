@@ -2,6 +2,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   use Omashiki.DataCase, async: false
 
   import Ecto.Query
+  import ExUnit.CaptureLog
 
   alias Omashiki.Config
   alias Omashiki.Jobs
@@ -14,39 +15,12 @@ defmodule Omashiki.Jobs.ClaimsTest do
     File.mkdir_p!(repo_path)
     {_, 0} = System.cmd("git", ["-C", repo_path, "init", "-q"])
 
-    Config.load_map!(
-      %{
-        "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "main"}},
-        "harnesses" => %{
-          "opencode" => %{
-            "adapter" => "opencode",
-            "runtime" => "docker",
-            "image" => "agent:latest"
-          }
-        },
-        "environments" => %{
-          "safe" => %{
-            "harness" => "opencode",
-            "executables" => ["git"],
-            "timeout_ms" => 1_000,
-            "caches" => [],
-            "mounts" => [],
-            "pre_steps" => [],
-            "post_steps" => [],
-            "policy" => %{"mode" => "off"},
-            "network" => "none",
-            "resources" => %{"cpus" => 1, "memory" => "1GB", "pids" => 32}
-          }
-        },
-        "limits" => %{}
-      },
-      path: Path.join(root, "omashiki.toml")
-    )
+    load_config!(root, %{})
 
     user = user_fixture()
     {token, _plaintext} = api_token_fixture(user)
     on_exit(fn -> File.rm_rf!(root) end)
-    {:ok, token: token}
+    {:ok, root: root, token: token}
   end
 
   test "concurrent claims fence one active attempt", %{token: token} do
@@ -192,6 +166,83 @@ defmodule Omashiki.Jobs.ClaimsTest do
     end)
 
     assert Repo.get!(ExecutionCapacity, 1).active == 0
+  end
+
+  test "declared max_concurrent_containers raises the budget past the seeded default", %{
+    root: root,
+    token: token
+  } do
+    load_config!(root, %{"max_concurrent_containers" => 12})
+    assert {:ok, %ExecutionCapacity{capacity: 12}} = Jobs.sync_capacity()
+
+    jobs =
+      Enum.map(1..13, fn n ->
+        {:ok, job} = Jobs.Admission.admit(token, request("raised-#{n}"))
+        job
+      end)
+
+    results =
+      Task.async_stream(jobs, fn job -> Jobs.claim(job, "raised-runner-#{job.id}") end,
+        max_concurrency: 13,
+        timeout: 10_000
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    claims =
+      Enum.flat_map(results, fn
+        {:ok, attempt} -> [attempt]
+        _ -> []
+      end)
+
+    assert length(claims) == 12
+    assert Enum.count(results, &match?({:error, :capacity_exhausted}, &1)) == 1
+    assert Repo.get!(ExecutionCapacity, 1).active == 12
+
+    Enum.each(claims, fn attempt ->
+      assert {:ok, _} =
+               Jobs.complete(attempt, attempt.lease_token, :cancelled, %{
+                 error: error("test_cleanup")
+               })
+    end)
+  end
+
+  test "lowering the declared budget clamps to outstanding reservations", %{
+    root: root,
+    token: token
+  } do
+    load_config!(root, %{"max_concurrent_containers" => 4})
+    assert {:ok, %ExecutionCapacity{capacity: 4}} = Jobs.sync_capacity()
+
+    attempts =
+      Enum.map(1..3, fn n ->
+        {:ok, job} = Jobs.Admission.admit(token, request("clamp-#{n}"))
+        {:ok, attempt} = Jobs.claim(job, "clamp-runner-#{n}")
+        attempt
+      end)
+
+    load_config!(root, %{"max_concurrent_containers" => 1})
+
+    log =
+      capture_log(fn ->
+        assert {:ok, %ExecutionCapacity{capacity: 3}} = Jobs.sync_capacity()
+      end)
+
+    assert log =~ "execution capacity held at 3"
+    assert Repo.get!(ExecutionCapacity, 1).capacity == 3
+
+    Enum.each(attempts, fn attempt ->
+      assert {:ok, _} =
+               Jobs.complete(attempt, attempt.lease_token, :cancelled, %{
+                 error: error("test_cleanup")
+               })
+    end)
+  end
+
+  test "set_capacity rejects a non-positive budget" do
+    assert {:error, :invalid_capacity} = Jobs.set_capacity(0)
+    assert {:error, :invalid_capacity} = Jobs.set_capacity(-1)
+    assert {:error, :invalid_capacity} = Jobs.set_capacity("12")
+    assert Repo.get!(ExecutionCapacity, 1).capacity == 8
   end
 
   test "cancellation is idempotent in blocked queued provisioning and running states", %{
@@ -369,6 +420,37 @@ defmodule Omashiki.Jobs.ClaimsTest do
 
     assert {:error, {:invalid_transition, "succeeded", "queued"}} = Jobs.retry(job)
     assert Repo.aggregate(from(a in JobAttempt, where: a.job_id == ^job.id), :count, :id) == 1
+  end
+
+  defp load_config!(root, limits) do
+    Config.load_map!(
+      %{
+        "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "main"}},
+        "harnesses" => %{
+          "opencode" => %{
+            "adapter" => "opencode",
+            "runtime" => "docker",
+            "image" => "agent:latest"
+          }
+        },
+        "environments" => %{
+          "safe" => %{
+            "harness" => "opencode",
+            "executables" => ["git"],
+            "timeout_ms" => 1_000,
+            "caches" => [],
+            "mounts" => [],
+            "pre_steps" => [],
+            "post_steps" => [],
+            "policy" => %{"mode" => "off"},
+            "network" => "none",
+            "resources" => %{"cpus" => 1, "memory" => "1GB", "pids" => 32}
+          }
+        },
+        "limits" => limits
+      },
+      path: Path.join(root, "omashiki.toml")
+    )
   end
 
   defp request(key) do

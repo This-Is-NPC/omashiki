@@ -3,6 +3,9 @@ defmodule Omashiki.Jobs do
 
   import Ecto.Query
 
+  require Logger
+
+  alias Omashiki.HostSettings
   alias Omashiki.Jobs.{DispatchWorker, ExecutionCapacity, Job, JobAttempt, JobEvent, Webhooks}
   alias Omashiki.Repo
 
@@ -25,7 +28,7 @@ defmodule Omashiki.Jobs do
     "cancelled" => ~w(error_code recovered)
   }
 
-  @doc "Claim one queued job and reserve one of the eight local execution slots."
+  @doc "Claim one queued job and reserve one of the global local execution slots."
   def claim(job_or_id, runner_id, opts \\ [])
 
   def claim(job_or_id, runner_id, opts) when is_binary(runner_id) do
@@ -198,6 +201,54 @@ defmodule Omashiki.Jobs do
     Repo.transaction(fn -> recover_stale_locked(at) end)
     |> normalize_transaction_result()
   end
+
+  @doc "Reconcile the slot budget with `[limits].max_concurrent_containers`."
+  def sync_capacity do
+    requested = HostSettings.get_max_concurrent_containers()
+
+    case set_capacity(requested) do
+      {:ok, %ExecutionCapacity{capacity: ^requested}} = ok ->
+        ok
+
+      {:ok, %ExecutionCapacity{capacity: clamped}} = ok ->
+        Logger.warning(
+          "execution capacity held at #{clamped}: #{clamped} slot(s) still reserved, requested #{requested}"
+        )
+
+        ok
+
+      {:error, reason} = error ->
+        Logger.error("execution capacity sync failed: #{inspect(reason)}")
+        error
+    end
+  end
+
+  @doc """
+  Set the global execution slot count.
+
+  Clamped up to the reservations already outstanding so the row never
+  violates `active <= capacity`; the surplus drains on the next boot.
+  """
+  def set_capacity(capacity) when is_integer(capacity) and capacity > 0 do
+    query =
+      from(c in ExecutionCapacity,
+        where: c.id == 1,
+        update: [
+          set: [
+            capacity: fragment("GREATEST(?, ?)", type(^capacity, :integer), c.active),
+            updated_at: ^now()
+          ]
+        ],
+        select: c
+      )
+
+    case Repo.update_all(query, []) do
+      {1, [row]} -> {:ok, row}
+      {0, []} -> {:error, :not_found}
+    end
+  end
+
+  def set_capacity(_), do: {:error, :invalid_capacity}
 
   defp claim_locked(%Job{} = job, runner_id, now, lease_ms) do
     reserve_capacity!()
