@@ -2,7 +2,13 @@
 #
 # Single source of declared repositories, harnesses, environments, caches,
 # credentials, and limits. The database stores what happens: jobs, queues, and
-# events. Restart Omashiki after changing this file.
+# events.
+#
+# The execution registry below — repositories, harnesses, environments,
+# credentials, caches, limits — reloads hot from /runtime with no restart. See
+# [reload]. The infrastructure sections at the top ([app], [db], [auth]) are
+# read by the entrypoints and by config/runtime.exs before the core is up, and
+# still need a restart.
 #
 # Also read by:
 #   .scripts/omashiki.py       injects configured ports into Compose and Mix
@@ -39,6 +45,30 @@ enabled = false
 # ---------------------------------------------------------------------------
 # Execution registry
 # ---------------------------------------------------------------------------
+
+# How a hot reload of this file lands on work that is already running.
+#
+# Every job captures its repository, environment and registry digest at
+# admission, so a running attempt always finishes on the configuration it was
+# admitted with, whatever this says. What this chooses is what happens to the
+# attempts that have not started yet.
+#
+#   gradual   (default) Swap immediately. New jobs are admitted against the new
+#             configuration; attempts already running finish on theirs. The
+#             fleet is briefly split, and /runtime shows the split as a
+#             percentage with the containers on each side. Nothing waits.
+#
+#   drain_all Close admission, wait for every active attempt to terminate, then
+#             swap, then reopen. Nothing ever runs two configurations at once.
+#             Costs the queueing time of the longest attempt.
+#
+# drain_timeout_ms bounds the wait. If it expires with attempts still running
+# the drain is abandoned: admission reopens and this file is NOT applied.
+# Nothing is cancelled — a config change does not kill a user's job. Use
+# gradual if you need the change through a long-running attempt.
+[reload]
+mode = "gradual"
+drain_timeout_ms = 300000
 
 [limits]
 max_concurrent_containers = 8

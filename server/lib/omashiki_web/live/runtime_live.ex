@@ -13,10 +13,25 @@ defmodule OmashikiWeb.RuntimeLive do
   for the whole application. Nothing on this page reaches the Docker daemon;
   render reads a cached snapshot and the snapshot's age is on the screen so a
   stalled poller cannot be mistaken for a quiet system.
+
+  ## Why the configuration rollout lives here
+
+  Applying a configuration change to a running core is not instantaneous. A
+  reload swaps what *admission* resolves against; the attempts already running
+  finish on the generation captured in their own `jobs` row. So between the
+  click and the last old attempt terminating, the fleet is genuinely split, and
+  that is a state worth naming rather than hiding behind a spinner.
+
+  The percentage is the census this page already takes, read one column
+  further: every active attempt's admitted `registry_digest` compared to the
+  live one. The rollout is therefore drawn from the same poll as the process
+  graph — no second timer, no second request to the daemon — and lands next to
+  the containers it is talking about.
   """
 
   use OmashikiWeb, :live_view
 
+  alias Omashiki.Config.Rollout
   alias Omashiki.Runtime.Inspector
   alias Omashiki.Telemetry.Recorder
   alias OmashikiWeb.OperationHelpers, as: Ops
@@ -26,6 +41,7 @@ defmodule OmashikiWeb.RuntimeLive do
     snapshot =
       if connected?(socket) do
         Inspector.watch()
+        Phoenix.PubSub.subscribe(Omashiki.PubSub, Rollout.topic())
         Inspector.refresh()
       else
         Inspector.snapshot()
@@ -36,6 +52,7 @@ defmodule OmashikiWeb.RuntimeLive do
      |> assign(:page_title, "Omashiki · Runtime")
      |> assign(:active_tab, :runtime)
      |> assign(:snapshot, snapshot)
+     |> assign(:reload_result, nil)
      |> assign(:telemetry, telemetry_rows())}
   end
 
@@ -44,7 +61,24 @@ defmodule OmashikiWeb.RuntimeLive do
     {:noreply, socket |> assign(:snapshot, snapshot) |> assign(:telemetry, telemetry_rows())}
   end
 
+  # A drain finishing, or failing, is not tied to the census interval. Taking a
+  # fresh census on the transition is what makes the percentage move the moment
+  # the swap lands rather than up to one interval later.
+  def handle_info({:config_rollout, _status}, socket) do
+    {:noreply, assign(socket, :snapshot, Inspector.refresh())}
+  end
+
   def handle_info(_message, socket), do: {:noreply, socket}
+
+  @impl true
+  def handle_event("reload_config", _params, socket) do
+    result = Rollout.reload()
+
+    {:noreply,
+     socket
+     |> assign(:reload_result, result)
+     |> assign(:snapshot, Inspector.refresh())}
+  end
 
   defp telemetry_rows, do: Recorder.snapshot() |> Enum.take(8)
 
@@ -97,6 +131,85 @@ defmodule OmashikiWeb.RuntimeLive do
           }
         />
       </div>
+
+      <.panel
+        title="Configuration rollout"
+        meta={"generation #{@snapshot.config.generation} · #{mode_label(@snapshot.config)}"}
+      >
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <.metric
+            label="APPLIED"
+            value={"#{@snapshot.config.applied_percent}%"}
+            note="active attempts on the live config"
+            value_class={
+              if @snapshot.config.applied_percent < 100,
+                do: "text-status-running",
+                else: "text-status-succeeded"
+            }
+          />
+          <.metric
+            label="ON LIVE CONFIG"
+            value={@snapshot.config.current}
+            note="admitted under the current digest"
+          />
+          <.metric
+            label="ON PRIOR CONFIG"
+            value={@snapshot.config.prior}
+            note="finishing on what admitted them"
+            value_class={
+              if @snapshot.config.prior > 0, do: "text-status-running", else: "text-on-surface"
+            }
+          />
+          <.metric
+            label="DIGEST"
+            value={short_digest(@snapshot.config.digest)}
+            note="live registry digest"
+          />
+        </div>
+
+        <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 font-mono text-xs sm:grid-cols-3">
+          <div>
+            <dt class="text-on-surface-variant">Rollout mode</dt>
+            <dd class="text-on-surface">{mode_label(@snapshot.config)}</dd>
+          </div>
+          <div>
+            <dt class="text-on-surface-variant">State</dt>
+            <dd class={
+              if draining?(@snapshot.config), do: "text-status-running", else: "text-on-surface"
+            }>
+              {rollout_state_label(@snapshot.config)}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-on-surface-variant">Loaded</dt>
+            <dd class="text-on-surface">{loaded_label(@snapshot.config)}</dd>
+          </div>
+        </dl>
+
+        <div class="mt-4 flex flex-wrap items-center gap-4">
+          <button
+            type="button"
+            phx-click="reload_config"
+            phx-disable-with="Reloading…"
+            class="border border-outline-variant px-4 py-2 font-label text-label-md uppercase tracking-[0.2em] text-on-surface hover:bg-surface-container-high"
+          >
+            Reload configuration
+          </button>
+          <p :if={@reload_result} class={["font-mono text-xs", reload_class(@reload_result)]}>
+            {reload_message(@reload_result)}
+          </p>
+        </div>
+
+        <%!--
+          The rollout is partial until this reaches zero. Saying so in words
+          matters: "82%" alone reads like a progress bar that will finish on
+          its own, and under `gradual` it only finishes when the attempts
+          below do.
+        --%>
+        <p class="mt-3 font-mono text-xs text-on-surface-variant">
+          {applied_explanation(@snapshot.config)}
+        </p>
+      </.panel>
 
       <.panel title="Supervision" meta={"node #{@snapshot.node_id || "—"}"}>
         <dl class="grid grid-cols-2 gap-x-4 gap-y-3 font-mono text-xs sm:grid-cols-4">
@@ -159,6 +272,9 @@ defmodule OmashikiWeb.RuntimeLive do
               <span class="font-mono text-xs text-on-surface-variant">
                 {node_label(row)}
               </span>
+              <span class={["font-mono text-xs", generation_class(row.generation)]}>
+                {generation_label(row.generation)}
+              </span>
             </div>
 
             <dl class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 pl-4 font-mono text-xs sm:grid-cols-4">
@@ -195,6 +311,9 @@ defmodule OmashikiWeb.RuntimeLive do
                 <span class="text-on-surface">container {short_container(entry.id)}</span>
                 <span class={Ops.status_class(entry.state)}>{entry.state}</span>
                 <span>{entry.status}</span>
+                <span class={generation_class(row.generation)}>
+                  {generation_label(row.generation)}
+                </span>
               </li>
             </ul>
             <p
@@ -250,6 +369,78 @@ defmodule OmashikiWeb.RuntimeLive do
 
   defp node_label(%{node_id: nil}), do: "node —"
   defp node_label(%{node_id: node_id}), do: "node #{node_id}"
+
+  # -- configuration rollout -------------------------------------------------
+
+  # "prior config" rather than "stale": the attempt is not wrong, it is
+  # correctly finishing on what it was admitted with. Calling that stale would
+  # invite an operator to kill it.
+  defp generation_label(:current), do: "live config"
+  defp generation_label(:prior), do: "prior config"
+  defp generation_label(_generation), do: "config unknown"
+
+  defp generation_class(:current), do: "text-status-succeeded"
+  defp generation_class(:prior), do: "text-status-running"
+  defp generation_class(_generation), do: "text-on-surface-variant"
+
+  defp mode_label(%{rollout: %{mode: :drain_all}}), do: "drain all"
+  defp mode_label(_config), do: "gradual"
+
+  defp draining?(%{rollout: %{draining?: true}}), do: true
+  defp draining?(_config), do: false
+
+  defp rollout_state_label(%{rollout: %{draining?: true, waiting_for: waiting}}),
+    do: "draining, #{waiting} attempt(s) to go"
+
+  defp rollout_state_label(%{prior: prior}) when prior > 0,
+    do: "partially applied, #{prior} attempt(s) on prior config"
+
+  defp rollout_state_label(_config), do: "fully applied"
+
+  defp applied_explanation(%{rollout: %{draining?: true, waiting_for: waiting}}),
+    do:
+      "Admission is paused. The swap lands once the #{waiting} remaining attempt(s) terminate; " <>
+        "if the drain bound expires first, nothing is applied and the previous configuration keeps serving."
+
+  defp applied_explanation(%{prior: 0}),
+    do: "Every active attempt is running against the live configuration."
+
+  defp applied_explanation(%{prior: prior}),
+    do:
+      "#{prior} attempt(s) are finishing on the configuration they were admitted with. " <>
+        "The rollout completes when the last of them terminates."
+
+  defp short_digest(digest) when is_binary(digest), do: String.slice(digest, 0, 12)
+  defp short_digest(_digest), do: "—"
+
+  defp loaded_label(%{loaded_at: nil}), do: "never"
+  defp loaded_label(%{loaded_at: loaded_at}), do: "#{Ops.age(loaded_at)} ago"
+
+  defp reload_message({:ok, :draining}),
+    do: "Drain started; admission is paused until active attempts finish."
+
+  defp reload_message({:ok, %{changed?: false, generation: generation}}),
+    do: "Reloaded as generation #{generation}; the registry digest did not change."
+
+  defp reload_message({:ok, %{changed?: true, generation: generation}}),
+    do: "Applied generation #{generation}. Newly admitted jobs use it."
+
+  defp reload_message({:error, :drain_in_progress}),
+    do: "A rollout is already draining; wait for it to finish."
+
+  # The whole point of failing closed: the operator must be told the file was
+  # rejected *and* that the core is still serving the previous generation, or
+  # they will assume the change landed.
+  defp reload_message({:error, reason}),
+    do: "Reload rejected, previous configuration still serving: #{inspect_reason(reason)}"
+
+  defp reload_message(_result), do: ""
+
+  defp inspect_reason(reason) when is_binary(reason), do: reason
+  defp inspect_reason(reason), do: inspect(reason)
+
+  defp reload_class({:error, _reason}), do: "text-status-failed"
+  defp reload_class(_result), do: "text-status-succeeded"
 
   defp process_label(nil), do: "none"
   defp process_label(pid) when is_pid(pid), do: inspect(pid)

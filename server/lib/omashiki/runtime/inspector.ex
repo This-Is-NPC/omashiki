@@ -31,12 +31,27 @@ defmodule Omashiki.Runtime.Inspector do
     * the census runs in a task, so a daemon that has stopped answering leaves
       this process responsive and the page showing its last known state with an
       honest age, rather than hanging alongside everything else.
+
+  ## The configuration rollout rides on the same poll
+
+  Each active attempt carries, on its `jobs` row, the `registry_digest` it was
+  admitted under. Compared to the live digest that is a per-container answer to
+  "which configuration is this actually running?", and in aggregate it is the
+  applied percentage of a hot reload — see `config_state/2`.
+
+  It is computed here rather than anywhere else for one reason: this poll
+  already has the attempt rows and the container list joined. A separate
+  watcher for the rollout would be a second timer and, worse, a second reader
+  of the Docker daemon for a question the first reader already answered.
   """
 
   use GenServer
 
   import Ecto.Query
 
+  alias Omashiki.Config
+  alias Omashiki.Config.Rollout
+  alias Omashiki.Jobs.Job
   alias Omashiki.Jobs.JobAttempt
   alias Omashiki.Repo
   alias Omashiki.Runtime.AttemptSupervisor
@@ -204,6 +219,7 @@ defmodule Omashiki.Runtime.Inspector do
 
   def build(census) do
     node_id = current_node_id()
+    live_digest = live_digest()
 
     {containers, runtime} =
       case take_census(census) do
@@ -211,7 +227,7 @@ defmodule Omashiki.Runtime.Inspector do
         {:error, reason} -> {[], {:error, reason}}
       end
 
-    rows = correlate(containers, active_attempts(), attempt_processes(), node_id)
+    rows = correlate(containers, active_attempts(), attempt_processes(), node_id, live_digest)
 
     %{
       node_id: node_id,
@@ -221,7 +237,8 @@ defmodule Omashiki.Runtime.Inspector do
       lease_renewer_alive?: alive?(LeaseRenewer),
       dispatch_executing: dispatch_executing(),
       rows: rows,
-      counts: counts(rows)
+      counts: counts(rows),
+      config: config_state(rows, live_digest)
     }
   end
 
@@ -234,7 +251,8 @@ defmodule Omashiki.Runtime.Inspector do
       lease_renewer_alive?: false,
       dispatch_executing: 0,
       rows: [],
-      counts: counts([])
+      counts: counts([]),
+      config: config_state([], nil)
     }
   end
 
@@ -251,8 +269,9 @@ defmodule Omashiki.Runtime.Inspector do
   `attempts` are maps with `:id`, `:job_id`, `:status`, `:node_id` and
   `:started_at`, and `processes` are `{attempt_id, pid}` pairs.
   """
-  @spec correlate([map()], [map()], [{String.t(), pid()}], String.t() | nil) :: [map()]
-  def correlate(containers, attempts, processes, node_id) do
+  @spec correlate([map()], [map()], [{String.t(), pid()}], String.t() | nil, String.t() | nil) ::
+          [map()]
+  def correlate(containers, attempts, processes, node_id, live_digest \\ nil) do
     by_process = Map.new(processes)
     by_attempt = Map.new(attempts, &{&1.id, &1})
 
@@ -269,7 +288,7 @@ defmodule Omashiki.Runtime.Inspector do
 
     (Map.keys(by_attempt) ++ Map.keys(by_process) ++ Map.keys(by_container))
     |> Enum.uniq()
-    |> Enum.map(&row(&1, by_attempt, by_process, by_container, node_id))
+    |> Enum.map(&row(&1, by_attempt, by_process, by_container, node_id, live_digest))
     |> Enum.sort_by(&{link_rank(&1.link), &1.attempt_id || "", &1.key_label})
   end
 
@@ -280,7 +299,7 @@ defmodule Omashiki.Runtime.Inspector do
     Map.new(@link_order, &{&1, Map.get(tallied, &1, 0)})
   end
 
-  defp row(key, by_attempt, by_process, by_container, node_id) do
+  defp row(key, by_attempt, by_process, by_container, node_id, live_digest) do
     attempt = Map.get(by_attempt, key)
     pid = Map.get(by_process, key)
     containers = Map.get(by_container, key, [])
@@ -295,8 +314,29 @@ defmodule Omashiki.Runtime.Inspector do
       pid: pid,
       containers: containers,
       started_at: attempt && attempt.started_at,
-      link: link(attempt, pid, containers, node_id)
+      link: link(attempt, pid, containers, node_id),
+      registry_digest: attempt && Map.get(attempt, :registry_digest),
+      generation: generation(attempt, live_digest)
     }
+  end
+
+  # Which configuration generation this row's work is running against.
+  #
+  # The digest was captured on the `jobs` row at admission and, until this,
+  # never read back — it was provenance and nothing else. Comparing it to the
+  # live one is what turns "the operator changed the model" into a number:
+  # `:current` rows are already on the new generation, `:prior` rows are the
+  # ones the rollout is still waiting for. `:unknown` is a container or process
+  # with no attempt row behind it — an orphan has no generation to be on.
+  defp generation(nil, _live_digest), do: :unknown
+  defp generation(_attempt, live_digest) when not is_binary(live_digest), do: :unknown
+
+  defp generation(attempt, live_digest) do
+    case Map.get(attempt, :registry_digest) do
+      ^live_digest -> :current
+      digest when is_binary(digest) -> :prior
+      _ -> :unknown
+    end
   end
 
   # A process or a container observed here is on this machine by definition,
@@ -324,21 +364,83 @@ defmodule Omashiki.Runtime.Inspector do
 
   # -- sources ---------------------------------------------------------------
 
+  # Joined to `jobs` for the one column that makes the rollout percentage
+  # computable: the registry digest the job was admitted under. It lives on the
+  # job, not the attempt — a retry of a job admitted three generations ago is
+  # still owed that generation's configuration.
   defp active_attempts do
     Repo.all(
       from(attempt in JobAttempt,
+        join: job in Job,
+        on: job.id == attempt.job_id,
         where: attempt.status in ["provisioning", "running"],
         select: %{
           id: attempt.id,
           job_id: attempt.job_id,
           status: attempt.status,
           node_id: attempt.node_id,
-          started_at: attempt.started_at
+          started_at: attempt.started_at,
+          registry_digest: job.registry_digest
         }
       )
     )
   rescue
     _ -> []
+  end
+
+  # -- configuration rollout -------------------------------------------------
+
+  @doc """
+  Applied percentage and generation tally for `rows` against `live_digest`.
+
+  Applied % is active attempts on the live digest over all active attempts. An
+  idle host is 100%: nothing is running against a superseded generation, so
+  there is nothing left to roll out.
+  """
+  @spec config_state([map()], String.t() | nil) :: map()
+  def config_state(rows, live_digest) do
+    tallied = Enum.frequencies_by(rows, & &1.generation)
+    current = Map.get(tallied, :current, 0)
+    prior = Map.get(tallied, :prior, 0)
+    total = current + prior
+
+    %{
+      digest: live_digest,
+      generation: config_generation(),
+      loaded_at: config_loaded_at(),
+      current: current,
+      prior: prior,
+      total: total,
+      applied_percent: applied_percent(current, total),
+      rollout: rollout_status()
+    }
+  end
+
+  defp applied_percent(_current, 0), do: 100
+  defp applied_percent(current, total), do: round(current * 100 / total)
+
+  defp live_digest do
+    Config.current_digest()
+  rescue
+    _ -> nil
+  end
+
+  defp config_generation do
+    Config.generation()
+  rescue
+    _ -> 0
+  end
+
+  defp config_loaded_at do
+    Config.loaded_at()
+  rescue
+    _ -> nil
+  end
+
+  defp rollout_status do
+    Rollout.status()
+  rescue
+    _ -> %{mode: :gradual, draining?: false, drain_timeout_ms: 0, waiting_for: 0, last: nil}
   end
 
   defp attempt_processes do
