@@ -667,6 +667,147 @@ defmodule Omashiki.GatewayTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Configuration generations
+  # ---------------------------------------------------------------------------
+
+  # The gateway resolves a credential on every turn of a running attempt, so it
+  # is the second place a hot reload could move the model under work already in
+  # flight. Each of these changes the live generation *after* the job exists and
+  # asserts on what actually reached the upstream — a test where the live config
+  # and the capture still agree cannot tell the two apart.
+  describe "an attempt keeps the credential it was admitted with" do
+    test "the model forwarded upstream is the admitted one, not the live one",
+         %{bypass: bypass, user: user, credential_name: name} do
+      job = job_with_captured_credential(user, name, "admitted-model", bypass)
+      parent = self()
+
+      put_credentials!(%{
+        name => %{
+          "provider" => "openai",
+          "model" => "swapped-after-admission",
+          "api_key" => "sk-live",
+          "base_url" => "http://localhost:#{bypass.port}"
+        }
+      })
+
+      assert %{model: "swapped-after-admission"} = Omashiki.Config.get_credential(name)
+
+      Bypass.expect_once(bypass, "POST", "/v1/chat/completions", fn conn ->
+        {:ok, raw, conn} = Plug.Conn.read_body(conn)
+        send(parent, {:upstream, Jason.decode!(raw)})
+        json(conn, response("chatcmpl-pinned", 1, 1))
+      end)
+
+      # No model in the body: the engine was provisioned against the admitted
+      # credential, so the credential's own model is what must answer.
+      assert {:ok, _} = Gateway.chat_completions(%{"messages" => []}, claims(job, name))
+
+      assert_received {:upstream, %{"model" => "admitted-model"}}
+    end
+
+    test "the turn is billed against the admitted model",
+         %{bypass: bypass, user: user, credential_name: name} do
+      job = job_with_captured_credential(user, name, "admitted-model", bypass)
+
+      put_credentials!(%{
+        name => %{
+          "provider" => "openai",
+          "model" => "swapped-after-admission",
+          "api_key" => "sk-live",
+          "base_url" => "http://localhost:#{bypass.port}"
+        }
+      })
+
+      expect_provider(bypass, response("chatcmpl-ledger", 7, 11))
+
+      assert {:ok, _} = Gateway.chat_completions(%{"messages" => []}, claims(job, name))
+
+      # A ledger row naming a model that never ran is the expensive version of
+      # this bug: the spend is real and attributed to the wrong thing.
+      assert [entry] = ledger(job)
+      assert entry.model == "admitted-model"
+    end
+
+    # `base_url` is pinned for the same reason the model is: an attempt should
+    # keep talking to the server it was admitted against, even after the
+    # operator moves the credential to a different one.
+    test "the request lands on the admitted base_url after the live one moves",
+         %{bypass: bypass, user: user, credential_name: name} do
+      job = job_with_captured_credential(user, name, "admitted-model", bypass)
+
+      # Nothing is registered on this one, so a request arriving here fails the
+      # test at Bypass verification rather than passing quietly.
+      moved = Bypass.open()
+
+      put_credentials!(%{
+        name => %{
+          "provider" => "openai",
+          "model" => "admitted-model",
+          "api_key" => "sk-live",
+          "base_url" => "http://localhost:#{moved.port}"
+        }
+      })
+
+      expect_provider(bypass, response("chatcmpl-base", 1, 1))
+
+      assert {:ok, _} = Gateway.chat_completions(%{"messages" => []}, claims(job, name))
+    end
+
+    # The third site that resolved live: a fallback hop uses the fallback
+    # credential's *own* declared model, so a swap there is invisible until the
+    # primary fails and the ledger names a model nobody chose.
+    test "a fallback hop uses the model the fallback was admitted with",
+         %{bypass: bypass, user: user, credential_name: name} do
+      fallback_name = "#{name}-fallback"
+      fallback = Bypass.open()
+      parent = self()
+
+      put_credentials!(%{
+        name => %{
+          "provider" => "openai",
+          "model" => "primary-model",
+          "api_key" => "sk-live",
+          "base_url" => "http://localhost:#{bypass.port}",
+          "fallback_chain" => [fallback_name]
+        },
+        fallback_name => %{
+          "provider" => "openai",
+          "model" => "fallback-admitted",
+          "api_key" => "sk-fallback",
+          "base_url" => "http://localhost:#{fallback.port}"
+        }
+      })
+
+      job =
+        job_with_captured_credentials(user, [
+          captured(name, "primary-model", bypass, [fallback_name]),
+          captured(fallback_name, "fallback-admitted", fallback, [])
+        ])
+
+      put_credentials!(%{
+        fallback_name => %{
+          "provider" => "openai",
+          "model" => "fallback-swapped",
+          "api_key" => "sk-fallback",
+          "base_url" => "http://localhost:#{fallback.port}"
+        }
+      })
+
+      Bypass.expect_once(bypass, "POST", "/v1/chat/completions", &Plug.Conn.resp(&1, 500, "{}"))
+
+      Bypass.expect_once(fallback, "POST", "/v1/chat/completions", fn conn ->
+        {:ok, raw, conn} = Plug.Conn.read_body(conn)
+        send(parent, {:fallback_upstream, Jason.decode!(raw)})
+        json(conn, response("chatcmpl-fallback", 1, 1))
+      end)
+
+      assert {:ok, _} = Gateway.chat_completions(%{"messages" => []}, claims(job, name))
+
+      assert_received {:fallback_upstream, %{"model" => "fallback-admitted"}}
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------------------
 
@@ -674,6 +815,58 @@ defmodule Omashiki.GatewayTest do
   defp restore(key, value), do: Application.put_env(:omashiki, key, value)
 
   defp put_credentials!(map), do: Omashiki.Fixtures.merge_config!(%{"credentials" => map})
+
+  # A credential entry shaped the way `Jobs.Admission` captures one: every
+  # declared field except `api_key`, which admission strips so a live key never
+  # reaches a database column. Building it any thinner would make the pin
+  # untestable — an entry carrying only a name is a reference, and the live
+  # generation is supposed to answer for those.
+  defp captured(name, model, bypass, fallback_chain) do
+    %{
+      "id" => nil,
+      "name" => name,
+      "provider" => "openai",
+      "model" => model,
+      "base_url" => "http://localhost:#{bypass.port}",
+      "fallback_chain" => fallback_chain,
+      "model_aliases" => %{}
+    }
+  end
+
+  defp job_with_captured_credential(user, name, model, bypass),
+    do: job_with_captured_credentials(user, [captured(name, model, bypass, [])])
+
+  defp job_with_captured_credentials(user, entries) do
+    n = System.unique_integer([:positive])
+
+    %Job{}
+    |> Job.changeset(%{
+      user_id: user.id,
+      schema_version: 1,
+      idempotency_key: "gw-cap-#{n}",
+      correlation_id: "gw-cap-corr-#{n}",
+      repository: "repo",
+      environment: "agentic",
+      payload: %{"instruction" => "work"},
+      payload_hash: String.duplicate("a", 64),
+      repository_snapshot: %{"path" => "/tmp/repo"},
+      repository_digest: String.duplicate("b", 64),
+      environment_snapshot: %{
+        "name" => "agentic",
+        "harness" => "opencode",
+        "credentials" => entries
+      },
+      environment_digest: String.duplicate("c", 64),
+      registry_digest: String.duplicate("d", 64),
+      queue: "default",
+      priority: 1,
+      status: "running",
+      current_attempt: 1,
+      queued_at: DateTime.utc_now(:microsecond),
+      started_at: DateTime.utc_now(:microsecond)
+    })
+    |> Repo.insert!()
+  end
 
   defp claims(%Job{} = job, credential_name) do
     %{
