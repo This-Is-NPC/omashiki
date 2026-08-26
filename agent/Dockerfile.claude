@@ -1,37 +1,79 @@
 # syntax=docker/dockerfile:1
-# Claude Code 2.1.240 agent sandbox, using the same hardened base as OpenCode.
-ARG OMATERM_BASE=ghcr.io/omacom-io/omaterm@sha256:180f5884ab8573b1235595eeefef605ad10ffdfbdef9eb96dfebd801e0f9215a
+# Claude Code agent sandbox, on the same debian:13-slim base as OpenCode.
+#
+# See agent/Dockerfile for why the omaterm base is gone. The harness ships as a
+# single compiled `claude.exe`; the only runtime it needs beyond that is the
+# node that runs claude_code_runner.mjs, which is copied in as a bare binary
+# rather than as a mise-managed toolchain.
+ARG MISE_VERSION=2026.6.11
+ARG NODE_VERSION=26.4.0
+ARG CLAUDE_CODE_VERSION=2.1.240
+
+FROM debian:13-slim AS mise
+
+ARG MISE_VERSION
+
+# libatomic1: node >= 26 links against libatomic.so.1, which debian-slim omits.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl libatomic1 \
+    && curl -fsSL "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-x64.tar.gz" \
+         -o /tmp/mise.tar.gz \
+    && tar -xzf /tmp/mise.tar.gz -C /tmp \
+    && install -m 0755 /tmp/mise/bin/mise /usr/local/bin/mise \
+    && rm -rf /tmp/mise.tar.gz /tmp/mise \
+    && rm -rf /var/lib/apt/lists/* \
+    && /usr/local/bin/mise --version
 
 # The global npm install unpacks the whole @anthropic-ai/claude-code tree plus
-# its dependencies into the mise-managed node prefix. Copying `claude.exe` out
-# afterwards does not reclaim that tree, so the install runs in its own stage
-# and only the two binaries cross into the final image.
-FROM ${OMATERM_BASE} AS claude-build
+# its dependencies; copying `claude.exe` out afterwards does not reclaim that
+# tree. Only the two binaries cross the boundary.
+FROM mise AS claude-build
 
-ARG CLAUDE_CODE_VERSION=2.1.240
+ARG NODE_VERSION
+ARG CLAUDE_CODE_VERSION
 
-USER 1000
-RUN mise trust /home/omaterm/.config/mise/config.toml \
+ENV MISE_DATA_DIR=/opt/mise-data \
+    MISE_CACHE_DIR=/tmp/mise-cache \
+    MISE_CONFIG_DIR=/opt/mise-config
+
+RUN mise use -g -y "node@${NODE_VERSION}" \
+    && eval "$(mise activate bash --shims)" \
+    && export PATH="${MISE_DATA_DIR}/shims:${PATH}" \
     && npm install --global --no-fund --no-audit --allow-scripts=@anthropic-ai/claude-code "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-    && claude --version | grep -F "${CLAUDE_CODE_VERSION}" \
     && install -m 0755 "$(npm root --global)/@anthropic-ai/claude-code/bin/claude.exe" /tmp/omashiki-claude-bin \
-    && install -m 0755 "$(mise which node)" /tmp/omashiki-node-bin
+    && install -m 0755 "$(mise which node)" /tmp/omashiki-node-bin \
+    && /tmp/omashiki-claude-bin --version | grep -F "${CLAUDE_CODE_VERSION}"
 
-FROM ${OMATERM_BASE}
+FROM debian:13-slim
 
-ARG CLAUDE_CODE_VERSION=2.1.240
+ARG CLAUDE_CODE_VERSION
 
-USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+         bash ca-certificates curl git libatomic1 python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Matches the uid the orchestrator runs containers as.
+RUN useradd --uid 1000 --create-home --shell /bin/bash omaterm
+
+COPY --from=mise /usr/local/bin/mise /usr/local/bin/mise
 COPY --from=claude-build /tmp/omashiki-claude-bin /usr/local/bin/claude
 COPY --from=claude-build /tmp/omashiki-node-bin /usr/local/bin/node
-RUN chmod 0755 /usr/local/bin/claude /usr/local/bin/node \
+RUN chmod 0755 /usr/local/bin/mise /usr/local/bin/claude /usr/local/bin/node \
+    && /usr/local/bin/mise --version \
     && /usr/local/bin/node --version \
     && /usr/local/bin/claude --version | grep -F "${CLAUDE_CODE_VERSION}"
+
 COPY claude_code_runner.mjs /usr/local/bin/omashiki-claude-runner
 COPY claude_entrypoint.sh /usr/local/bin/omashiki-claude-entrypoint
 RUN chmod 0755 /usr/local/bin/omashiki-claude-runner /usr/local/bin/omashiki-claude-entrypoint
 
-ENV PATH="/usr/local/bin:${PATH}"
+# Defaults only: omashiki.toml's [caches.global.env] overrides these at runtime
+# so mise-installed toolchains land in the shared cache mount.
+ENV MISE_DATA_DIR=/home/omaterm/.local/share/mise \
+    MISE_CACHE_DIR=/home/omaterm/.local/cache/mise \
+    MISE_CONFIG_DIR=/tmp/agent-home/.config/mise \
+    PATH="/usr/local/bin:${PATH}"
 
 USER 1000:1000
 ENTRYPOINT ["/usr/local/bin/omashiki-claude-entrypoint"]

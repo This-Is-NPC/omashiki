@@ -1,40 +1,81 @@
 # syntax=docker/dockerfile:1
-# OpenAI Codex CLI 0.149.1 agent sandbox, using the same hardened base as OpenCode.
-ARG OMATERM_BASE=ghcr.io/omacom-io/omaterm@sha256:180f5884ab8573b1235595eeefef605ad10ffdfbdef9eb96dfebd801e0f9215a
-
-# The global npm install unpacks every @openai/codex platform vendor tree into
-# the mise-managed node prefix. Copying the one matching vendor dir out
-# afterwards does not reclaim the rest, so the install runs in its own stage
-# and only the selected binaries cross into the final image.
-FROM ${OMATERM_BASE} AS codex-build
-
+# OpenAI Codex CLI agent sandbox, on the same debian:13-slim base as OpenCode.
+#
+# See agent/Dockerfile for why the omaterm base is gone. The harness ships as a
+# compiled vendor binary; the only runtime it needs beyond that is the node
+# that runs codex_runner.mjs, which is copied in as a bare binary rather than
+# as a mise-managed toolchain.
+ARG MISE_VERSION=2026.6.11
+ARG NODE_VERSION=26.4.0
 ARG CODEX_VERSION=0.149.1
 
-USER 1000
-RUN mise trust /home/omaterm/.config/mise/config.toml \
+FROM debian:13-slim AS mise
+
+ARG MISE_VERSION
+
+# libatomic1: node >= 26 links against libatomic.so.1, which debian-slim omits.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl libatomic1 \
+    && curl -fsSL "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-x64.tar.gz" \
+         -o /tmp/mise.tar.gz \
+    && tar -xzf /tmp/mise.tar.gz -C /tmp \
+    && install -m 0755 /tmp/mise/bin/mise /usr/local/bin/mise \
+    && rm -rf /tmp/mise.tar.gz /tmp/mise \
+    && rm -rf /var/lib/apt/lists/* \
+    && /usr/local/bin/mise --version
+
+# The global npm install unpacks every @openai/codex platform vendor tree;
+# copying the one matching vendor dir out afterwards does not reclaim the rest.
+# Only the selected binaries cross the boundary.
+FROM mise AS codex-build
+
+ARG NODE_VERSION
+ARG CODEX_VERSION
+
+ENV MISE_DATA_DIR=/opt/mise-data \
+    MISE_CACHE_DIR=/tmp/mise-cache \
+    MISE_CONFIG_DIR=/opt/mise-config
+
+RUN mise use -g -y "node@${NODE_VERSION}" \
+    && export PATH="${MISE_DATA_DIR}/shims:${PATH}" \
     && npm install --global --no-fund --no-audit "@openai/codex@${CODEX_VERSION}" \
-    && codex --version | grep -F "${CODEX_VERSION}" \
     && CODEX_VENDOR_BIN="$(dirname "$(find "$(npm root --global)/@openai" -type f -path '*/vendor/*/bin/codex' | head -1)")" \
     && test -x "${CODEX_VENDOR_BIN}/codex" \
     && mkdir -p /tmp/omashiki-codex-bin \
     && cp -a "${CODEX_VENDOR_BIN}/." /tmp/omashiki-codex-bin/ \
-    && install -m 0755 "$(mise which node)" /tmp/omashiki-node-bin
+    && install -m 0755 "$(mise which node)" /tmp/omashiki-node-bin \
+    && /tmp/omashiki-codex-bin/codex --version | grep -F "${CODEX_VERSION}"
 
-FROM ${OMATERM_BASE}
+FROM debian:13-slim
 
-ARG CODEX_VERSION=0.149.1
+ARG CODEX_VERSION
 
-USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+         bash ca-certificates curl git libatomic1 python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Matches the uid the orchestrator runs containers as.
+RUN useradd --uid 1000 --create-home --shell /bin/bash omaterm
+
+COPY --from=mise /usr/local/bin/mise /usr/local/bin/mise
 COPY --from=codex-build /tmp/omashiki-codex-bin/ /usr/local/bin/
 COPY --from=codex-build /tmp/omashiki-node-bin /usr/local/bin/node
-RUN chmod 0755 /usr/local/bin/node /usr/local/bin/codex \
+RUN chmod 0755 /usr/local/bin/mise /usr/local/bin/codex /usr/local/bin/node \
+    && /usr/local/bin/mise --version \
     && /usr/local/bin/node --version \
     && /usr/local/bin/codex --version | grep -F "${CODEX_VERSION}"
+
 COPY codex_runner.mjs /usr/local/bin/omashiki-codex-runner
 COPY codex_entrypoint.sh /usr/local/bin/omashiki-codex-entrypoint
 RUN chmod 0755 /usr/local/bin/omashiki-codex-runner /usr/local/bin/omashiki-codex-entrypoint
 
-ENV PATH="/usr/local/bin:${PATH}"
+# Defaults only: omashiki.toml's [caches.global.env] overrides these at runtime
+# so mise-installed toolchains land in the shared cache mount.
+ENV MISE_DATA_DIR=/home/omaterm/.local/share/mise \
+    MISE_CACHE_DIR=/home/omaterm/.local/cache/mise \
+    MISE_CONFIG_DIR=/tmp/agent-home/.config/mise \
+    PATH="/usr/local/bin:${PATH}"
 
 USER 1000:1000
 ENTRYPOINT ["/usr/local/bin/omashiki-codex-entrypoint"]
