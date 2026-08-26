@@ -437,13 +437,21 @@ itself stays in the environment because `omashiki.toml` is tracked by git —
 unset.
 
 The stealth model this tier used to pin is gone from both OpenCode and
-OpenRouter, so pin one the account can actually reach; the tier is about the
-key path, not about any one model.
+OpenRouter. `z-ai/glm-5.3-flash` replaces it, verified reachable on this
+account 2026-08-26.
+
+**It is a reasoning model, and that changes how you size `max_tokens`.** It
+spent 88 reasoning tokens to answer the single word `ok` — 91 completion
+tokens for a 2-token reply. At `max_tokens: 20` the budget is consumed before
+any answer is emitted: `finish_reason` comes back `length` and
+`message.content` is **null**, which reads downstream as a job that ran and
+produced nothing rather than as a truncation. Give it room (800 was ample for
+a trivial prompt) or every load-test job will look like a silent failure.
 
 ```toml
 [credentials.openrouter]
 provider = "openrouter"
-model = "a-model-this-account-can-reach"
+model = "z-ai/glm-5.3-flash"
 base_url = "https://openrouter.ai/api/v1"
 api_key = "${env:OPENROUTER_API_KEY}"
 
