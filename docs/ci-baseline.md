@@ -67,6 +67,12 @@ The agent images are dominated by the `ghcr.io/omacom-io/omaterm` base, roughly
 6.47 GB of `omashiki/agent`'s 7.21 GB. jcode's 484 MB is what an agent image
 costs without that base.
 
+The table above is a "before" record and is deliberately left at its measured
+values. That base has since been dropped: `agent`, `agent-claude` and
+`agent-codex` were rebased on `debian:13-slim` and now measure 699 MB, 1.1 GB
+and 1.09 GB. `ci:docker` asserts a budget so the regression cannot return
+silently.
+
 ## Standing items this baseline exposes
 
 These are recorded observations, not regressions introduced by the baseline
