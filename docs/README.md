@@ -28,6 +28,12 @@ documents above is aspirational, not current.
 - [Generic task processor](generic-task-processor.md): structured non-Git
   results and optional repositories, without weakening the caller boundary.
 
+## Engineering Records
+
+- [CI baseline](ci-baseline.md): the recorded exit code and headline result of
+  every local CI target at a named commit, plus the standing gaps that run
+  exposed. Later changes claiming "CI is still green" compare against it.
+
 ## Documentation Ownership
 
 - `docs/` owns product behavior, architecture, contracts, security guarantees,
