@@ -30,6 +30,11 @@ config :omashiki, OmashikiWeb.Endpoint,
   code_reloader: true,
   debug_errors: true,
   secret_key_base: "vh5B4AZ+oKh5S1IBm0+/4ouLoL/WJBDvq1caXOQCZPliI3AEbtEeE1JztGvKd1m6",
+  # `--sourcemap=inline` is a dev-only debugging aid and is deliberately absent
+  # from the shared esbuild profile in config.exs, so the watcher's output is
+  # NOT what `assets.build` or `assets.deploy` emits. That divergence is only
+  # safe because priv/static/assets is gitignored build output: never commit a
+  # watcher-built bundle, or production ships a source map of dev sources.
   watchers: [
     esbuild: {Esbuild, :install_and_run, [:omashiki, ~w(--sourcemap=inline --watch)]},
     tailwind: {Tailwind, :install_and_run, [:omashiki, ~w(--watch)]}

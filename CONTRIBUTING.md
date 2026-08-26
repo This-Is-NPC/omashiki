@@ -54,6 +54,7 @@ Rotating the underlying HMAC pepper (`SECRET_KEY_BASE`) invalidates every existi
 
 - **UI tokens are the single source of truth.** Reuse the existing classes and atomic components in `OmashikiWeb.CoreComponents` rather than introducing one-off styling.
 - **Run `mix test` and `mix tailwind omashiki` before opening a PR.** The token migration produces new utility classes only when they're referenced by a content file, so a forgotten consumer will silently disappear from `priv/static/assets/app.css` until the build is re-run.
+- **Never commit anything under `server/priv/static/assets/`.** It is build output, gitignored, and rebuilt from source by `mix assets.build` locally and by `mix assets.deploy` in `server/Dockerfile` before `mix release` — so no deployment path reads a committed copy. The dev watcher additionally passes `--sourcemap=inline`, which the shared esbuild profile does not; committing watcher output therefore ships a source map of development sources to production. `mise run ci:server:assets` rebuilds the bundles and fails if any of them became git-visible.
 
 ## Test Suite Taxonomy
 

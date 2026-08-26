@@ -69,11 +69,23 @@ description = "Run the prepared overture real-provider E2E"
 run         = "mise run e2e:overture:opencode"
 
 [tasks."ci:server:assets"]
-description = "Compile Tailwind + esbuild bundles in test env (asset validation)"
+description = "Compile Tailwind + esbuild bundles in test env, and assert they stay out of git"
 dir         = "server"
 run         = """
 MIX_ENV=test mix tailwind omashiki
 MIX_ENV=test mix esbuild omashiki
+
+# priv/static/assets is build output and is gitignored (see server/.gitignore).
+# If building it dirties git, a bundle has been committed again, and the tree
+# once more contains an artifact that no build target reproduces. Fail here
+# rather than let a stale bundle reach production.
+dirty="$(git status --porcelain -- priv/static/assets)"
+if [ -n "$dirty" ]; then
+  echo "ci:server:assets: building assets touched git-visible files:" >&2
+  echo "$dirty" >&2
+  echo "priv/static/assets is build output; it must not be tracked." >&2
+  exit 1
+fi
 """
 
 [tasks."ci:server:vuln"]

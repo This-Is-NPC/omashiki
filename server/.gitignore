@@ -31,10 +31,21 @@ erl_crash.dump
 # JavaScript dependencies inside assets/
 assets/node_modules/
 
-# Fonts mirrored from assets/node_modules/@fontsource by
-# `mix omashiki.assets.copy_fonts` (runs in `assets.build` /
-# `assets.deploy`). Regenerable build artifact — keep out of git.
-/priv/static/assets/files/
+# Everything under priv/static/assets is build output, never source:
+#   - app.css      `mix tailwind omashiki`
+#   - app.js       `mix esbuild omashiki`
+#   - files/       fonts mirrored from assets/node_modules/@fontsource by
+#                  `mix omashiki.assets.copy_fonts`
+# All three are produced by `mix assets.build` (dev) and `mix assets.deploy`
+# (release — server/Dockerfile runs it before `mix release`), so no deployment
+# path reads a committed copy. Keep them out of git: a committed bundle is a
+# snapshot of whichever profile built it last. The tracked `app.js` used to be
+# dev-watcher output carrying an inline base64 source map of development
+# sources — shipped to production, and reproducible by no build target.
+/priv/static/assets/
+
+# Digested asset cache, written by `mix phx.digest` during `assets.deploy`.
+/priv/static/cache_manifest.json
 
 # Phoenix/Elixir tooling state.
 /.elixir_ls/
