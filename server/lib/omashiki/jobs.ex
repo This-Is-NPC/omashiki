@@ -264,15 +264,23 @@ defmodule Omashiki.Jobs do
   booting no longer overwrites the first node's budget. The row is created here
   if it does not exist yet: boot is the only place a node's capacity row is
   written into being.
+
+  After reconciling its own row, drops idle capacity rows for nodes that are not
+  in `Config.nodes/0` — the declared cluster plus this host on a single-machine
+  install. Rows with `active > 0` are left to drain; declared peers survive even
+  when idle so a multi-node cluster still sums every live node.
   """
   def sync_capacity do
     requested = HostSettings.get_max_concurrent_containers()
 
     case set_capacity(requested) do
       {:ok, %ExecutionCapacity{capacity: ^requested}} = ok ->
+        prune_phantom_capacity!()
         ok
 
       {:ok, %ExecutionCapacity{capacity: clamped}} = ok ->
+        prune_phantom_capacity!()
+
         Logger.warning(
           "execution capacity held at #{clamped}: #{clamped} slot(s) still reserved, requested #{requested}"
         )
@@ -339,6 +347,16 @@ defmodule Omashiki.Jobs do
     )
     |> Repo.one()
   end
+
+  defp prune_phantom_capacity! do
+    allowed = Enum.map(Config.nodes(), & &1.name)
+
+    from(c in ExecutionCapacity,
+      where: c.node_id not in ^allowed and c.active == 0
+    )
+    |> Repo.delete_all()
+  end
+
 
   defp claim_locked(%Job{} = job, runner_id, now, lease_ms) do
     # One read of this host's identity feeds both the reservation and the stamp,

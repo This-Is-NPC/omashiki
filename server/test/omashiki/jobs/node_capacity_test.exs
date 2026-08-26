@@ -124,6 +124,69 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     assert Jobs.cluster_capacity() == %{capacity: 20, active: 20}
   end
 
+  test "sync_capacity prunes a migrated phantom row so cluster capacity matches this host",
+       %{root: root} do
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    Repo.insert!(%ExecutionCapacity{
+      node_id: "local",
+      capacity: 8,
+      active: 0,
+      inserted_at: now,
+      updated_at: now
+    })
+
+    boot!(root, "solo-host", 16)
+
+    assert Repo.get(ExecutionCapacity, "local") == nil
+    assert Jobs.cluster_capacity() == %{capacity: 16, active: 0}
+    assert row("solo-host").capacity == 16
+  end
+
+  test "sync_capacity keeps a declared peer row while pruning undeclared phantoms", %{root: root} do
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    Repo.insert!(%ExecutionCapacity{
+      node_id: "local",
+      capacity: 8,
+      active: 0,
+      inserted_at: now,
+      updated_at: now
+    })
+
+    Repo.insert!(%ExecutionCapacity{
+      node_id: "node-b",
+      capacity: 10,
+      active: 0,
+      inserted_at: now,
+      updated_at: now
+    })
+
+    boot!(root, "node-a", 10)
+
+    assert Repo.get(ExecutionCapacity, "local") == nil
+    assert row("node-b").capacity == 10
+    assert Jobs.cluster_capacity() == %{capacity: 20, active: 0}
+  end
+
+  test "sync_capacity retains a phantom row while it still holds active reservations", %{root: root} do
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    Repo.insert!(%ExecutionCapacity{
+      node_id: "local",
+      capacity: 8,
+      active: 3,
+      inserted_at: now,
+      updated_at: now
+    })
+
+    boot!(root, "solo-host", 16)
+
+    assert row("local").active == 3
+    assert Jobs.cluster_capacity() == %{capacity: 24, active: 3}
+  end
+
+
   # DONE WHEN, parts two and three. This is the assertion the whole node-identity
   # phase was ordered for: `recover_stale/1` runs on *every* node, so the machine
   # that fails an expired attempt is routinely not the machine that reserved for
