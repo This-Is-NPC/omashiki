@@ -5,6 +5,7 @@ defmodule Omashiki.Jobs do
 
   require Logger
 
+  alias Omashiki.Config
   alias Omashiki.HostSettings
   alias Omashiki.Jobs.{DispatchWorker, ExecutionCapacity, Job, JobAttempt, JobEvent, Webhooks}
   alias Omashiki.Repo
@@ -309,6 +310,7 @@ defmodule Omashiki.Jobs do
     update_attempt!(attempt, %{
       status: "provisioning",
       runner_id: runner_id,
+      node_id: Config.current_node().name,
       lease_token: token,
       lease_expires_at: expires_at,
       heartbeat_at: now,

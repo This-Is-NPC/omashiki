@@ -49,6 +49,45 @@ defmodule Omashiki.Jobs.ClaimsTest do
     assert Repo.get!(ExecutionCapacity, 1).active == 0
   end
 
+  # The production caller is `DispatchWorker`, which passes only a runner id
+  # (`"oban:<id>"` — the dispatch job, not the machine). The node has to come
+  # from the claim path's own view of this host, or it is never recorded at all.
+  test "a claim records the declared node that ran the attempt", %{root: root, token: token} do
+    load_config!(root, %{}, %{"builder-01" => %{}})
+    {:ok, job} = Jobs.Admission.admit(token, request("declared-node"))
+
+    assert {:ok, attempt} = Jobs.claim(job, "oban:1")
+    assert attempt.node_id == "builder-01"
+    assert Repo.get!(JobAttempt, attempt.id).node_id == "builder-01"
+
+    # The dedicated column, not an overloaded runner id.
+    assert attempt.runner_id == "oban:1"
+  end
+
+  # The compatibility path: no `[nodes]` section at all still answers "which
+  # machine ran this?", because there is one implicit local node.
+  test "a claim with no declared nodes records the implicit local node", %{
+    root: root,
+    token: token
+  } do
+    previous = System.get_env("OMASHIKI_NODE")
+    System.put_env("OMASHIKI_NODE", "implicit-claim-host")
+
+    on_exit(fn ->
+      case previous do
+        nil -> System.delete_env("OMASHIKI_NODE")
+        value -> System.put_env("OMASHIKI_NODE", value)
+      end
+    end)
+
+    load_config!(root, %{})
+    refute Enum.any?(Config.nodes(), &(&1.name == "builder-01"))
+    {:ok, job} = Jobs.Admission.admit(token, request("implicit-node"))
+
+    assert {:ok, attempt} = Jobs.claim(job, "oban:2")
+    assert attempt.node_id == "implicit-claim-host"
+  end
+
   test "worker crash before claim leaves the job queued without capacity", %{token: token} do
     {:ok, job} = Jobs.Admission.admit(token, request("crash-before-claim"))
     parent = self()
@@ -646,9 +685,10 @@ defmodule Omashiki.Jobs.ClaimsTest do
     :ok
   end
 
-  defp load_config!(root, limits) do
+  defp load_config!(root, limits, nodes \\ %{}) do
     Config.load_map!(
       %{
+        "nodes" => nodes,
         "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "main"}},
         "harnesses" => %{
           "opencode" => %{

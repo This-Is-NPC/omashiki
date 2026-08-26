@@ -92,14 +92,37 @@ attempt. Covered by `Omashiki.Jobs.GitArtifactTest`, "canonical remote"
 
 Cheap now, expensive to retrofit: recovery needs to know whose lease it was.
 
-- [ ] A stable `node_id` per process, from an environment variable with a
-      hostname fallback
-- [ ] Persist it on `job_attempts`. `runner_id` already exists and currently
-      receives `"oban:<id>"`; either extend that value or add a column
-- [ ] Surface the node on the job detail view in the operator UI
+Status: **done.**
+
+- [x] Nodes are declared in `omashiki.toml` as `[nodes.<name>]`, parsed and
+      validated like every other registry section. A name is the whole
+      declaration — per-node capacity and per-node Docker endpoint arrive with
+      the changes that read them
+- [x] A stable node per process: `OMASHIKI_NODE`, falling back to the hostname.
+      One declared node is this machine by construction; with several declared,
+      a host in none of them fails config load rather than claiming work under a
+      node id no other machine has heard of
+- [x] No `[nodes]` section means exactly one implicit local node, so the
+      distributed path is opt-in by the presence of configuration
+- [x] Persisted as `job_attempts.node_id`, a dedicated nullable column.
+      `runner_id` was not extended: it carries `"oban:<id>"`, which identifies
+      the dispatch job rather than the host, and Phase 3 needs a column to join
+      on
+- [x] The job detail view shows the node per attempt — per attempt, not per
+      job, because a retry can land on a different machine
+
+**Nodes are not in the registry digest.** The digest is captured at admission
+and pins what a job *does*. Adding or draining a machine is a deployment, not
+configuration drift, and hashing the node list would go stale on every
+in-flight job's admitted digest during a routine scale-out. It would also
+defeat the Phase 4 cross-node comparison below: the implicit node is named
+after its own host, so two identically-configured machines would hash
+differently and report a divergence that is not there.
 
 **Done when:** "which machine ran this attempt?" is answerable from the
-database.
+database. Covered by `Omashiki.Jobs.ClaimsTest`, "a claim records the declared
+node that ran the attempt" and "a claim with no declared nodes records the
+implicit local node".
 
 ## Phase 3 — Capacity Per Node
 

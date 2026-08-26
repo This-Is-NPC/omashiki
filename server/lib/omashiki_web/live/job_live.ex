@@ -185,6 +185,9 @@ defmodule OmashikiWeb.JobLive do
             >
               <span class="font-mono text-xs text-on-surface">attempt {attempt.number}</span>
               <span class={["font-mono text-xs uppercase", Ops.status_class(attempt.status)]}>{attempt.status}</span>
+              <%!-- Which machine ran it. Per attempt, not per job: a retry can
+                    land on a different node than the attempt it replaces. --%>
+              <span class="font-mono text-xs text-on-surface-variant">node {attempt.node_id || "—"}</span>
               <span class="font-mono text-xs text-on-surface-variant">{Ops.timestamp(
                 attempt.finished_at || attempt.started_at
               )}</span>

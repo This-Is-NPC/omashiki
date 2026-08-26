@@ -4,6 +4,7 @@ defmodule OmashikiWeb.JobLiveTest do
   import Phoenix.LiveViewTest
   import Omashiki.JobFixtures
 
+  alias Omashiki.Jobs.JobAttempt
   alias Omashiki.Jobs.JobEvent
   alias Omashiki.Jobs.JobStep
   alias Omashiki.Repo
@@ -19,6 +20,8 @@ defmodule OmashikiWeb.JobLiveTest do
         status: "succeeded",
         payload: %{"branch" => "main", "checks" => ["test"]}
       })
+
+    Repo.update!(JobAttempt.changeset(attempt, %{node_id: "builder-07"}))
 
     Repo.insert!(
       JobStep.changeset(%JobStep{}, %{
@@ -77,6 +80,8 @@ defmodule OmashikiWeb.JobLiveTest do
     # the CSRF and LiveView session tokens are base64url and will contain
     # short letter runs like these by chance.
     text = visible_text(html)
+    # Which machine ran the attempt, read off the screen rather than the markup.
+    assert text =~ "node builder-07"
     refute text =~ "Retry"
     refute text =~ "Audit"
     refute text =~ "Comments"
