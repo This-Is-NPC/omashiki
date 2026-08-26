@@ -101,9 +101,13 @@ run         = "docker build -t omashiki/agent:ci-check agent/"
 description = "Build pinned Claude Code agent Docker image (dry-run, no push)"
 run         = "docker build -t omashiki/agent-claude:ci-check -f agent/Dockerfile.claude agent/"
 
+[tasks."ci:docker:codex"]
+description = "Build pinned OpenAI Codex CLI agent Docker image (dry-run, no push)"
+run         = "docker build -t omashiki/agent-codex:ci-check -f agent/Dockerfile.codex agent/"
+
 [tasks."ci:docker"]
 description = "Build server + agent Docker images (dry-run, no push)"
-depends     = ["ci:docker:server", "ci:docker:agent", "ci:docker:claude"]
+depends     = ["ci:docker:server", "ci:docker:agent", "ci:docker:claude", "ci:docker:codex"]
 
 [tasks.ci]
 description = "Run the full local CI matrix"

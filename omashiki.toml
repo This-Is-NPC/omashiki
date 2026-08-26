@@ -138,3 +138,27 @@ credentials = "~/.claude/.credentials.json"
 [host_credentials.codex-local]
 kind = "codex"
 credentials = "~/.codex/auth.json"
+
+[harnesses.codex]
+adapter = "codex"
+runtime = "docker"
+image = "omashiki/agent-codex:latest"
+
+[environments.codex]
+harness = "codex"
+executables = ["mise", "git"]
+credentials = ["codex-local"]
+caches = ["global"]
+timeout_ms = 1800000
+network = "restricted"
+mounts = []
+post_steps = []
+pre_steps = [{ argv = ["mise", "install", "--yes"], condition = "always", timeout_ms = 600000 }]
+
+[environments.codex.policy]
+mode = "off"
+
+[environments.codex.resources]
+cpus = 2.0
+memory = "2GB"
+pids = 256
