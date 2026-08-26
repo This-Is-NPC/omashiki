@@ -361,17 +361,42 @@ defmodule Omashiki.Jobs.GitArtifact do
     end
   end
 
-  defp cleanup_worktree(%{repo_path: repo_path, path: path}, opts) do
-    cond do
-      not File.exists?(path) ->
-        _ = git(repo_path, ["worktree", "prune"], opts)
-        :ok
+  # `git worktree prune` is repo-wide, not scoped to this job. Running it from a
+  # per-job cleanup means one finishing job deletes the administrative directory
+  # of another that is still being created, which surfaces on the victim as
+  # `failed to read .git/worktrees/job-…`. Harmless when jobs are serial,
+  # a steady source of provisioning failures once they overlap. Removal of this
+  # worktree is enough here; reclaiming entries whose directory vanished belongs
+  # to the orphan sweep, which runs when nothing is in flight.
+  @doc """
+  Reclaim worktree entries whose directory no longer exists, for every declared
+  repository.
 
-      true ->
-        case git(repo_path, ["worktree", "remove", "--force", path], opts) do
-          {:ok, _} -> :ok
-          {:error, reason} -> {:error, {:cleanup_failed, reason}}
-        end
+  Repo-wide by nature, so it belongs here — at boot, before any attempt is in
+  flight — and not in the per-job cleanup path, where it would race concurrent
+  provisioning.
+  """
+  def prune_worktrees(opts \\ []) do
+    Omashiki.Config.repositories()
+    |> Enum.each(fn repository ->
+      path = Map.get(repository, :path, Map.get(repository, "path"))
+
+      if is_binary(path) and validate_repo(path) == :ok do
+        _ = git(path, ["worktree", "prune"], opts)
+      end
+    end)
+
+    :ok
+  end
+
+  defp cleanup_worktree(%{repo_path: repo_path, path: path}, opts) do
+    if File.exists?(path) do
+      case git(repo_path, ["worktree", "remove", "--force", path], opts) do
+        {:ok, _} -> :ok
+        {:error, reason} -> {:error, {:cleanup_failed, reason}}
+      end
+    else
+      :ok
     end
   end
 

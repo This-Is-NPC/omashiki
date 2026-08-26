@@ -92,6 +92,7 @@ defmodule Omashiki.Application do
     if Application.get_env(:omashiki, :run_orphan_cleanup_on_boot, true) do
       _ = Omashiki.Runtime.ContainerManager.cleanup_orphans()
       _ = Omashiki.Runtimes.CacheMaintenance.run()
+      _ = Omashiki.Jobs.GitArtifact.prune_worktrees()
     end
 
     :ok
