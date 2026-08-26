@@ -29,10 +29,28 @@ defmodule Omashiki.LlmEgress.Proxy do
     end
   end
 
-  @doc "Return the configured socket path, or the safe per-user default."
+  @doc """
+  Return the configured socket path, or the safe per-user default.
+
+  A Unix socket is bound to a path, so two suites that resolve to the same
+  path cannot both listen: the second dies at application start with
+  `:address_in_use`. `MIX_TEST_PARTITION` is folded into the default the same
+  way `config/test.exs` folds it into the database name. It is unset outside
+  partitioned test runs, where the path stays byte-identical to before.
+  """
   def path do
     Application.get_env(:omashiki, :llm_egress_socket_path) ||
-      Path.join(System.tmp_dir!(), "omashiki-#{System.get_env("USER", "user")}-#{@socket_name}")
+      Path.join(System.tmp_dir!(), default_socket_name())
+  end
+
+  defp default_socket_name do
+    user = System.get_env("USER", "user")
+
+    case System.get_env("MIX_TEST_PARTITION") do
+      nil -> "omashiki-#{user}-#{@socket_name}"
+      "" -> "omashiki-#{user}-#{@socket_name}"
+      partition -> "omashiki-#{user}-#{partition}-#{@socket_name}"
+    end
   end
 
   @doc "Return the configured exact host allowlist."
