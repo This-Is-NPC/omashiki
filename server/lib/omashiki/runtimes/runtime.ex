@@ -1,6 +1,6 @@
 defmodule Omashiki.Runtimes.Runtime do
   @moduledoc """
-  Where an agent harness runs (docker image, future kata/firecracker, …).
+  Where an agent harness runs (Docker image today).
 
   Declared in a job environment snapshot. Docker `image` and runtime delivery
   settings live in `config` for `kind == "docker"`.
@@ -19,7 +19,7 @@ defmodule Omashiki.Runtimes.Runtime do
 
   @primary_key {:id, :binary_id, autogenerate: false}
 
-  @kinds ~w(docker kata firecracker)
+  @kinds ~w(docker)
   @statuses ~w(active retired)
 
   embedded_schema do
