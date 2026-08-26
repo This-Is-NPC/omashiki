@@ -3,7 +3,7 @@ defmodule Omashiki.Config do
   Declared host configuration from `omashiki.toml`.
 
   Production configuration declares repositories, governed environments,
-  credentials, caches, and host limits. Jobs capture repository/environment
+  credentials, host credentials, caches, and host limits. Jobs capture repository/environment
   values and their digest at admission so later reloads cannot alter them.
 
   ## Failures
@@ -12,12 +12,12 @@ defmodule Omashiki.Config do
 
     * the file is missing
     * a required top-level section is missing (`repositories`, `environments`, `harnesses`,
-      or `limits`; `credentials` and `caches` are optional)
+      or `limits`; `credentials`, `host_credentials`, and `caches` are optional)
     * a required field on an entry is missing
   """
 
   alias Omashiki.Credentials.Credential
-  alias Omashiki.Config.{Registry, ResolvedJob}
+  alias Omashiki.Config.{HostCredential, Registry, ResolvedJob}
   alias Omashiki.Runtimes.CacheGroup
   alias Omashiki.SupplyChain.Policy
 
@@ -41,6 +41,7 @@ defmodule Omashiki.Config do
   @required_sections ~w(repositories environments harnesses limits)
   @empty %{
     credentials: [],
+    host_credentials: [],
     caches: [],
     harnesses: [],
     repositories: [],
@@ -106,6 +107,7 @@ defmodule Omashiki.Config do
   end
 
   def credentials, do: snapshot().credentials
+  def host_credentials, do: snapshot().host_credentials
   def caches, do: snapshot().caches
   def harnesses, do: snapshot().harnesses
   def repositories, do: snapshot().repositories
@@ -170,6 +172,13 @@ defmodule Omashiki.Config do
 
   def get_credential(_), do: nil
 
+  @doc "Host credential by name, or nil."
+  def get_host_credential(name) when is_binary(name) do
+    Enum.find(host_credentials(), &(&1.name == name))
+  end
+
+  def get_host_credential(_), do: nil
+
   @doc "Cache group by TOML name, or nil."
   def get_cache(name) when is_binary(name) do
     Enum.find(caches(), &(&1.name == name))
@@ -194,12 +203,13 @@ defmodule Omashiki.Config do
 
   defp declarative?(%{
          credentials: c,
+         host_credentials: hc,
          caches: ca,
          repositories: repositories,
          environments: environments,
          limits: l
        }) do
-    c != [] or ca != [] or repositories != [] or environments != [] or map_size(l) > 0
+    c != [] or hc != [] or ca != [] or repositories != [] or environments != [] or map_size(l) > 0
   end
 
   defp build_snapshot!(map, path, source, opts) when is_map(map) do
@@ -215,6 +225,7 @@ defmodule Omashiki.Config do
 
     caches = build_caches!(section(map, "caches"))
     credentials = build_credentials!(section(map, "credentials"))
+    host_credentials = HostCredential.build!(section(map, "host_credentials"))
 
     base_dir = if is_binary(path), do: Path.dirname(Path.expand(path)), else: File.cwd!()
 
@@ -225,6 +236,7 @@ defmodule Omashiki.Config do
         section(map, "harnesses"),
         caches,
         credentials,
+        host_credentials,
         base_dir
       )
 
@@ -232,6 +244,7 @@ defmodule Omashiki.Config do
 
     %{
       credentials: credentials,
+      host_credentials: host_credentials,
       caches: caches,
       harnesses: registry.harnesses,
       repositories: registry.repositories,

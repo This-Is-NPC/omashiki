@@ -118,3 +118,23 @@ mode = "off"
 cpus = 2.0
 memory = "2GB"
 pids = 256
+
+# ---------------------------------------------------------------------------
+# Host credential origins
+# ---------------------------------------------------------------------------
+# Read fresh at every attempt and copied into a private per-attempt directory
+# mounted at /run/omashiki/state. Changing the file contents needs no restart;
+# changing which file is the origin does.
+
+[host_credentials.opencode-local]
+kind = "opencode"
+auth = "~/.local/share/opencode/auth.json"
+config = "~/.config/opencode/opencode.json"
+
+[host_credentials.claude-local]
+kind = "claude-code"
+credentials = "~/.claude/.credentials.json"
+
+[host_credentials.codex-local]
+kind = "codex"
+credentials = "~/.codex/auth.json"

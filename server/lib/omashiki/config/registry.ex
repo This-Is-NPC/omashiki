@@ -24,6 +24,7 @@ defmodule Omashiki.Config.Environment do
     :harness_profile,
     :executables,
     :credentials,
+    :host_credentials,
     :capabilities,
     :mcp_servers,
     :pre_steps,
@@ -68,6 +69,7 @@ defmodule Omashiki.Config.Registry do
         harness_section,
         caches,
         credentials,
+        host_credentials,
         base_dir
       ) do
     if symlink_in_absolute_path?(base_dir) do
@@ -78,7 +80,14 @@ defmodule Omashiki.Config.Registry do
     harnesses = Omashiki.Harnesses.build!(harness_section)
 
     environments =
-      build_environments!(environment_section, harnesses, caches, credentials, base_dir)
+      build_environments!(
+        environment_section,
+        harnesses,
+        caches,
+        credentials,
+        host_credentials,
+        base_dir
+      )
 
     digest = digest(repositories, harnesses, environments)
 
@@ -133,10 +142,20 @@ defmodule Omashiki.Config.Registry do
     |> Enum.sort_by(& &1.name)
   end
 
-  defp build_environments!(section, harnesses, caches, credentials, base_dir) do
+  defp build_environments!(section, harnesses, caches, credentials, host_credentials, base_dir) do
     harnesses_by_name = Map.new(harnesses, &{&1.name, &1})
     caches_by_name = Map.new(caches, &{&1.name, &1})
     credentials_by_name = Map.new(credentials, &{&1.name, &1})
+    host_credentials_by_name = Map.new(host_credentials, &{&1.name, &1})
+
+    shared =
+      credentials_by_name
+      |> Map.keys()
+      |> Enum.filter(&Map.has_key?(host_credentials_by_name, &1))
+
+    if shared != [] do
+      raise Error, "credential names #{inspect(Enum.sort(shared))} are declared twice"
+    end
 
     section
     |> require_section_table!("environments")
@@ -167,9 +186,12 @@ defmodule Omashiki.Config.Registry do
           profile -> profile
         end
 
-      resolved_credentials =
-        resolve_names!(attrs, "credentials", credentials_by_name, where, "credential")
-        |> expand_credentials(credentials_by_name)
+      {resolved_credentials, resolved_host_credentials} =
+        attrs
+        |> credential_names!(where)
+        |> split_credentials!(credentials_by_name, host_credentials_by_name, where)
+
+      resolved_credentials = expand_credentials(resolved_credentials, credentials_by_name)
 
       capabilities = optional_string_list!(attrs, "capabilities", where)
       mcp_servers = mcp_servers!(Map.get(attrs, "mcp_servers", %{}), where)
@@ -199,6 +221,7 @@ defmodule Omashiki.Config.Registry do
         harness_profile: harness_profile,
         executables: executables,
         credentials: resolved_credentials,
+        host_credentials: resolved_host_credentials,
         capabilities: capabilities,
         mcp_servers: mcp_servers,
         pre_steps: pre_steps,
@@ -378,6 +401,40 @@ defmodule Omashiki.Config.Registry do
 
     Enum.map(values, fn name ->
       Map.get(known, name) || raise(Error, "#{where}.#{key}: unknown #{kind} #{inspect(name)}")
+    end)
+  end
+
+  # One declared list, two resolved kinds: LLM gateway credentials keep feeding
+  # the gateway, host credentials are materialized per attempt.
+  defp credential_names!(attrs, where) do
+    values = Map.get(attrs, "credentials", [])
+
+    unless is_list(values) and Enum.all?(values, &is_binary/1) do
+      raise Error, "#{where}.credentials must be an array of names"
+    end
+
+    if length(values) != length(Enum.uniq(values)) do
+      raise Error, "#{where}.credentials must not contain duplicate names"
+    end
+
+    values
+  end
+
+  defp split_credentials!(names, by_name, host_by_name, where) do
+    Enum.reduce(names, {[], []}, fn name, {credentials, host_credentials} ->
+      cond do
+        credential = Map.get(by_name, name) ->
+          {[credential | credentials], host_credentials}
+
+        host_credential = Map.get(host_by_name, name) ->
+          {credentials, [host_credential | host_credentials]}
+
+        true ->
+          raise Error, "#{where}.credentials: unknown credential #{inspect(name)}"
+      end
+    end)
+    |> then(fn {credentials, host_credentials} ->
+      {Enum.reverse(credentials), Enum.reverse(host_credentials)}
     end)
   end
 
