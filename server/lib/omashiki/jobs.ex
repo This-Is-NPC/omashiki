@@ -169,7 +169,23 @@ defmodule Omashiki.Jobs do
 
   @doc "Cancel a job once; repeated cancellation calls return the existing terminal row."
   def cancel(job_or_id, attrs \\ %{}) when is_map(attrs) do
-    transition(job_or_id, "cancelled", Map.put_new(attrs, :error, default_error("cancelled")))
+    case transition(
+           job_or_id,
+           "cancelled",
+           Map.put_new(attrs, :error, default_error("cancelled"))
+         ) do
+      {:ok, %Job{} = job} = result ->
+        :ok =
+          Omashiki.Runtime.AttemptSupervisor.cancel_job(
+            job.id,
+            job.current_attempt
+          )
+
+        result
+
+      other ->
+        other
+    end
   end
 
   @doc "Create the next numbered queued attempt after a failed or cancelled attempt."

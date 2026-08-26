@@ -64,6 +64,8 @@ defmodule Omashiki.Jobs.Runner.DockerContainer do
 
   def destroy(%{id: container_id}), do: ContainerManager.destroy(container_id)
 
+  def cancel_scope(scope_id), do: ContainerManager.cancel_scope(scope_id)
+
   defp profile_for(environment) do
     Omashiki.Harnesses.profile(environment)
   end
@@ -423,6 +425,16 @@ defmodule Omashiki.Jobs.Runner do
 
   defp with_lease_heartbeat(%JobAttempt{lease_token: token} = attempt, opts, fun)
        when is_binary(token) do
+    if Keyword.get(opts, :heartbeat, true) do
+      do_with_lease_heartbeat(attempt, token, opts, fun)
+    else
+      fun.()
+    end
+  end
+
+  defp with_lease_heartbeat(_attempt, _opts, fun), do: fun.()
+
+  defp do_with_lease_heartbeat(attempt, token, opts, fun) do
     interval = Keyword.get(opts, :heartbeat_interval_ms, 10_000)
     heartbeat = spawn(fn -> heartbeat_loop(attempt.id, token, interval) end)
 
@@ -432,8 +444,6 @@ defmodule Omashiki.Jobs.Runner do
       stop_heartbeat(heartbeat)
     end
   end
-
-  defp with_lease_heartbeat(_attempt, _opts, fun), do: fun.()
 
   defp heartbeat_loop(attempt_id, token, interval) do
     receive do

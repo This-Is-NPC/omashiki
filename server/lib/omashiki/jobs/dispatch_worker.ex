@@ -12,8 +12,8 @@ defmodule Omashiki.Jobs.DispatchWorker do
 
   alias Omashiki.Jobs
   alias Omashiki.Jobs.Job
-  alias Omashiki.Jobs.Runner
   alias Omashiki.Repo
+  alias Omashiki.Runtime.AttemptSupervisor
 
   @impl Oban.Worker
   def perform(%Oban.Job{id: oban_id, args: %{"job_id" => job_id}}) do
@@ -24,7 +24,7 @@ defmodule Omashiki.Jobs.DispatchWorker do
       %Job{status: "queued"} ->
         case Jobs.claim(job_id, "oban:#{oban_id}") do
           {:ok, attempt} ->
-            case Runner.run(attempt) do
+            case AttemptSupervisor.run(attempt) do
               {:ok, %Job{status: status}} when status in ["succeeded", "failed", "cancelled"] ->
                 :ok
 

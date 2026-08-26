@@ -20,7 +20,9 @@ defmodule Omashiki.Application do
       [
         Omashiki.Repo,
         {Phoenix.PubSub, name: Omashiki.PubSub},
+        {Registry, keys: :unique, name: Omashiki.Runtime.AttemptRegistry},
         {Task.Supervisor, name: Omashiki.Runtime.TaskSupervisor},
+        Omashiki.Runtime.AttemptSupervisor,
         Omashiki.Runtime.PortAllocator,
         Omashiki.Runtime.LeaseRenewer,
         Omashiki.Runtime.ContainerManager,
