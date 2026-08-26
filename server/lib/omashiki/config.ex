@@ -718,6 +718,14 @@ defmodule Omashiki.Config do
     )
     |> maybe_put(:pids_limit, positive_int(Map.get(section, "pids_limit")))
     |> maybe_put(
+      :global_budget_tokens,
+      positive_int(Map.get(section, "global_budget_tokens"))
+    )
+    |> maybe_put(
+      :global_budget_window_hours,
+      positive_int(Map.get(section, "global_budget_window_hours"))
+    )
+    |> maybe_put(
       :nano_cpus,
       cpu_to_nano(Map.get(section, "cpu_per_container") || Map.get(section, "nano_cpus"))
     )

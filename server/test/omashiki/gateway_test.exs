@@ -427,7 +427,7 @@ defmodule Omashiki.GatewayTest do
         occurred_at: DateTime.utc_now(:microsecond)
       })
 
-      Application.put_env(:omashiki, :global_budget_tokens, 1_000)
+      merge_config!(%{"limits" => %{"global_budget_tokens" => 1_000}})
 
       assert {:error, %{status: 429, error: %{message: "budget_exceeded"}}} =
                Gateway.chat_completions(%{"messages" => []}, claims(job, name))

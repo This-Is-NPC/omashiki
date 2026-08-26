@@ -12,16 +12,6 @@ defmodule Omashiki.Gateway.BudgetTest do
   alias Omashiki.UsageLedger
 
   setup do
-    previous = Application.get_env(:omashiki, :global_budget_tokens)
-
-    on_exit(fn ->
-      case previous do
-        nil -> Application.delete_env(:omashiki, :global_budget_tokens)
-        value -> Application.put_env(:omashiki, :global_budget_tokens, value)
-      end
-    end)
-
-    Application.delete_env(:omashiki, :global_budget_tokens)
     :ok
   end
 
@@ -90,7 +80,7 @@ defmodule Omashiki.Gateway.BudgetTest do
       spend(other, 1, input: 400, output: 400)
       spend(job, 1, input: 100, output: 100)
 
-      Application.put_env(:omashiki, :global_budget_tokens, 1_000)
+      merge_config!(%{"limits" => %{"global_budget_tokens" => 1_000}})
 
       assert Budget.check(job) == {:error, :budget_exceeded}
     end
@@ -99,8 +89,23 @@ defmodule Omashiki.Gateway.BudgetTest do
       job = job_fixture()
       spend(job, 1, input: 100, output: 100)
 
-      Application.put_env(:omashiki, :global_budget_tokens, 1_000)
+      merge_config!(%{"limits" => %{"global_budget_tokens" => 1_000}})
 
+      assert Budget.check(job) == :ok
+    end
+
+    test "spend outside the rolling window does not count toward the global cap" do
+      job = job_fixture()
+      old = DateTime.add(DateTime.utc_now(), -25 * 3600, :second)
+
+      spend(job, 1, input: 500, output: 500, occurred_at: old)
+      spend(job, 2, input: 100, output: 100)
+
+      merge_config!(%{
+        "limits" => %{"global_budget_tokens" => 1_000, "global_budget_window_hours" => 24}
+      })
+
+      assert Budget.spent_global() == 200
       assert Budget.check(job) == :ok
     end
   end
@@ -162,7 +167,7 @@ defmodule Omashiki.Gateway.BudgetTest do
         input_tokens: Keyword.fetch!(opts, :input),
         output_tokens: Keyword.fetch!(opts, :output),
         cache_write_tokens: Keyword.get(opts, :cache_write),
-        occurred_at: DateTime.utc_now(:microsecond)
+        occurred_at: Keyword.get(opts, :occurred_at, DateTime.utc_now(:microsecond))
       })
   end
 

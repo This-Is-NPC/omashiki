@@ -75,6 +75,9 @@ max_concurrent_containers = 8
 cpu_per_container = 2.0
 memory_per_container = "2GB"
 pids_limit = 256
+# Cluster-wide rolling token cap for gateway between-turn checks (optional).
+# global_budget_tokens = 1000000
+# global_budget_window_hours = 24
 
 [caches.global]
 host = "~/.cache/omashiki/global"
