@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1
+# jcode agent sandbox.
+#
+# Unlike the OpenCode and Codex images this one does not build on the omaterm
+# base: jcode is a single static binary with no runtime to install, so the whole
+# reason that base exists (mise, node, a language toolchain) does not apply. The
+# result is ~484MB instead of ~7.2GB, and — the number that actually bounds
+# concurrency — ~15MiB resident per container instead of ~675MiB.
+FROM debian:13-slim
+
+ARG JCODE_VERSION=v0.81.1
+
+# The release tarball is a shell wrapper plus a sibling `.bin`; the wrapper
+# execs the binary from its own directory, so both have to land together.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl git \
+    && curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VERSION}/jcode-linux-x86_64.tar.gz" \
+         -o /tmp/jcode.tar.gz \
+    && mkdir -p /opt/jcode \
+    && tar -xzf /tmp/jcode.tar.gz -C /tmp \
+    && install -m 0755 /tmp/jcode-linux-x86_64 /opt/jcode/jcode-linux-x86_64 \
+    && install -m 0755 /tmp/jcode-linux-x86_64.bin /opt/jcode/jcode-linux-x86_64.bin \
+    && ln -s /opt/jcode/jcode-linux-x86_64 /usr/local/bin/jcode \
+    && rm -rf /tmp/jcode.tar.gz /tmp/jcode-linux-x86_64* \
+    && apt-get purge -y curl && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && /usr/local/bin/jcode --version
+
+# Matches the uid the orchestrator runs containers as.
+RUN useradd --uid 1000 --create-home --shell /bin/bash omaterm
+
+COPY jcode_runner.sh /usr/local/bin/omashiki-jcode-runner
+COPY jcode_entrypoint.sh /usr/local/bin/omashiki-jcode-entrypoint
+RUN chmod 0755 /usr/local/bin/omashiki-jcode-runner /usr/local/bin/omashiki-jcode-entrypoint
+
+# A sandboxed agent must not phone home: jcode ships telemetry on by default.
+ENV JCODE_NO_TELEMETRY=1
+ENV PATH="/usr/local/bin:${PATH}"
+
+USER 1000:1000
+ENTRYPOINT ["/usr/local/bin/omashiki-jcode-entrypoint"]
