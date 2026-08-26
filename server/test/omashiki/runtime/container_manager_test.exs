@@ -1,9 +1,60 @@
 defmodule Omashiki.Runtime.ContainerManagerTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Omashiki.Runtime.ContainerManager
   alias Omashiki.Harness.{LaunchPlan, Spec}
   alias Omashiki.Runtimes.Runtime
+
+  defmodule BlockingOperations do
+    def op_provision(_job, attempt, %{owner: owner}, _opts) do
+      send(owner, {:docker_operation_started, attempt.id, self()})
+
+      receive do
+        :continue -> {:ok, %{sandbox_id: attempt.id}}
+      end
+    end
+
+    def op_execute(_container_id, _argv, _timeout_ms), do: {:ok, %{stdout: "", exit_code: 0}}
+    def op_remove(_container_id), do: :ok
+    def op_cancel_scope(_scope_id), do: :ok
+    def op_cleanup_orphans, do: {:ok, []}
+    def op_fetch_logs(_container_id, _opts), do: {:ok, ""}
+  end
+
+  test "does not serialize independent blocking Docker operations" do
+    owner = self()
+
+    {:ok, manager} =
+      ContainerManager.start_link(
+        name: nil,
+        availability: true,
+        operations: BlockingOperations
+      )
+
+    calls =
+      Enum.map(1..2, fn id ->
+        Task.async(fn ->
+          GenServer.call(
+            manager,
+            {:provision_for_job, %{id: id}, %{id: id}, %{owner: owner}, []},
+            2_000
+          )
+        end)
+      end)
+
+    workers =
+      Enum.map(1..2, fn id ->
+        assert_receive {:docker_operation_started, ^id, worker}, 1_000
+        worker
+      end)
+
+    Enum.each(workers, &send(&1, :continue))
+
+    assert Enum.map(calls, &Task.await(&1, 1_000)) == [
+             {:ok, %{sandbox_id: 1}},
+             {:ok, %{sandbox_id: 2}}
+           ]
+  end
 
   test "CLI transport does not create an HTTP port binding" do
     config =

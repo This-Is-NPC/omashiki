@@ -20,7 +20,7 @@ defmodule Omashiki.Application do
       [
         Omashiki.Repo,
         {Phoenix.PubSub, name: Omashiki.PubSub},
-        {Task.Supervisor, name: Omashiki.OpencodeTaskSupervisor},
+        {Task.Supervisor, name: Omashiki.Runtime.TaskSupervisor},
         Omashiki.Runtime.PortAllocator,
         Omashiki.Runtime.ContainerManager,
         Omashiki.Runtimes.CacheMaintenance,

@@ -10,23 +10,24 @@ defmodule Omashiki.Runtime.ContainerManager do
 
   use GenServer
   @behaviour Omashiki.Runtime.ContainerManager.Behaviour
+  @behaviour Omashiki.Runtime.ContainerManager.Operations
   require Logger
 
   alias Omashiki.Jobs.Job
   alias Omashiki.SupplyChain.{Policy, Preflight, Proxy, SocketBridge}
+  alias Omashiki.Runtime.HostCredentials
   alias Omashiki.Runtimes.{CacheMaintenance, CacheSnapshot}
 
   @docker_api_version "v1.43"
   @container_label "omashiki"
   @stop_timeout 10
-  @host_port_range_start 14_096
-  @host_port_range_end 14_999
   @agent_home "/tmp/agent-home"
   @host_socket "/run/omashiki/host.sock"
   @llm_egress_socket "/run/omashiki/llm-egress.sock"
   @isolated_host_base_url "http://127.0.0.1:8080"
   @isolated_egress_proxy "http://127.0.0.1:8081"
   @default_bootstrap_timeout_ms 10 * 60 * 1_000
+  @cancellation_table :omashiki_runtime_cancellations
   @socket_path Application.compile_env(:omashiki, :docker_socket_path, "/var/run/docker.sock")
 
   @default_resource_limits %{
@@ -41,7 +42,9 @@ defmodule Omashiki.Runtime.ContainerManager do
   # --- Client API ---
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    genserver_opts = if is_nil(name), do: [], else: [name: name]
+    GenServer.start_link(__MODULE__, opts, genserver_opts)
   end
 
   @doc "Provisions one governed job attempt through the hardened Docker boundary."
@@ -66,16 +69,22 @@ defmodule Omashiki.Runtime.ContainerManager do
     GenServer.call(__MODULE__, {:exec, container_id, argv, timeout_ms}, timeout_ms + 10_000)
   end
 
-  @doc "Stops and removes a container by ID. Fire-and-forget."
+  @doc "Stops and removes a container by ID, waiting for idempotent cleanup."
   @impl true
   def destroy(sandbox_id) do
-    GenServer.cast(__MODULE__, {:destroy, sandbox_id})
+    GenServer.call(__MODULE__, {:destroy, sandbox_id}, call_timeout_ms())
+  end
+
+  @doc "Stops every container belonging to an attempt scope. Idempotent."
+  @impl true
+  def cancel_scope(scope_id) when is_binary(scope_id) do
+    GenServer.call(__MODULE__, {:cancel_scope, scope_id}, call_timeout_ms())
   end
 
   @doc "Lists and destroys Docker containers that no longer belong to a job."
   @impl true
   def cleanup_orphans do
-    GenServer.call(__MODULE__, :cleanup_orphans, 30_000)
+    GenServer.call(__MODULE__, :cleanup_orphans, call_timeout_ms())
   end
 
   @doc """
@@ -89,24 +98,33 @@ defmodule Omashiki.Runtime.ContainerManager do
   """
   @impl true
   def fetch_logs(sandbox_id, opts \\ []) when is_binary(sandbox_id) do
-    GenServer.call(__MODULE__, {:fetch_logs, sandbox_id, opts}, 10_000)
+    GenServer.call(__MODULE__, {:fetch_logs, sandbox_id, opts}, call_timeout_ms())
   end
 
   # --- Server Callbacks ---
 
   @impl true
-  def init(_opts) do
-    case docker_ping() do
-      :ok ->
+  def init(opts) do
+    ensure_cancellation_table()
+
+    operations = Keyword.get(opts, :operations, __MODULE__)
+
+    availability = Keyword.get_lazy(opts, :availability, &docker_ping/0)
+
+    case availability do
+      value when value in [:ok, true] ->
         Logger.info("[ContainerManager] Docker Engine API is reachable")
-        {:ok, %{available: true}}
+        {:ok, %{available: true, operations: operations}}
 
       {:error, reason} ->
         Logger.warning(
           "[ContainerManager] Docker not available: #{inspect(reason)}. Running in degraded mode."
         )
 
-        {:ok, %{available: false}}
+        {:ok, %{available: false, operations: operations}}
+
+      false ->
+        {:ok, %{available: false, operations: operations}}
     end
   end
 
@@ -114,8 +132,18 @@ defmodule Omashiki.Runtime.ContainerManager do
   def handle_call(:cleanup_orphans, _from, %{available: false} = state),
     do: {:reply, {:ok, []}, state}
 
-  def handle_call(:cleanup_orphans, _from, state) do
-    {:reply, do_cleanup_orphans(), state}
+  def handle_call(:cleanup_orphans, from, state) do
+    async_reply(from, fn -> state.operations.op_cleanup_orphans() end)
+    {:noreply, state}
+  end
+
+  def handle_call({:cancel_scope, _scope_id}, _from, %{available: false} = state),
+    do: {:reply, :ok, state}
+
+  def handle_call({:cancel_scope, scope_id}, from, state) do
+    :ets.insert(@cancellation_table, {scope_id})
+    async_reply(from, fn -> state.operations.op_cancel_scope(scope_id) end)
+    {:noreply, state}
   end
 
   def handle_call(
@@ -126,33 +154,80 @@ defmodule Omashiki.Runtime.ContainerManager do
     {:reply, {:error, :docker_unavailable}, state}
   end
 
-  def handle_call({:provision_for_job, job, attempt, environment, opts}, _from, state) do
-    {:reply, do_provision_for_job(job, attempt, environment, opts), state}
+  def handle_call({:provision_for_job, job, attempt, environment, opts}, from, state) do
+    async_reply(from, fn -> state.operations.op_provision(job, attempt, environment, opts) end)
+    {:noreply, state}
   end
 
   def handle_call({:fetch_logs, _id, _opts}, _from, %{available: false} = state),
     do: {:reply, {:error, :docker_unavailable}, state}
 
-  def handle_call({:fetch_logs, container_id, opts}, _from, state) do
-    {:reply, do_fetch_logs(container_id, opts), state}
+  def handle_call({:fetch_logs, container_id, opts}, from, state) do
+    async_reply(from, fn -> state.operations.op_fetch_logs(container_id, opts) end)
+    {:noreply, state}
   end
 
   def handle_call({:exec, _container_id, _argv, _timeout_ms}, _from, %{available: false} = state),
     do: {:reply, {:error, :docker_unavailable}, state}
 
-  def handle_call({:exec, container_id, argv, timeout_ms}, _from, state) do
-    {:reply, do_exec_stream(container_id, argv, timeout_ms: timeout_ms), state}
-  end
-
-  @impl true
-  def handle_cast({:destroy, _container_id}, %{available: false} = state), do: {:noreply, state}
-
-  def handle_cast({:destroy, container_id}, state) do
-    do_destroy(container_id)
+  def handle_call({:exec, container_id, argv, timeout_ms}, from, state) do
+    async_reply(from, fn -> state.operations.op_execute(container_id, argv, timeout_ms) end)
     {:noreply, state}
   end
 
+  def handle_call({:destroy, _container_id}, _from, %{available: false} = state),
+    do: {:reply, :ok, state}
+
+  def handle_call({:destroy, container_id}, from, state) do
+    async_reply(from, fn -> state.operations.op_remove(container_id) end)
+    {:noreply, state}
+  end
+
+  defp async_reply(from, fun) do
+    case Task.Supervisor.start_child(Omashiki.Runtime.TaskSupervisor, fn ->
+           result =
+             try do
+               fun.()
+             rescue
+               error -> {:error, {:container_operation_exception, error}}
+             catch
+               kind, reason -> {:error, {:container_operation_throw, kind, reason}}
+             end
+
+           GenServer.reply(from, result)
+         end) do
+      {:ok, _pid} -> :ok
+      {:error, reason} -> GenServer.reply(from, {:error, {:operation_start_failed, reason}})
+    end
+  end
+
   # --- Provision ---
+
+  @doc false
+  @impl Omashiki.Runtime.ContainerManager.Operations
+  def op_provision(job, attempt, environment, opts),
+    do: do_provision_for_job(job, attempt, environment, opts)
+
+  @doc false
+  @impl Omashiki.Runtime.ContainerManager.Operations
+  def op_execute(container_id, argv, timeout_ms),
+    do: do_exec_stream(container_id, argv, timeout_ms: timeout_ms)
+
+  @doc false
+  @impl Omashiki.Runtime.ContainerManager.Operations
+  def op_remove(container_id), do: do_destroy(container_id)
+
+  @doc false
+  @impl Omashiki.Runtime.ContainerManager.Operations
+  def op_cancel_scope(scope_id), do: do_cancel_scope(scope_id)
+
+  @doc false
+  @impl Omashiki.Runtime.ContainerManager.Operations
+  def op_cleanup_orphans, do: do_cleanup_orphans()
+
+  @doc false
+  @impl Omashiki.Runtime.ContainerManager.Operations
+  def op_fetch_logs(container_id, opts), do: do_fetch_logs(container_id, opts)
 
   defp do_provision_for_job(
          %Job{} = job,
@@ -186,10 +261,12 @@ defmodule Omashiki.Runtime.ContainerManager do
     launch_plan = profile.launch_plan
     protocol = transport_kind(launch_plan)
 
+    requested_host_port = Keyword.get(opts, :host_port)
+
     host_port =
       case protocol do
-        "http" -> Keyword.get(opts, :host_port) || pick_free_host_port()
-        _ -> Keyword.get(opts, :host_port)
+        "http" -> requested_host_port || reserve_host_port!(job_scope.id)
+        _ -> requested_host_port
       end
 
     # Runtime delivery is admitted from the immutable job snapshot only.
@@ -201,10 +278,8 @@ defmodule Omashiki.Runtime.ContainerManager do
       Keyword.get(
         opts,
         :runtime_mount_defs,
-        %{}
+        []
       )
-
-    runtime_mounts = runtime_mount_binds(runtime_mount_defs)
 
     cache_groups =
       Keyword.get(
@@ -215,33 +290,50 @@ defmodule Omashiki.Runtime.ContainerManager do
 
     started_at = System.monotonic_time(:millisecond)
 
-    with_cache_lease(job_scope.id, cache_groups, fn ->
-      cache_outcomes = cache_outcomes(cache_groups)
+    result =
+      with {:ok, host_credentials} <-
+             HostCredentials.materialize(job_scope.id, environment, owner: {host_uid, host_gid}) do
+        runtime_mounts = runtime_mount_binds(runtime_mount_defs) ++ host_credentials.binds
+        runtime_mount_defs = runtime_mount_defs ++ host_credentials.mounts
 
-      result =
-        with :ok <- validate_supply_chain_network(cache_groups),
-             {:ok, cache_mounts} <- prepare_cache_mounts(cache_groups) do
-          do_create_container(
-            job_scope,
-            opts,
-            credential,
-            profile,
-            protocol,
-            host_port,
-            repo_root,
-            container_workdir,
-            host_uid,
-            host_gid,
-            runtime_mounts,
-            cache_groups,
-            cache_mounts,
-            runtime_mount_defs
-          )
-        end
+        with_cache_lease(job_scope.id, cache_groups, fn ->
+          cache_outcomes = cache_outcomes(cache_groups)
 
-      record_cache_access(cache_outcomes, elapsed_ms(started_at))
-      result
-    end)
+          result =
+            with :ok <- validate_supply_chain_network(cache_groups),
+                 {:ok, cache_mounts} <- prepare_cache_mounts(cache_groups) do
+              do_create_container(
+                job_scope,
+                opts,
+                credential,
+                profile,
+                protocol,
+                host_port,
+                repo_root,
+                container_workdir,
+                host_uid,
+                host_gid,
+                runtime_mounts,
+                cache_groups,
+                cache_mounts,
+                runtime_mount_defs
+              )
+            end
+
+          record_cache_access(cache_outcomes, elapsed_ms(started_at))
+          result
+        end)
+      end
+
+    unless match?({:ok, _}, result) do
+      HostCredentials.discard(job_scope.id)
+
+      if protocol == "http" and is_nil(requested_host_port) do
+        _ = Omashiki.Runtime.PortAllocator.release(job_scope.id)
+      end
+    end
+
+    result
   end
 
   defp with_cache_lease(_owner, [], fun), do: invoke_provision(fun)
@@ -397,15 +489,26 @@ defmodule Omashiki.Runtime.ContainerManager do
 
         case docker_post("/containers/create", container_config) do
           {:ok, %{"Id" => container_id}} ->
-            case finalize_provision(
-                   container_id,
-                   host_port,
-                   protocol,
-                   launch,
-                   container_workdir,
-                   cache_groups,
-                   runtime_job && runtime_job.id
-                 ) do
+            provision_result =
+              if cancelled_scope?(group.id) do
+                do_destroy(container_id, %{
+                  "Config" => %{"Labels" => %{"omashiki.job_scope_id" => group.id}}
+                })
+
+                {:error, :cancelled}
+              else
+                finalize_provision(
+                  container_id,
+                  host_port,
+                  protocol,
+                  launch,
+                  container_workdir,
+                  cache_groups,
+                  runtime_job && runtime_job.id
+                )
+              end
+
+            case provision_result do
               {:ok, info} ->
                 info =
                   info
@@ -1433,7 +1536,12 @@ defmodule Omashiki.Runtime.ContainerManager do
         {:error, reason} -> Logger.warning("[ContainerManager] Remove failed: #{inspect(reason)}")
       end
     after
-      if is_binary(job_scope_id), do: release_cache_owner(job_scope_id)
+      if is_binary(job_scope_id) do
+        release_cache_owner(job_scope_id)
+        _ = Omashiki.Runtime.PortAllocator.release(job_scope_id)
+        HostCredentials.discard(job_scope_id)
+        clear_cancelled_scope(job_scope_id)
+      end
     end
   end
 
@@ -1454,6 +1562,7 @@ defmodule Omashiki.Runtime.ContainerManager do
     case docker_get("/containers/json?all=true&filters=#{URI.encode_www_form(filter)}") do
       {:ok, containers} when is_list(containers) ->
         active_ids = active_job_scope_ids()
+        HostCredentials.sweep(active_ids)
 
         orphans = Enum.filter(containers, &(orphan_status(&1, active_ids) == :orphan))
 
@@ -1464,6 +1573,42 @@ defmodule Omashiki.Runtime.ContainerManager do
       err ->
         err
     end
+  end
+
+  defp do_cancel_scope(scope_id) do
+    filter = Jason.encode!(%{"label" => ["#{@container_label}=true"]})
+
+    case docker_get("/containers/json?all=true&filters=#{URI.encode_www_form(filter)}") do
+      {:ok, containers} when is_list(containers) ->
+        containers
+        |> Enum.filter(&(job_scope_id_from_container(&1) == scope_id))
+        |> Enum.each(fn %{"Id" => id} = container -> do_destroy(id, container) end)
+
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp ensure_cancellation_table do
+    case :ets.whereis(@cancellation_table) do
+      :undefined -> :ets.new(@cancellation_table, [:named_table, :public, :set])
+      _table -> @cancellation_table
+    end
+  end
+
+  defp cancelled_scope?(scope_id) do
+    :ets.member(@cancellation_table, scope_id)
+  rescue
+    ArgumentError -> false
+  end
+
+  defp clear_cancelled_scope(scope_id) do
+    :ets.delete(@cancellation_table, scope_id)
+    :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   defp active_job_scope_ids do
@@ -1480,26 +1625,10 @@ defmodule Omashiki.Runtime.ContainerManager do
 
   # --- Compose helpers ---
 
-  # Picks an unused TCP port in the configured range. Bind-test only; the
-  # actual reservation happens when Docker creates the port mapping.
-  defp pick_free_host_port do
-    case allocate_host_port(@host_port_range_start..@host_port_range_end, &port_listenable?/1) do
-      {:ok, port} ->
-        port
-
-      :exhausted ->
-        raise "No free host port in range #{@host_port_range_start}..#{@host_port_range_end}"
-    end
-  end
-
-  defp port_listenable?(port) do
-    case :gen_tcp.listen(port, [:binary, active: false, reuseaddr: true]) do
-      {:ok, socket} ->
-        :gen_tcp.close(socket)
-        true
-
-      _ ->
-        false
+  defp reserve_host_port!(scope_id) do
+    case Omashiki.Runtime.PortAllocator.reserve(scope_id) do
+      {:ok, port} -> port
+      {:error, :host_port_range_exhausted} -> raise "No free host port in range 14096..14999"
     end
   end
 
@@ -1834,7 +1963,25 @@ defmodule Omashiki.Runtime.ContainerManager do
 
   defp demux_docker_frames(buf, acc), do: {buf, acc}
 
-  defp mint_request(method, path, headers, body, timeout_ms \\ 10_000) do
+  # The daemon is a shared, serialized resource: a burst of concurrent
+  # `docker create` calls queues inside dockerd, and 10s is not enough headroom
+  # once tens of attempts provision at once — the calls that wait longest fail
+  # with :timeout even though the daemon would have served them.
+  # These calls wait on a task that is itself talking to dockerd, so the caller's
+  # deadline has to sit above the daemon deadline — otherwise the facade gives up
+  # on work that is still in flight and the attempt dies with a GenServer timeout
+  # while the container is being created or removed normally.
+  defp call_timeout_ms, do: max(30_000, docker_timeout_ms() * 2)
+
+  defp docker_timeout_ms do
+    case System.get_env("OMASHIKI_DOCKER_TIMEOUT_MS") do
+      nil -> 10_000
+      raw -> String.to_integer(raw)
+    end
+  end
+
+  defp mint_request(method, path, headers, body, timeout_ms \\ nil) do
+    timeout_ms = timeout_ms || docker_timeout_ms()
     full_path = "/#{@docker_api_version}#{path}"
     deadline = System.monotonic_time(:millisecond) + timeout_ms
 

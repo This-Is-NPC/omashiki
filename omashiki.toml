@@ -94,6 +94,7 @@ base_branch = "master"
 adapter = "opencode"
 runtime = "docker"
 image = "omashiki/agent:latest"
+options = { auth_path = "/run/omashiki/state/auth.json", config_path = "/run/omashiki/state/opencode.json" }
 
 [harnesses.claude-code]
 adapter = "claude-code"
@@ -103,7 +104,7 @@ image = "omashiki/agent-claude:latest"
 [environments.opencode]
 harness = "opencode"
 executables = ["mise", "git"]
-credentials = []
+credentials = ["opencode-local"]
 caches = ["global"]
 timeout_ms = 1800000
 network = "none"
