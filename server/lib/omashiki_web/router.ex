@@ -1,6 +1,8 @@
 defmodule OmashikiWeb.Router do
   use OmashikiWeb, :router
 
+  import Phoenix.LiveDashboard.Router
+
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
@@ -39,6 +41,22 @@ defmodule OmashikiWeb.Router do
       live "/jobs/:id", JobLive, :show
       live "/config", ConfigLive, :index
     end
+  end
+
+  # BEAM internals: process state, message queues, stacktraces, ETS. Gated by
+  # `:require_operator_console`, which is `:require_user` plus a loopback check
+  # when login is off — see OmashikiWeb.AuthHooks.
+  #
+  # `allow_destructive_actions` stays at its default of false. The "Kill
+  # process" button would let a misread page take down a live attempt, and this
+  # route exists to explain an outage, not to add a way to cause one.
+  scope "/" do
+    pipe_through :browser
+
+    live_dashboard "/dashboard",
+      metrics: Omashiki.Telemetry,
+      ecto_repos: [Omashiki.Repo],
+      on_mount: {OmashikiWeb.AuthHooks, :require_operator_console}
   end
 
   # Health and token issuance are the only unauthenticated control-plane
