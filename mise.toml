@@ -158,20 +158,33 @@ docker build -t omashiki/agent-jcode:ci-check -f agent/Dockerfile.jcode agent/
 .scripts/agent_image_check.sh omashiki/agent-jcode:ci-check 1024 bash git jcode
 """
 
-# Same narrow contract as jcode, and for the same reasons: no HEALTHCHECK, no
-# supply-chain relay, no caches and empty pre_steps, so neither curl, python3
-# nor mise is installed. pi is not a node program despite shipping on npm — the
-# release tarball is a bun-compiled executable linking only glibc — so `node`
-# does not belong on this list either.
+# pi is a coding harness, so its environment manages dependencies through mise
+# like [environments.opencode] and [environments.codex] do, and this image
+# carries the mise binary plus the OTP toolchain that `mise install --yes`
+# needs. That requirement belongs to the environment, not to the harness
+# binary: deriving the contents from what pi alone executes is what left mise
+# out at first. curl comes with it: kerl fetches the OTP source tarball with
+# curl, so `mise install --yes` dies at "curl: not found" without it. python3
+# stays out — it is only for the supply-chain relay, which this image does not
+# run — and so does node, because pi ships on npm but the release is a
+# bun-compiled executable linking only glibc.
 #
-# 512MB against a measured 430MB. Deliberately tighter than jcode's 1024: this
-# image exists to be small, its only growth path is the pinned PI_VERSION, and
-# bumping that is an ARG edit a reviewer already has to look at.
+# 2048MB against a measured 947MB: 86MB base + 407MB apt (the OTP toolchain is
+# almost all of it) + 95MB mise + 114MB pi. Up from 430MB before mise, and the
+# same budget as the other two images carrying that toolchain. This gate exists
+# to catch a 6GB base regression — the omaterm inheritance — not to police a
+# debian point release, so the headroom is deliberate.
+#
+# agent_toolchain_check.sh runs here for the reason it was written: asserting
+# the mise *binary* does not assert that `mise install` can build erlang, and an
+# image that passes the first and fails the second builds green, passes the size
+# budget, and then fails every job. Costs roughly two minutes.
 [tasks."ci:docker:pi"]
 description = "Build pinned pi agent Docker image (dry-run, no push)"
 run         = """
 docker build -t omashiki/agent-pi:ci-check -f agent/Dockerfile.pi agent/
-.scripts/agent_image_check.sh omashiki/agent-pi:ci-check 512 bash git pi
+.scripts/agent_image_check.sh omashiki/agent-pi:ci-check 2048 bash git curl mise pi
+.scripts/agent_toolchain_check.sh omashiki/agent-pi:ci-check
 """
 
 [tasks."ci:docker"]

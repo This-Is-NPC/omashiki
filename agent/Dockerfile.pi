@@ -1,37 +1,88 @@
 # syntax=docker/dockerfile:1
 # pi agent sandbox.
 #
-# Like Dockerfile.jcode this does not build on the omaterm base, and for the
-# same reason: there is no runtime to install. Despite pi being published as an
-# npm package, the release tarball is a `bun build --compile` executable — a
-# single ELF whose only shared objects are libc, libm, libpthread and libdl
-# (glibc 2.17 floor). It needs no node, no npm and no mise, so do not copy the
+# Despite shipping on npm, pi's release tarball is a `bun build --compile`
+# executable: one ELF whose only shared objects are libc, libm, libpthread and
+# libdl, at a glibc 2.17 floor. It needs no node and no npm, so do not copy the
 # node-bearing package list from Dockerfile.claude or Dockerfile.codex onto it.
-FROM debian:13-slim
-
+#
+# It does need mise. pi is a coding harness, and dependency management for a
+# coding environment goes through mise in this project, so [environments.pi]
+# runs the same `mise install --yes` pre_step as [environments.opencode] and
+# [environments.codex]. That is a property of the environment, not of the
+# harness binary — deriving this image's contents from pi's own requirements
+# alone is what left mise out of the first cut.
+#
+# Installed toolchains come from the mounted cache rather than from here (see
+# [caches.global.env] in omashiki.toml), but as agent/Dockerfile already
+# records, that cache can only be warmed by an install that ran in a container
+# first, and mise has no precompiled path for erlang — it shells out to kerl,
+# which compiles OTP from source. So the C toolchain ships too, scoped to OTP's
+# build dependencies.
+ARG MISE_VERSION=2026.6.11
 ARG PI_VERSION=v0.84.3
 # From the release's own SHA256SUMS. The tarball is 42MB of executable fetched
 # over the network at build time; pinning the version alone would still let the
 # contents move under a retagged release.
 ARG PI_SHA256=6f8bb67c21bc6b8a8a106d354f56d7fd4a190a3cd8ad3a32db45f6d281a5d008
 
-# The tarball unpacks to a `pi/` directory holding the executable beside the
-# assets it loads by relative path (themes, the photon wasm), so it is installed
-# whole and only the executable is put on PATH.
+# Both downloads happen in this stage so the final image does not carry the
+# tarballs, only what was extracted from them.
+FROM debian:13-slim AS fetch
+
+ARG MISE_VERSION
+ARG PI_VERSION
+ARG PI_SHA256
+
+# The pi tarball unpacks to a `pi/` directory holding the executable beside the
+# assets it loads by relative path (themes, the photon wasm), so it is kept
+# whole and only the executable is put on PATH in the final stage.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && curl -fsSL "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-x64.tar.gz" \
+         -o /tmp/mise.tar.gz \
+    && tar -xzf /tmp/mise.tar.gz -C /tmp \
+    && install -m 0755 /tmp/mise/bin/mise /usr/local/bin/mise \
     && curl -fsSL "https://github.com/earendil-works/pi/releases/download/${PI_VERSION}/pi-linux-x64.tar.gz" \
          -o /tmp/pi.tar.gz \
     && echo "${PI_SHA256}  /tmp/pi.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/pi.tar.gz -C /opt \
-    && ln -s /opt/pi/pi /usr/local/bin/pi \
-    && rm -f /tmp/pi.tar.gz \
-    && apt-get purge -y curl && apt-get autoremove -y \
+    && rm -rf /tmp/mise.tar.gz /tmp/mise /tmp/pi.tar.gz \
     && rm -rf /var/lib/apt/lists/* \
-    && PI_OFFLINE=1 /usr/local/bin/pi --version
+    && /usr/local/bin/mise --version
+
+FROM debian:13-slim
+
+# OTP build toolchain. The list is what OTP 27.2's own configure demanded, in
+# order, on this base; agent/Dockerfile derives it rung by rung and the trap
+# worth naming is the third one, where erlang installs green and then cannot
+# run mix, hex or TLS. autoconf is deliberately absent - kerl builds a release
+# tarball whose configure is pre-generated, not a checkout.
+#
+# curl is part of that toolchain, not a convenience: kerl downloads the OTP
+# source tarball with it, and without it `mise install --yes` fails at
+# "curl: not found" before a compiler is ever invoked. That, rather than the
+# HEALTHCHECK agent/Dockerfile cites, is why Dockerfile.codex also ships curl
+# while having no HEALTHCHECK at all. Dockerfile.jcode can purge it because
+# nothing in that image ever runs mise.
+#
+# python3 stays out: it is only there for the supply-chain relay, which this
+# image does not run and [environments.pi.policy] = "off" does not ask for.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+         bash ca-certificates curl git \
+         gcc g++ make libc6-dev libncurses-dev libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Matches the uid the orchestrator runs containers as.
 RUN useradd --uid 1000 --create-home --shell /bin/bash omaterm
+
+COPY --from=fetch /usr/local/bin/mise /usr/local/bin/mise
+COPY --from=fetch /opt/pi /opt/pi
+RUN ln -s /opt/pi/pi /usr/local/bin/pi \
+    && chmod 0755 /usr/local/bin/mise \
+    && /usr/local/bin/mise --version \
+    && PI_OFFLINE=1 /usr/local/bin/pi --version
 
 COPY pi_runner.sh /usr/local/bin/omashiki-pi-runner
 COPY pi_entrypoint.sh /usr/local/bin/omashiki-pi-entrypoint
@@ -44,7 +95,12 @@ ENV PI_OFFLINE=1
 # A sandboxed agent must not phone home. PI_OFFLINE already suppresses
 # install/update telemetry; this also drops the provider attribution headers.
 ENV PI_TELEMETRY=0
-ENV PATH="/usr/local/bin:${PATH}"
+# Defaults only: omashiki.toml's [caches.global.env] overrides all three at
+# runtime so the toolchains land in the shared cache mount, not the container.
+ENV MISE_DATA_DIR=/home/omaterm/.local/share/mise \
+    MISE_CACHE_DIR=/home/omaterm/.local/cache/mise \
+    MISE_CONFIG_DIR=/tmp/agent-home/.config/mise \
+    PATH="/usr/local/bin:${PATH}"
 
 USER 1000:1000
 ENTRYPOINT ["/usr/local/bin/omashiki-pi-entrypoint"]

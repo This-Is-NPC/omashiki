@@ -297,10 +297,21 @@ pids = 256
 # ---------------------------------------------------------------------------
 # pi
 # ---------------------------------------------------------------------------
-# pi is a single `bun build --compile` executable: no node, no mise, no npm and
-# no cache mounts. Like jcode it has no host-auth route — it always reaches the
-# model through the gateway — so its environment needs a gateway credential and
-# a network that is not "none".
+# pi itself is a single `bun build --compile` executable: no node and no npm.
+# Its *environment*, though, is a coding environment, so dependencies are
+# managed through mise exactly as [environments.opencode] and
+# [environments.codex] manage them — hence `mise` in executables, the global
+# cache, and the `mise install --yes` pre_step below. Do not read pi's own
+# slimness as licence to drop those: the harness binary and the environment
+# have different requirements, and this is the environment's.
+#
+# `caches = ["global"]` is what makes that install cheap. [caches.global.env]
+# redirects MISE_DATA_DIR into the mount, so a toolchain built once is reused by
+# every later attempt instead of being rebuilt in each container.
+#
+# Like jcode it has no host-auth route — it always reaches the model through the
+# gateway — so its environment needs a gateway credential and a network that is
+# not "none".
 #
 # The harness is declared live and the environment is not, which is the same
 # split [harnesses.claude-code] already uses: a harness with no environment is
@@ -319,19 +330,23 @@ options = { timeout_ms = 1800000 }
 
 #[environments.pi]
 #harness = "pi"
-#executables = ["git"]
+#executables = ["mise", "git"]
 #credentials = ["local-llm"]
-#caches = []
+#caches = ["global"]
 #timeout_ms = 1800000
 #network = "restricted"
 #mounts = []
 #post_steps = []
-#pre_steps = []
+#pre_steps = [{ argv = ["mise", "install", "--yes"], condition = "always", timeout_ms = 600000 }]
 #
 #[environments.pi.policy]
 #mode = "off"
 #
+## Sized like [environments.opencode], because the pre_step is the same and it
+## is the expensive part: mise compiles erlang from source the first time the
+## cache is cold. A high-concurrency load-test tier would want far less; that
+## belongs in .scripts/loadtest/README.md, not here.
 #[environments.pi.resources]
-#cpus = 1.0
-#memory = "1GB"
+#cpus = 2.0
+#memory = "2GB"
 #pids = 256
