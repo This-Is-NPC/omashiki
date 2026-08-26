@@ -18,6 +18,10 @@ defmodule Omashiki.Application do
 
     children =
       [
+        # First: it attaches the handlers for `Omashiki.Telemetry.events/0`, and
+        # a handler that starts after the first emitter has already missed the
+        # events it exists to observe.
+        Omashiki.Telemetry,
         Omashiki.Repo,
         {Phoenix.PubSub, name: Omashiki.PubSub},
         {Registry, keys: :unique, name: Omashiki.Runtime.AttemptRegistry},
