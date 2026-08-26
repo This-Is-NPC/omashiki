@@ -67,9 +67,17 @@ config :mime, :types, %{
 config :omashiki, :job_event_retention_days, 30
 
 # Oban retains durable queue rows for the same 30-day horizon as job data.
+# The `scheduler` limit is a second, independent concurrency ceiling: it caps how
+# many DispatchWorkers run at once, so it bounds live attempts regardless of
+# `[limits] max_concurrent_containers` in omashiki.toml. The smaller of the two
+# wins — leave them consistent or the TOML advertises a capacity the queue will
+# never grant.
 config :omashiki, Oban,
   repo: Omashiki.Repo,
-  queues: [scheduler: 10, webhooks: 5],
+  queues: [
+    scheduler: String.to_integer(System.get_env("OBAN_SCHEDULER_LIMIT") || "10"),
+    webhooks: 5
+  ],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 30}
   ]

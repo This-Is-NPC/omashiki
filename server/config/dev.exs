@@ -9,7 +9,12 @@ config :omashiki, Omashiki.Repo,
   database: "omashiki_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
-  pool_size: 10
+  # Tunable for load testing: the default pool of 10 is exhausted well before
+  # the container limit is, and a queue timeout surfaces as a 500 on job
+  # submission rather than as backpressure.
+  pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+  queue_target: String.to_integer(System.get_env("POOL_QUEUE_TARGET") || "50"),
+  queue_interval: String.to_integer(System.get_env("POOL_QUEUE_INTERVAL") || "1000")
 
 # For development, we disable any cache and enable
 # debugging and code reloading.
