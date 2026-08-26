@@ -81,8 +81,12 @@ defmodule Omashiki.Jobs.DispatchWorkerTest do
   defp perform_final_attempt(job_id),
     do: perform_job(DispatchWorker, %{"job_id" => job_id}, attempt: max_attempts())
 
-  defp exhaust_capacity!,
-    do: Repo.update_all(ExecutionCapacity, set: [active: 8])
+  # Capacity is host-configurable since `set_capacity/1`, and the
+  # `execution_capacity_values_check` constraint requires `active <= capacity`,
+  # so fill the row up to whatever it actually declares rather than to 8.
+  defp exhaust_capacity! do
+    Repo.update_all(from(c in ExecutionCapacity, update: [set: [active: c.capacity]]), [])
+  end
 
   test "runner returns a non-terminal result -> the job row never stays queued", %{
     user: user,
