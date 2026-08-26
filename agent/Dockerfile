@@ -11,8 +11,13 @@
 #
 # What the sandbox actually needs is derived from entrypoint.sh: bash, git,
 # curl (the HEALTHCHECK), python3 (supply-chain-relay), the mise *binary*
-# (omashiki.toml pre_steps run `mise install --yes`) and opencode itself. The
-# toolchains mise installs come from the mounted cache, not from this image.
+# (omashiki.toml pre_steps run `mise install --yes`) and opencode itself.
+#
+# Installed toolchains come from the mounted cache, not from this image — but
+# the cache can only be warmed by an install that ran here first, and mise
+# builds erlang from source with kerl rather than fetching an artifact. So a C
+# toolchain stays, scoped to OTP's build dependencies rather than to a general
+# workstation; see the note on that RUN for how the list was derived.
 ARG MISE_VERSION=2026.6.11
 ARG OPENCODE_VERSION=1.18.21
 
@@ -50,9 +55,25 @@ ARG OPENCODE_VERSION
 
 # curl stays (unlike Dockerfile.jcode, which purges it) because the
 # HEALTHCHECK below shells out to it on every interval.
+#
+# OTP build toolchain. omashiki.toml's `mise install --yes` pre_step has no
+# precompiled path for erlang: mise's core plugin shells out to kerl, which
+# compiles OTP from source. Asserting the mise *binary* does not assert that.
+#
+# The list is what OTP 27.2's own configure demanded, in order, on this base:
+#   nothing              -> "no acceptable C compiler found in $PATH"
+#   gcc make libc6-dev   -> "No curses library functions found"
+#   + libncurses-dev     -> configure exits 0 but disables crypto, ssl and ssh
+#                           ("No usable OpenSSL found") and drops the JIT
+#                           ("lack of compiler with C++17 support")
+#   + g++ libssl-dev     -> crypto, ssl, ssh enabled and the JIT back on
+# The third rung is the trap worth naming: erlang installs green there and
+# then cannot run mix, hex or TLS. autoconf is deliberately absent — kerl
+# builds a release tarball whose configure is pre-generated, not a checkout.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
          bash ca-certificates curl git python3 \
+         gcc g++ make libc6-dev libncurses-dev libssl-dev \
     && rm -rf /var/lib/apt/lists/* \
     && python3 -c 'import asyncio'
 

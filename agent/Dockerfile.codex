@@ -50,9 +50,24 @@ FROM debian:13-slim
 
 ARG CODEX_VERSION
 
+# OTP build toolchain. omashiki.toml's `mise install --yes` pre_step has no
+# precompiled path for erlang: mise's core plugin shells out to kerl, which
+# compiles OTP from source. Asserting the mise *binary* does not assert that.
+#
+# The list is what OTP 27.2's own configure demanded, in order, on this base:
+#   nothing              -> "no acceptable C compiler found in $PATH"
+#   gcc make libc6-dev   -> "No curses library functions found"
+#   + libncurses-dev     -> configure exits 0 but disables crypto, ssl and ssh
+#                           ("No usable OpenSSL found") and drops the JIT
+#                           ("lack of compiler with C++17 support")
+#   + g++ libssl-dev     -> crypto, ssl, ssh enabled and the JIT back on
+# The third rung is the trap worth naming: erlang installs green there and
+# then cannot run mix, hex or TLS. autoconf is deliberately absent — kerl
+# builds a release tarball whose configure is pre-generated, not a checkout.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
          bash ca-certificates curl git libatomic1 python3 \
+         gcc g++ make libc6-dev libncurses-dev libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Matches the uid the orchestrator runs containers as.
