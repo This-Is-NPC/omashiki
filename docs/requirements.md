@@ -17,8 +17,8 @@ contract vocabulary.
   or none, and parent references point to another item in the same batch.
 - **BR-005 Ordered execution:** A child remains blocked until its direct parent
   succeeds for the first time. A failed or cancelled parent does not unlock it.
-- **BR-006 Capacity:** No more than eight attempts may reserve local execution
-  capacity at once.
+- **BR-006 Capacity:** No more attempts may reserve local execution capacity at
+  once than `[limits].max_concurrent_containers` declares.
 - **BR-007 Attempt identity:** Retry reopens the same job with the next positive
   attempt number. Success is irreversible; failed and cancelled jobs are
   retryable.
@@ -44,9 +44,10 @@ contract vocabulary.
 - **FR-004 Inspection:** `GET /api/v1/jobs`, `GET /api/v1/jobs/:id`, and
   `GET /api/v1/jobs/:id/result` expose owner-scoped state and terminal results.
   A result is unavailable until the job is terminal.
-- **FR-005 Lifecycle control:** `POST /api/v1/jobs/:id/cancel` cancels waiting
-  or active work. `POST /api/v1/jobs/:id/retry` queues a new attempt only for a
-  failed or cancelled job.
+- **FR-005 Lifecycle control:** `POST /api/v1/jobs/:id/cancel` durably cancels
+  waiting or active work and then interrupts any registered active runtime.
+  `POST /api/v1/jobs/:id/retry` queues a new attempt only for a failed or
+  cancelled job.
 - **FR-006 Event history:** `GET /api/v1/jobs/:id/events/history` returns
   retained contiguous events. `GET /api/v1/jobs/:id/events` and `/events/stream`
   stream the same event sequence as SSE and accept `Last-Event-ID`.
@@ -109,7 +110,8 @@ contract vocabulary.
   contents. Usage rows are append-only and keyed for retry idempotency.
 - **NFR-012 Resilience:** Docker, Git, harness, proxy, queue, and delivery
   boundaries are supervised or recoverable so one failed attempt does not bring
-  down unrelated work.
+  down unrelated work. Active attempts have independent temporary OTP processes;
+  blocking runtime operations do not serialize unrelated attempts.
 
 ## References
 

@@ -58,6 +58,53 @@ starts Claude Code with fixed headless flags, no MCP/settings sources, and the
 configured tool allowlist. The credential file is the only persistent writable
 provider state; the provider's host configuration directory is never mounted.
 
+## Codex Image
+
+`agent/Dockerfile.codex` pins OpenAI Codex CLI `0.149.1`. Its entrypoint mirrors
+the Claude image: it configures Git, links the isolated credential state into a
+volatile `CODEX_HOME`, and stays idle. Each harness turn is a separate Docker
+exec through `omashiki-codex-runner`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `HOME` | `/tmp/agent-home` | Volatile writable home on the container tmpfs |
+| `CODEX_HOME` | `/tmp/agent-home/.codex` | Volatile Codex state directory |
+| `CODEX_CREDENTIALS_PATH` | `/run/omashiki/state/codex-auth.json` | Isolated writable `auth.json` |
+| `GIT_USER_NAME` | `omashiki-agent` | Git author name |
+| `GIT_USER_EMAIL` | `agent@omashiki.local` | Git author email |
+
+The runner reads a read-only invocation file, passes the prompt over stdin, and
+runs `codex exec --json` with `--ignore-user-config`, `--ignore-rules`,
+`--ephemeral`, and `tools.web_search` off by default. Codex's own Landlock
+sandbox cannot create the unprivileged user namespace it needs inside the
+container, so it is bypassed: Docker is the isolation boundary.
+
+## jcode Image
+
+`agent/Dockerfile.jcode` pins jcode `v0.81.1` and is the one agent image that
+does not build on the `omaterm` base: jcode is a single static binary with no
+runtime to install. The image is ~484MB against ~7.2GB, and ~15MiB resident per
+container against ~675MiB.
+
+| Variable | Default | Description |
+|---|---|---|
+| `HOME` | `/tmp/agent-home` | Volatile writable home on the container tmpfs |
+| `JCODE_HOME` | `/tmp/agent-home/.jcode` | Volatile jcode state directory |
+| `JCODE_GATEWAY_BASE_URL` | required | Loopback Omashiki gateway base URL |
+| `JCODE_GATEWAY_MODEL` | required | Model id the gateway resolves |
+| `JCODE_GATEWAY_TOKEN` | required | Job-bound gateway token |
+| `GIT_USER_NAME` | `omashiki-agent` | Git author name |
+| `GIT_USER_EMAIL` | `agent@omashiki.local` | Git author email |
+
+The entrypoint registers a single `omashiki` provider profile pointing at the
+gateway and exits 78 if any of the three gateway variables is missing, so a
+misprovisioned container fails at startup rather than reaching a provider. The
+profile stores the *name* of the token variable, not its value, so the token
+never lands on disk and each `docker exec` turn resolves it fresh.
+`JCODE_NO_TELEMETRY=1` is baked into the image. The runner reads the prompt
+from a file rather than from the exec argv, which also keeps the image free of
+a JSON parser.
+
 ## Runtime Boundary
 
 Both images run as the repository owner IDs with a read-only root filesystem,

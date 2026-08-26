@@ -23,8 +23,9 @@ flowchart LR
     jobs --> db[(PostgreSQL)]
     jobs --> oban[Oban durable queues]
     oban --> dispatch[DispatchWorker]
-    dispatch --> capacity[Eight-slot capacity]
-    capacity --> runner[Attempt runner]
+    dispatch --> capacity[Declared capacity slots]
+    capacity --> attempt[Supervised attempt process]
+    attempt --> runner[Attempt runner]
 
     runner --> git[GitArtifact worktree and result]
     runner --> docker[Docker container boundary]
@@ -60,16 +61,26 @@ flowchart LR
 - **Durable dispatch.** `Omashiki.Jobs.DispatchWorker` runs in Oban's
   `scheduler` queue. `Omashiki.Jobs.Recovery` marks expired active leases
   failed and releases capacity. The configured queues are `scheduler: 10` and
-  `webhooks: 5`; the database capacity row limits active attempts to eight.
+  `webhooks: 5`; the database capacity row limits active attempts to
+  `[limits].max_concurrent_containers`, reconciled at boot.
+- **Attempt supervision.** `Omashiki.Runtime.AttemptSupervisor` owns one
+  temporary `GenServer` per active attempt. That process renews the database
+  lease, runs the lifecycle in a monitored task, coordinates callers, and
+  interrupts the runtime after cancellation is committed. PostgreSQL remains
+  authoritative; a VM crash is recovered through the existing fencing lease.
 - **Attempt runner.** `Omashiki.Jobs.Runner` records ordered `provision`, pre,
   harness, post, `finalization`, and `cleanup` steps. Commands are argv-only,
   must use declared executables, and reject unsafe executables. Exceptions and
   boundary failures become terminal attempt failures without creating a second
   attempt.
 - **Governed runtime.** `Omashiki.Runtime.ContainerManager` talks to Docker
-  through its Unix socket, mounts the captured worktree, uses the resolved
-  harness launch plan, drops capabilities, disables privilege escalation, uses
-  a read-only root filesystem with tmpfs, and removes orphan containers at boot.
+  through its Unix socket and executes slow Docker operations in monitored
+  tasks, so independent attempts provision concurrently and cancellation is not
+  queued behind another container operation. An atomic allocator leases the
+  localhost ports used by HTTP harnesses. The runtime mounts the captured
+  worktree, uses the resolved harness launch plan, drops capabilities, disables
+  privilege escalation, uses a read-only root filesystem with tmpfs, and
+  removes orphan containers at boot.
   Transport, startup, readiness, and secret targets are adapter metadata. The
   runner converts the provisioned container and injected boundary into a typed
   `Omashiki.Runtime.Capability`; adapters use it for HTTP endpoints or argv-only
@@ -91,9 +102,11 @@ flowchart LR
   HTTPS hosts on port 443 with public resolved addresses.
 - **Observation and delivery.** `JobEvent` rows are append-only per-job
   sequence. SSE accepts `Last-Event-ID`, replays contiguous retained rows, and
-  stops after a terminal event. A terminal event and its webhook outbox row are
-  committed together; `Webhooks` signs canonical JSON with timestamp-bound
-  HMAC-SHA256, retries for 24 hours, and then records a dead-letter status.
+  stops after a terminal event. Telemetry reports attempt, lifecycle-step,
+  container-provision, and bootstrap durations without prompt or credential
+  contents. A terminal event and its webhook outbox row are committed together;
+  `Webhooks` signs canonical JSON with timestamp-bound HMAC-SHA256, retries for
+  24 hours, and then records a dead-letter status.
 
 ## Configuration Boundary
 
@@ -106,6 +119,13 @@ included in the immutable environment snapshot and registry digest.
 Declared host mounts are read-only except for explicit files below the managed
 `/run/omashiki/state` root. That narrow writable boundary supports rotating
 OAuth state without exposing a provider's full host configuration directory.
+
+Optional `[host_credentials.*]` entries declare operator credential files that
+live outside the configuration root. Origins are read, never written: each
+attempt receives private copies under `/run/omashiki/state`, so a token refresh
+inside one container cannot corrupt the host file or another attempt's copy.
+Environments reference gateway credentials and host credentials through one
+`credentials` list; names must be unique across both.
 
 Public job payloads use the neutral V2 shape: required `instruction` plus
 optional JSON-object `context`. Harness/provider/auth/model control fields are
@@ -125,6 +145,7 @@ unauthenticated exposure.
 - [Admission](../server/lib/omashiki/jobs/admission.ex)
 - [Job lifecycle](../server/lib/omashiki/jobs.ex)
 - [Attempt runner](../server/lib/omashiki/jobs/runner.ex)
+- [Attempt supervision](../server/lib/omashiki/runtime/attempt.ex)
 - [Container boundary](../server/lib/omashiki/runtime/container_manager.ex)
 - [Harness adapter contract](../server/lib/omashiki/harness/adapter.ex)
 - [Harness types](../server/lib/omashiki/harness/types.ex)
