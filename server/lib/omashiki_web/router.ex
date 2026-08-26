@@ -78,5 +78,11 @@ defmodule OmashikiWeb.Router do
     pipe_through :api
 
     post "/tools-proxy/:server", ToolsProxyController, :handle
+
+    # LLM ingress for agent containers. Not `:authenticated_api`: the Bearer
+    # here is a job-bound gateway token minted at provision time, which
+    # GatewayController verifies itself — an operator API token would be the
+    # wrong credential.
+    post "/gateway/v1/chat/completions", GatewayController, :chat_completions
   end
 end
