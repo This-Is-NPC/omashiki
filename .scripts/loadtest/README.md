@@ -429,24 +429,28 @@ memory = "1GB"
 pids = 256
 ```
 
-### Tier B — OpenRouter `stealth/ox-alpha`
+### Tier B — OpenRouter, the gateway key path
 
 Gateway path: the container holds a job-bound token, never the key. The key
 itself stays in the environment because `omashiki.toml` is tracked by git —
 `${env:VAR}` is resolved at load time and fails loudly when the variable is
 unset.
 
+The stealth model this tier used to pin is gone from both OpenCode and
+OpenRouter, so pin one the account can actually reach; the tier is about the
+key path, not about any one model.
+
 ```toml
-[credentials.openrouter-ox-alpha]
+[credentials.openrouter]
 provider = "openrouter"
-model = "stealth/ox-alpha"
+model = "a-model-this-account-can-reach"
 base_url = "https://openrouter.ai/api/v1"
 api_key = "${env:OPENROUTER_API_KEY}"
 
 [environments.lt-openrouter]
 harness = "opencode"
 executables = ["git"]
-credentials = ["openrouter-ox-alpha"]
+credentials = ["openrouter"]
 caches = ["global"]
 timeout_ms = 600000
 network = "host"
@@ -499,11 +503,16 @@ pids = 256
 
 ### Tier D — local Qwen2.5-Coder-1.5B-Instruct
 
-The `192.168.0.200` address below is one specific private LAN box; substitute
-your own. Use the **instruct** model: the 0.5B GGUF is the *base* model, never
-emits a stop token under the OpenCode system prompt, and generates until the
-slot context is exhausted (29k tokens / 121 s per turn). The 1.5B instruct
-answers the same prompt in 0.7 s with `finish_reason=stop`.
+The address is one specific private LAN box, so it stays in the operator's
+environment rather than in the tracked file: `base_url` takes the same
+`${env:VAR}` form as `api_key` and fails the boot by name when the variable is
+unset. Export it before starting Omashiki, for example
+`OMASHIKI_LOCAL_LLM_BASE_URL=http://<host>:8080/v1`.
+
+Use the **instruct** model: the 0.5B GGUF is the *base* model, never emits a
+stop token under the OpenCode system prompt, and generates until the slot
+context is exhausted (29k tokens / 121 s per turn). The 1.5B instruct answers
+the same prompt in 0.7 s with `finish_reason=stop`.
 
 `llama-server` speaks OpenAI-compat; the gateway reaches it over the LAN and
 the container only ever sees the gateway.
@@ -511,8 +520,8 @@ the container only ever sees the gateway.
 ```toml
 [credentials.qwen-local]
 provider = "llamacpp"
-model = "qwen2.5-coder-1.5b"
-base_url = "http://192.168.0.200:8080/v1"
+model = "qwen2.5-coder-1.5b-instruct"
+base_url = "${env:OMASHIKI_LOCAL_LLM_BASE_URL}"
 api_key = "unused-by-llama-server"
 
 [environments.lt-qwen]
@@ -535,12 +544,16 @@ memory = "1GB"
 pids = 256
 ```
 
-### Tier E — jcode on OpenRouter, the high-concurrency configuration
+### Tier E — jcode on the local server, the high-concurrency configuration
 
 jcode is a static binary with no runtime: ~15 MiB resident per container
 against ~675 MiB for OpenCode. That is what moves the memory ceiling from ~53
 concurrent containers to a number CPU reaches first (~430 at the measured 0.028
 cores per attempt).
+
+It reuses Tier D's credential: jcode has no host-auth route, so it always
+reaches the model through the gateway, and the gateway is what holds the local
+server's address.
 
 ```toml
 [harnesses.jcode]
@@ -552,7 +565,7 @@ options = { timeout_ms = 600000 }
 [environments.lt-jcode]
 harness = "jcode"
 executables = ["git"]
-credentials = ["openrouter-ox-alpha"]
+credentials = ["qwen-local"]
 caches = []
 timeout_ms = 600000
 network = "host"

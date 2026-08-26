@@ -27,13 +27,13 @@ defmodule Omashiki.Harness.JcodeTest do
     assert plan.transport["argv"] == [Jcode.runner_path(), Jcode.invocation_path()]
     assert "JCODE_HOME=#{Jcode.jcode_home()}" in plan.environment
 
-    assert {:ok, pinned} = Jcode.launch_plan(profile(%{"model" => "stealth/ox-alpha"}))
+    assert {:ok, pinned} = Jcode.launch_plan(profile(%{"model" => "qwen2.5-coder-1.5b-instruct"}))
 
     assert pinned.transport["argv"] == [
              Jcode.runner_path(),
              Jcode.invocation_path(),
              "--model",
-             "stealth/ox-alpha"
+             "qwen2.5-coder-1.5b-instruct"
            ]
   end
 
@@ -43,8 +43,8 @@ defmodule Omashiki.Harness.JcodeTest do
       stdout:
         Jason.encode!(%{
           "session_id" => "session_x",
-          "provider" => "openrouter",
-          "model" => "stealth/ox-alpha",
+          "provider" => "llamacpp",
+          "model" => "qwen2.5-coder-1.5b-instruct",
           "text" => "HELLO",
           "usage" => %{
             "input_tokens" => 12_331,
@@ -74,8 +74,8 @@ defmodule Omashiki.Harness.JcodeTest do
     assert result.output_tokens == 16
     assert result.cached_input_tokens == 0
     assert result.cache_write_tokens == nil
-    assert result.model_resolved == "stealth/ox-alpha"
-    assert result.provider == "openrouter"
+    assert result.model_resolved == "qwen2.5-coder-1.5b-instruct"
+    assert result.provider == "llamacpp"
   end
 
   test "never places the prompt in the exec argv" do
