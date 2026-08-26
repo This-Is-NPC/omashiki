@@ -283,6 +283,18 @@ defmodule OmashikiWeb.Api.JobsController do
         "Batch parent references could not be resolved"
       )
 
+  # A drain-all configuration rollout is emptying the fleet. The submission is
+  # not wrong and will succeed once the swap lands, so it is a 503 with a retry
+  # hint rather than a 4xx that says the client did something invalid.
+  defp error(conn, :admission_paused),
+    do:
+      error_response(
+        conn,
+        503,
+        "admission_paused",
+        "Configuration rollout is draining active work; retry shortly"
+      )
+
   defp error(conn, :unknown_repository),
     do: error_response(conn, 422, "unknown_repository", "Repository is not registered")
 

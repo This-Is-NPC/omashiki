@@ -38,6 +38,9 @@ defmodule Omashiki.Application do
         Omashiki.Runtime.LeaseRenewer,
         Omashiki.Runtime.ContainerManager,
         Omashiki.Runtime.Inspector,
+        # Owns the hot swap. Boot still loads the file below — this is the
+        # supervised path that can load it *again* without a restart.
+        Omashiki.Config.Rollout,
         Omashiki.Runtimes.CacheMaintenance,
         {Oban, Application.fetch_env!(:omashiki, Oban)},
         Omashiki.Gateway.CircuitBreaker,

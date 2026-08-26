@@ -6,6 +6,7 @@ defmodule Omashiki.Jobs.Admission do
   alias Omashiki.Accounts.User
   alias Omashiki.ApiTokens.Token
   alias Omashiki.Config
+  alias Omashiki.Config.Rollout
   alias Omashiki.Jobs.{DispatchWorker, Job, JobAttempt, JobEvent}
   alias Omashiki.Jobs.Contract.V1
   alias Omashiki.Repo
@@ -17,7 +18,8 @@ defmodule Omashiki.Jobs.Admission do
 
   @doc "Admit one root job for an active, persisted API token."
   def admit(%Token{} = token, attrs) when is_map(attrs) do
-    with {:ok, request} <- validate_single(attrs),
+    with :ok <- admission_open(),
+         {:ok, request} <- validate_single(attrs),
          {:ok, user_id} <- authorize(token),
          nil <- find_existing(user_id, token.id, request["idempotency_key"]),
          {:ok, resolved} <- resolve(request) do
@@ -33,7 +35,8 @@ defmodule Omashiki.Jobs.Admission do
 
   @doc "Admit an ordered, atomically persisted batch of jobs."
   def admit_batch(%Token{} = token, attrs) when is_map(attrs) do
-    with {:ok, request} <- validate_batch(attrs),
+    with :ok <- admission_open(),
+         {:ok, request} <- validate_batch(attrs),
          {:ok, user_id} <- authorize(token),
          {:ok, items} <- prepare_batch(user_id, token.id, request),
          result <- insert_batch(user_id, token.id, request["correlation_id"], items) do
@@ -42,6 +45,13 @@ defmodule Omashiki.Jobs.Admission do
   end
 
   def admit_batch(_, _), do: {:error, :unauthorized}
+
+  # A `drain_all` rollout is waiting for the fleet to empty. Admitting here
+  # would keep it from ever emptying, so the door closes at the front rather
+  # than the work queueing up behind the swap.
+  defp admission_open do
+    if Rollout.admission_open?(), do: :ok, else: {:error, :admission_paused}
+  end
 
   defp validate_single(attrs) do
     case V1.validate_single(attrs) do

@@ -63,6 +63,10 @@ config :omashiki, :runtime_census, {Omashiki.Runtime.Inspector, :empty_census, [
 config :omashiki, :runtime_inspector_interval_ms, :timer.hours(1)
 config :omashiki, :enable_job_recovery, false
 
+# `Config.Rollout` polls for the fleet to empty during a drain. One second is
+# right for a production drain measured in minutes and is pure dead time here.
+config :omashiki, :rollout_poll_ms, 25
+
 # The capacity row is owned by the sandbox; tests call `Jobs.sync_capacity/0`.
 config :omashiki, :sync_execution_capacity_on_boot, false
 
