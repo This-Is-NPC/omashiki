@@ -37,6 +37,7 @@ defmodule Omashiki.Application do
         Omashiki.Runtime.PortAllocator,
         Omashiki.Runtime.LeaseRenewer,
         Omashiki.Runtime.ContainerManager,
+        Omashiki.Runtime.Inspector,
         Omashiki.Runtimes.CacheMaintenance,
         {Oban, Application.fetch_env!(:omashiki, Oban)},
         Omashiki.Gateway.CircuitBreaker,

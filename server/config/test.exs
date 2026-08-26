@@ -49,6 +49,18 @@ config :omashiki, :api_token_use_write, :inline
 
 # Skip on-boot orphan cleanup (no Docker socket / repo dirs in unit tests).
 config :omashiki, :run_orphan_cleanup_on_boot, false
+
+# The runtime graph joins a container census onto processes and attempt rows.
+# Tests drive the container half explicitly; without this the shared inspector
+# would reach for whatever Docker daemon the developer happens to be running and
+# fold their real containers into the assertions.
+config :omashiki, :runtime_census, {Omashiki.Runtime.Inspector, :empty_census, []}
+
+# …and the shared inspector never polls on its own here. `async: false` tests
+# share one sandbox connection with every other process, so a background poll
+# would queue behind — and ahead of — the queries a timing-sensitive test is
+# making. Tests call `Inspector.refresh/0` when they want a census.
+config :omashiki, :runtime_inspector_interval_ms, :timer.hours(1)
 config :omashiki, :enable_job_recovery, false
 
 # The capacity row is owned by the sandbox; tests call `Jobs.sync_capacity/0`.
