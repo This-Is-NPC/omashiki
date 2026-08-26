@@ -35,6 +35,11 @@ run         = "true"
 #   ci:docker:server       Dry-run build of server image
 #   ci:docker:agent        Dry-run build of opencode agent image
 #   ci:docker              Composite: docker:server + every agent image
+#
+# Every agent image build is followed by .scripts/agent_image_check.sh, which
+# asserts a size budget and that the image can actually execute the binaries
+# entrypoint.sh and omashiki.toml pre_steps depend on. Both halves are needed:
+# an image missing `mise` is small and green and fails every job at runtime.
 
 [tasks."ci:server"]
 description = "Start DB, compile server with warnings-as-errors, run full mix test"
@@ -107,19 +112,35 @@ run         = "docker build -t omashiki/server:ci-check -f server/Dockerfile ser
 
 [tasks."ci:docker:agent"]
 description = "Build production opencode agent Docker image (dry-run, no push)"
-run         = "docker build -t omashiki/agent:ci-check agent/"
+run         = """
+docker build -t omashiki/agent:ci-check agent/
+.scripts/agent_image_check.sh omashiki/agent:ci-check 2048 bash git curl python3 mise opencode
+"""
 
 [tasks."ci:docker:claude"]
 description = "Build pinned Claude Code agent Docker image (dry-run, no push)"
-run         = "docker build -t omashiki/agent-claude:ci-check -f agent/Dockerfile.claude agent/"
+run         = """
+docker build -t omashiki/agent-claude:ci-check -f agent/Dockerfile.claude agent/
+.scripts/agent_image_check.sh omashiki/agent-claude:ci-check 2048 bash git curl python3 mise node claude
+"""
 
 [tasks."ci:docker:codex"]
 description = "Build pinned OpenAI Codex CLI agent Docker image (dry-run, no push)"
-run         = "docker build -t omashiki/agent-codex:ci-check -f agent/Dockerfile.codex agent/"
+run         = """
+docker build -t omashiki/agent-codex:ci-check -f agent/Dockerfile.codex agent/
+.scripts/agent_image_check.sh omashiki/agent-codex:ci-check 2048 bash git curl python3 mise node codex
+"""
 
+# jcode deliberately ships neither curl, python3 nor mise: it has no
+# HEALTHCHECK, runs no supply-chain relay, and omashiki.toml declares no jcode
+# environment, so nothing invokes `mise install` for it. Its contract is
+# correspondingly narrower — do not copy the list above onto it.
 [tasks."ci:docker:jcode"]
 description = "Build pinned jcode agent Docker image (dry-run, no push)"
-run         = "docker build -t omashiki/agent-jcode:ci-check -f agent/Dockerfile.jcode agent/"
+run         = """
+docker build -t omashiki/agent-jcode:ci-check -f agent/Dockerfile.jcode agent/
+.scripts/agent_image_check.sh omashiki/agent-jcode:ci-check 1024 bash git jcode
+"""
 
 [tasks."ci:docker"]
 description = "Build server + agent Docker images (dry-run, no push)"
