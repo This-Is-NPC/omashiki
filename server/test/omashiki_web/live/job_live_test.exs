@@ -73,9 +73,13 @@ defmodule OmashikiWeb.JobLiveTest do
     assert html =~ "Branch and SHAs"
     assert html =~ "checkout"
     assert html =~ "125"
-    refute html =~ "Retry"
-    refute html =~ "Audit"
-    refute html =~ "Comments"
+    # Against the operator's own reading of the screen, not the raw document:
+    # the CSRF and LiveView session tokens are base64url and will contain
+    # short letter runs like these by chance.
+    text = visible_text(html)
+    refute text =~ "Retry"
+    refute text =~ "Audit"
+    refute text =~ "Comments"
   end
 
   test "cancel action is authorized and updates the job", %{conn: conn, user: user, token: token} do

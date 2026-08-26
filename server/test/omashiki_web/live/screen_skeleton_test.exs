@@ -18,13 +18,17 @@ defmodule OmashikiWeb.ScreenSkeletonTest do
     assert config =~ "Environments"
     assert config =~ "Caches"
 
+    # Against the operator's own reading of the screen, not the raw document:
+    # the CSRF and LiveView session tokens are base64url and will contain any
+    # of these letter runs by chance.
     for html <- [overview, queue, config] do
-      refute html =~ "DAG"
-      refute html =~ "Review"
-      refute html =~ "Persona"
-      refute html =~ "Comment"
-      refute html =~ "Drag"
-      refute html =~ "Workflow"
+      text = visible_text(html)
+      refute text =~ "DAG"
+      refute text =~ "Review"
+      refute text =~ "Persona"
+      refute text =~ "Comment"
+      refute text =~ "Drag"
+      refute text =~ "Workflow"
     end
   end
 

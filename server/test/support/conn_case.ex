@@ -43,6 +43,29 @@ defmodule OmashikiWeb.ConnCase do
     {:ok, [conn: conn] ++ ctx}
   end
 
+  @label_attributes ~w(alt aria-label placeholder title)
+
+  @doc """
+  Returns only the words a human (or a screen reader) actually reads in a
+  rendered document: text nodes plus #{Enum.join(@label_attributes, ", ")}.
+
+  Markup, `<script>` bodies, and every other attribute are dropped, so the
+  generated CSRF and LiveView session tokens cannot be mistaken for
+  vocabulary. Use this, never the raw HTML, when refuting that a word is
+  absent from a screen: a base64url token contains arbitrary letter runs
+  and will otherwise match at random.
+  """
+  def visible_text(html) when is_binary(html) do
+    document = Floki.parse_document!(html)
+
+    labels =
+      Enum.flat_map(@label_attributes, fn attribute ->
+        Floki.attribute(document, "[#{attribute}]", attribute)
+      end)
+
+    Enum.join([Floki.text(document, sep: " ") | labels], " ")
+  end
+
   @doc """
   Adds the bearer-token header AND a `:user_id` session cookie to the
   given conn unless the test is tagged `:unauthenticated`.

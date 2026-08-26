@@ -31,8 +31,12 @@ defmodule OmashikiWeb.QueueLiveTest do
     assert html =~ "repository"
     assert html =~ "environment"
     assert html =~ "attempt"
-    refute html =~ "DAG"
-    refute html =~ "drag"
+    # Against the operator's own reading of the screen, not the raw document:
+    # the CSRF and LiveView session tokens are base64url and will contain
+    # "DAG" or "drag" by chance.
+    text = visible_text(html)
+    refute text =~ "DAG"
+    refute text =~ "drag"
   end
 
   test "refreshes when a durable job update is broadcast", %{conn: conn} do

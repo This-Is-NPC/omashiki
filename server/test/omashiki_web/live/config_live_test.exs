@@ -12,9 +12,13 @@ defmodule OmashikiWeb.ConfigLiveTest do
     assert html =~ "Environments"
     assert html =~ "Read-only"
     assert html =~ "restart to change"
-    refute html =~ "Save"
-    refute html =~ "Edit"
-    refute html =~ "Persona"
+    # Against the operator's own reading of the screen, not the raw document:
+    # the CSRF and LiveView session tokens are base64url and will contain
+    # short letter runs like these by chance.
+    text = visible_text(html)
+    refute text =~ "Save"
+    refute text =~ "Edit"
+    refute text =~ "Persona"
   end
 
   test "cache purge action is available only for configured groups", %{conn: conn} do
