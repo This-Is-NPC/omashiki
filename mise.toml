@@ -40,6 +40,14 @@ run         = "true"
 # asserts a size budget and that the image can actually execute the binaries
 # entrypoint.sh and omashiki.toml pre_steps depend on. Both halves are needed:
 # an image missing `mise` is small and green and fails every job at runtime.
+#
+# The two images whose environment declares a `mise install --yes` pre_step
+# also run .scripts/agent_toolchain_check.sh, which performs that install for
+# real. Executing `mise --version` does not prove `mise install` works: mise
+# builds erlang from source with kerl, so a base with no C toolchain passes
+# the dependency contract above and still fails the pre_step. That check costs
+# roughly two minutes per image and is the only part of this matrix that
+# compiles anything.
 
 [tasks."ci:server"]
 description = "Start DB, compile server with warnings-as-errors, run full mix test"
@@ -115,8 +123,14 @@ description = "Build production opencode agent Docker image (dry-run, no push)"
 run         = """
 docker build -t omashiki/agent:ci-check agent/
 .scripts/agent_image_check.sh omashiki/agent:ci-check 2048 bash git curl python3 mise opencode
+.scripts/agent_toolchain_check.sh omashiki/agent:ci-check
 """
 
+# No agent_toolchain_check.sh here on purpose: omashiki.toml declares
+# [harnesses.claude-code] but no [environments.claude-code], so nothing ever
+# runs `mise install` against this image and it ships no C toolchain. Adding
+# the check would spend two minutes asserting a capability the image is not
+# meant to have.
 [tasks."ci:docker:claude"]
 description = "Build pinned Claude Code agent Docker image (dry-run, no push)"
 run         = """
@@ -129,6 +143,7 @@ description = "Build pinned OpenAI Codex CLI agent Docker image (dry-run, no pus
 run         = """
 docker build -t omashiki/agent-codex:ci-check -f agent/Dockerfile.codex agent/
 .scripts/agent_image_check.sh omashiki/agent-codex:ci-check 2048 bash git curl python3 mise node codex
+.scripts/agent_toolchain_check.sh omashiki/agent-codex:ci-check
 """
 
 # jcode deliberately ships neither curl, python3 nor mise: it has no
