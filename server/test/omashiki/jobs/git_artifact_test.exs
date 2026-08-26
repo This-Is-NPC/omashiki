@@ -19,7 +19,7 @@ defmodule Omashiki.Jobs.GitArtifactTest do
     }
 
     on_exit(fn -> File.rm_rf!(root) end)
-    {:ok, job: job, repo: repo}
+    {:ok, root: root, job: job, repo: repo}
   end
 
   test "captures base SHA and creates an isolated job worktree", %{job: job, repo: repo} do
@@ -175,6 +175,113 @@ defmodule Omashiki.Jobs.GitArtifactTest do
     refute recent.branch in pruned
     assert branch?(repo, recent.branch)
     assert :ok = GitArtifact.cleanup(recent)
+  end
+
+  # The canonical remote is a bare repository on this filesystem and the second
+  # node is a second clone of it. That is a proxy for two machines — one host,
+  # but the identical Git transport and ref-negotiation path — and the proxy is
+  # the only simulated part of the claim.
+  describe "canonical remote" do
+    test "publishes the branch so a clone that never ran the attempt can fetch it", ctx do
+      canonical = canonical_remote!(ctx)
+      job = at_node(ctx.job, ctx.repo, canonical)
+
+      {:ok, artifact} = GitArtifact.provision_worktree(job)
+      File.write!(Path.join(artifact.path, "delivered.txt"), "artifact\n")
+
+      assert {:ok, result} = GitArtifact.finalize(artifact, job)
+      assert result.remote == canonical
+      assert result.result["remote"] == canonical
+
+      observer = clone!(ctx, canonical, "observer")
+
+      assert git!(observer, ["rev-parse", "refs/remotes/origin/#{result.branch}"]) ==
+               result.head_sha
+
+      assert git!(observer, ["show", "origin/#{result.branch}:delivered.txt"]) == "artifact"
+      assert :ok = GitArtifact.cleanup(artifact)
+    end
+
+    test "detects a colliding branch on the remote instead of dropping an artifact", ctx do
+      canonical = canonical_remote!(ctx)
+      second_node = clone!(ctx, canonical, "node-b")
+
+      first_job = at_node(ctx.job, ctx.repo, canonical)
+      second_job = at_node(ctx.job, second_node, canonical)
+
+      {:ok, first} = GitArtifact.provision_worktree(first_job)
+      {:ok, second} = GitArtifact.provision_worktree(second_job)
+      assert first.branch == second.branch
+
+      File.write!(Path.join(first.path, "out.txt"), "first node\n")
+      File.write!(Path.join(second.path, "out.txt"), "second node\n")
+
+      assert {:ok, published} = GitArtifact.finalize(first, first_job)
+
+      assert {:error, {:collision, :remote, branch}} =
+               GitArtifact.finalize(second, second_job)
+
+      assert branch == first.branch
+      assert git!(canonical, ["rev-parse", "refs/heads/#{branch}"]) == published.head_sha
+
+      assert :ok = GitArtifact.cleanup(first)
+      assert :ok = GitArtifact.cleanup(second)
+    end
+
+    test "prunes an expired remote branch from a node that never held it locally", ctx do
+      canonical = canonical_remote!(ctx)
+      old_job = at_node(ctx.job, ctx.repo, canonical)
+      recent_job = at_node(%{ctx.job | id: ctx.job.id <> "-recent"}, ctx.repo, canonical)
+
+      {:ok, old} = GitArtifact.provision_worktree(old_job)
+
+      git!(
+        old.path,
+        ["commit", "--allow-empty", "-q", "-m", "old"],
+        identity_env("2000-01-01T00:00:00Z")
+      )
+
+      assert {:ok, _} = GitArtifact.finalize(old, old_job)
+      assert :ok = GitArtifact.cleanup(old)
+
+      {:ok, recent} = GitArtifact.provision_worktree(recent_job)
+      assert {:ok, _} = GitArtifact.finalize(recent, recent_job)
+      assert :ok = GitArtifact.cleanup(recent)
+
+      sweeper = clone!(ctx, canonical, "sweeper")
+      refute branch?(sweeper, old.branch)
+
+      assert {:ok, pruned} =
+               GitArtifact.prune_expired(sweeper,
+                 remote: canonical,
+                 cutoff: System.system_time(:second) - 1
+               )
+
+      assert old.branch in pruned
+      refute recent.branch in pruned
+      refute branch?(canonical, old.branch)
+      assert branch?(canonical, recent.branch)
+    end
+  end
+
+  defp canonical_remote!(%{root: root, repo: repo}) do
+    canonical = Path.join(root, "canonical.git")
+    git!(root, ["init", "--bare", "-q", "-b", "main", canonical])
+    git!(repo, ["push", "-q", canonical, "refs/heads/main:refs/heads/main"])
+    canonical
+  end
+
+  defp clone!(%{root: root}, source, name) do
+    target = Path.join(root, name)
+    git!(root, ["clone", "--quiet", source, target])
+    target
+  end
+
+  defp at_node(%Job{} = job, path, remote) do
+    %{
+      job
+      | repository_snapshot: %{"path" => path, "base_branch" => "main", "remote" => remote}
+    }
   end
 
   defp install_hook!(repo, contents) do

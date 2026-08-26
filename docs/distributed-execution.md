@@ -52,23 +52,41 @@ Phase 3 makes claims more frequent.
 Do this first. It depends on no other phase and it is the only one that changes
 observable product behavior.
 
+Status: **done.**
+
 **Problem.** Success is a local `omashiki/job-<id>` branch inside `<repo_path>`
-on the machine that executed (`jobs/git_artifact.ex:159-168`). If that node dies,
-or the client asks a different node, the deliverable is gone.
+on the machine that executed. If that node dies, or the client asks a different
+node, the deliverable is gone. A second defect sat underneath it:
+`collision_check/2` only inspected local state, and with N nodes writing to one
+shared remote the absence of a *local* collision proves nothing.
 
 **Change.** Finalization publishes to a canonical remote. The local branch
 becomes an execution detail and the result becomes
 `(remote, branch, base_sha, head_sha)`.
 
-- [ ] A canonical remote field per repository in `omashiki.toml`
-- [ ] `GitArtifact.finalize` pushes after the safety validations — secret,
+- [x] A canonical remote field per repository in `omashiki.toml` —
+      `[repositories.*].remote`, optional, `nil` keeps single-node behaviour
+- [x] `GitArtifact.finalize` pushes after the safety validations — secret,
       symlink, protected path, and the 100 MiB cap stay **before** the push
       (NFR-005)
-- [ ] The API result exposes the remote
-- [ ] `prune_expired/2` prunes on the remote, not only locally
+- [x] The API result exposes the remote, in the attempt `result` map
+- [x] `prune_expired/2` prunes on the remote, not only locally: candidates come
+      from the remote's own refs, so a node prunes artifacts it never held
+- [x] Collision detection moved to the push. `--force-with-lease=<ref>:` with an
+      empty expectation makes the remote refuse a branch name that already
+      exists there, so the arbiter is the one repository every node shares
+
+**Push credentials.** Not declared in `omashiki.toml`. The push is a host-side
+operation by the Omashiki daemon and authenticates the way every other host-side
+Git command does — SSH agent, `~/.ssh/config`, or a credential helper.
+`[host_credentials.*]` was rejected for it: that section is harness-shaped and
+delivers by copying into the per-attempt container mount, which is precisely
+where a push credential must not be. An agent holding it could push to the
+canonical remote directly and bypass the artifact safety validations.
 
 **Done when:** a job's branch is reachable from a machine that did not run the
-attempt.
+attempt. Covered by `Omashiki.Jobs.GitArtifactTest`, "canonical remote"
+— a bare repository plus a second clone stands in for the second machine.
 
 ## Phase 2 — Node Identity
 
