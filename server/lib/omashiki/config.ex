@@ -414,7 +414,7 @@ defmodule Omashiki.Config do
         model = require_string_field!(attrs, "model", where)
         base_url = optional_string_field!(attrs, "base_url", where)
         validate_credential_base_url!(base_url, where)
-        api_key = optional_string_field!(attrs, "api_key", where) || ""
+        api_key = resolve_api_key!(optional_string_field!(attrs, "api_key", where) || "", where)
         fallback_chain = Map.get(attrs, "fallback_chain", [])
         model_aliases = Map.get(attrs, "model_aliases", %{})
 
@@ -475,6 +475,28 @@ defmodule Omashiki.Config do
     Enum.each(Map.fetch!(by_name, name).fallback_chain, fn fallback ->
       validate_fallback_cycle!(fallback, by_name, visiting)
     end)
+  end
+
+  # `api_key = "${env:VAR}"` keeps a live key in the operator's environment
+  # instead of in this file, which is tracked by git. Anything else is used
+  # verbatim, so existing plaintext declarations keep working.
+  @env_reference ~r/^\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/
+
+  defp resolve_api_key!(value, where) do
+    case Regex.run(@env_reference, value) do
+      [_, name] ->
+        case System.get_env(name) do
+          key when is_binary(key) and key != "" ->
+            key
+
+          _ ->
+            raise Error,
+                  "#{where}.api_key references environment variable #{name}, which is unset or empty"
+        end
+
+      nil ->
+        value
+    end
   end
 
   defp validate_credential_base_url!(nil, _where), do: :ok

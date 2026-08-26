@@ -323,6 +323,36 @@ defmodule Omashiki.Config.RegistryTest do
     end
   end
 
+  test "resolves an api_key declared as an environment reference", ctx do
+    var = "OMASHIKI_TEST_API_KEY_#{System.unique_integer([:positive])}"
+    referenced = put_in(fixture(ctx), ["credentials", "provider", "api_key"], "${env:#{var}}")
+
+    on_exit(fn -> System.delete_env(var) end)
+
+    assert_raise Error, ~r/references environment variable #{var}, which is unset or empty/, fn ->
+      Config.load_map!(referenced, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+
+    System.put_env(var, "")
+
+    assert_raise Error, ~r/references environment variable #{var}, which is unset or empty/, fn ->
+      Config.load_map!(referenced, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+
+    System.put_env(var, "resolved-secret")
+
+    assert :ok = Config.load_map!(referenced, path: Path.join(ctx.root, "omashiki.toml"))
+    assert %Credential{api_key: "resolved-secret"} = Config.get_credential("provider")
+  end
+
+  test "leaves an api_key that is not an environment reference verbatim", ctx do
+    literal =
+      put_in(fixture(ctx), ["credentials", "provider", "api_key"], "${env:not a var name}")
+
+    assert :ok = Config.load_map!(literal, path: Path.join(ctx.root, "omashiki.toml"))
+    assert %Credential{api_key: "${env:not a var name}"} = Config.get_credential("provider")
+  end
+
   test "rejects symlinked Git metadata", ctx do
     File.rm_rf!(Path.join(ctx.repo, ".git"))
     external_git = Path.join(ctx.root, "external.git")
