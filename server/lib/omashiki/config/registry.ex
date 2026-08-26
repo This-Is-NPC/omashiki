@@ -10,6 +10,19 @@ defmodule Omashiki.Config.Repository do
   defstruct [:name, :path, :base_branch, :remote]
 end
 
+defmodule Omashiki.Config.Node do
+  @moduledoc """
+  Immutable declared execution node.
+
+  A node is one machine that runs attempts. The name is the whole declaration:
+  it is what `job_attempts.node_id` records, so "which machine ran this?" is
+  answerable from the database. Per-node capacity and per-node Docker endpoint
+  are declared by the phases that consume them, not here.
+  """
+  @enforce_keys [:name]
+  defstruct [:name]
+end
+
 defmodule Omashiki.Config.Step do
   @moduledoc "Ordered, argv-only environment lifecycle step."
   @enforce_keys [:phase, :argv, :condition, :timeout_ms]
@@ -54,7 +67,7 @@ end
 defmodule Omashiki.Config.Registry do
   @moduledoc false
 
-  alias Omashiki.Config.{Environment, Error, Mount, Repository, Step}
+  alias Omashiki.Config.{Environment, Error, Mount, Node, Repository, Step}
   alias Omashiki.SupplyChain.Policy
 
   @name ~r/^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -73,6 +86,7 @@ defmodule Omashiki.Config.Registry do
         repository_section,
         environment_section,
         harness_section,
+        node_section,
         caches,
         credentials,
         host_credentials,
@@ -84,6 +98,7 @@ defmodule Omashiki.Config.Registry do
 
     repositories = build_repositories!(repository_section, base_dir)
     harnesses = Omashiki.Harnesses.build!(harness_section)
+    nodes = build_nodes!(node_section)
 
     environments =
       build_environments!(
@@ -101,10 +116,26 @@ defmodule Omashiki.Config.Registry do
       repositories: repositories,
       harnesses: harnesses,
       environments: environments,
+      nodes: nodes,
       registry_digest: digest
     }
   end
 
+  # Nodes are deliberately not hashed here.
+  #
+  # The digest pins what a job *does* — its repository, harness, and environment
+  # — and is captured at admission so a later reload cannot move the ground under
+  # an admitted job. The node list is not part of that: a job admitted while three
+  # machines were declared executes identically once a fourth joins. Hashing it
+  # would invalidate every in-flight job's digest on scale-out or on draining a
+  # machine, which are routine operations, not configuration drift.
+  #
+  # It would also defeat the cross-node comparison it looks like it serves. With
+  # no `[nodes]` section the single implicit node is named after *this* machine,
+  # so two identically-configured hosts would hash differently and report a
+  # divergence that does not exist. Divergence stays loud where it is actually
+  # checkable: a machine absent from a declared `[nodes]` list fails config load
+  # outright rather than claiming work under a node id nothing else knows about.
   def digest(repositories, harnesses, environments) do
     canonical = %{
       repositories: repositories,
@@ -116,6 +147,22 @@ defmodule Omashiki.Config.Registry do
     |> :erlang.term_to_binary([:deterministic])
     |> then(&:crypto.hash(:sha256, &1))
     |> Base.encode16(case: :lower)
+  end
+
+  # A node declares a name and nothing else today. The fields a distributed
+  # deployment needs — per-node capacity, per-node Docker endpoint — are added by
+  # the changes that read them; an option nothing consumes is a lie in the file.
+  defp build_nodes!(section) do
+    section
+    |> require_section_table!("nodes")
+    |> Enum.map(fn {name, attrs} ->
+      where = "nodes.#{name}"
+      validate_name!(name, where)
+      attrs = require_table!(attrs, where)
+      reject_unknown!(attrs, [], where)
+      %Node{name: name}
+    end)
+    |> Enum.sort_by(& &1.name)
   end
 
   defp build_repositories!(section, base_dir) do

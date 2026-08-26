@@ -3,8 +3,12 @@ defmodule Omashiki.Config do
   Declared host configuration from `omashiki.toml`.
 
   Production configuration declares repositories, governed environments,
-  credentials, host credentials, caches, and host limits. Jobs capture repository/environment
-  values and their digest at admission so later reloads cannot alter them.
+  credentials, host credentials, caches, execution nodes, and host limits. Jobs
+  capture repository/environment values and their digest at admission so later
+  reloads cannot alter them.
+
+  `[nodes]` is optional. Without it there is exactly one implicit node — this
+  machine — and every path behaves as it did before nodes existed.
 
   ## Failures
 
@@ -17,7 +21,7 @@ defmodule Omashiki.Config do
   """
 
   alias Omashiki.Credentials.Credential
-  alias Omashiki.Config.{HostCredential, Registry, ResolvedJob}
+  alias Omashiki.Config.{HostCredential, Node, Registry, ResolvedJob}
   alias Omashiki.Runtimes.CacheGroup
   alias Omashiki.SupplyChain.Policy
 
@@ -46,6 +50,8 @@ defmodule Omashiki.Config do
     harnesses: [],
     repositories: [],
     environments: [],
+    nodes: [],
+    current_node: nil,
     registry_digest: nil,
     limits: %{},
     path: nil,
@@ -113,6 +119,29 @@ defmodule Omashiki.Config do
   def repositories, do: snapshot().repositories
   def environments, do: snapshot().environments
   def current_digest, do: snapshot().registry_digest
+
+  @doc """
+  Declared execution nodes, or the single implicit local node.
+
+  An `omashiki.toml` with no `[nodes]` section yields exactly one node — this
+  machine — so every caller sees the same shape whether or not the operator has
+  declared a cluster.
+  """
+  def nodes do
+    case snapshot().nodes do
+      [] -> [current_node()]
+      nodes -> nodes
+    end
+  end
+
+  @doc """
+  The node this process runs on.
+
+  Resolved once at load. Falls back to the implicit local node when no
+  configuration has been loaded at all, so it never returns nil and never
+  raises on the claim path.
+  """
+  def current_node, do: snapshot().current_node || local_node()
 
   @doc "Current immutable repository/environment registry snapshot."
   def current_snapshot do
@@ -212,6 +241,47 @@ defmodule Omashiki.Config do
     c != [] or hc != [] or ca != [] or repositories != [] or environments != [] or map_size(l) > 0
   end
 
+  # Which of the declared nodes is this machine?
+  #
+  # `OMASHIKI_NODE` names it explicitly; the hostname is the fallback, so a
+  # machine whose host name matches its declaration needs no environment at all.
+  #
+  # No `[nodes]` section means the distributed path is not in use: one implicit
+  # local node, and nothing to disagree with. A single declared node is that
+  # node by construction — declaring it is how an operator names the machine.
+  #
+  # Beyond that the mismatch is loud. A machine that is not in the list would
+  # otherwise claim work and stamp attempts with a node id no other machine, and
+  # no per-node capacity row, has ever heard of. Failing config load is the only
+  # place that is still cheap to notice.
+  defp resolve_current_node!([]), do: local_node()
+  defp resolve_current_node!([%Node{} = only]), do: only
+
+  defp resolve_current_node!(nodes) do
+    name = local_node_name()
+
+    Enum.find(nodes, &(&1.name == name)) ||
+      raise Error,
+            "this machine is #{inspect(name)}, which is not declared in [nodes]; " <>
+              "set OMASHIKI_NODE to one of #{inspect(Enum.map(nodes, & &1.name))}"
+  end
+
+  defp local_node, do: %Node{name: local_node_name()}
+
+  defp local_node_name do
+    case System.get_env("OMASHIKI_NODE") do
+      name when is_binary(name) and name != "" -> name
+      _ -> hostname()
+    end
+  end
+
+  defp hostname do
+    case :inet.gethostname() do
+      {:ok, host} -> List.to_string(host)
+      _ -> "local"
+    end
+  end
+
   defp build_snapshot!(map, path, source, opts) when is_map(map) do
     map = stringify_keys(map)
 
@@ -234,6 +304,7 @@ defmodule Omashiki.Config do
         section(map, "repositories"),
         section(map, "environments"),
         section(map, "harnesses"),
+        section(map, "nodes"),
         caches,
         credentials,
         host_credentials,
@@ -249,6 +320,8 @@ defmodule Omashiki.Config do
       harnesses: registry.harnesses,
       repositories: registry.repositories,
       environments: registry.environments,
+      nodes: registry.nodes,
+      current_node: resolve_current_node!(registry.nodes),
       registry_digest: registry.registry_digest,
       limits: limits,
       path: path,

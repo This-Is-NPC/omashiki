@@ -86,6 +86,29 @@ HEX_HOME = "/omashiki-cache/global/hex"
 # [caches.global.policy.packages.go]
 # "example.com/module" = "v1.2.3"
 
+# Execution nodes: the machines that run attempts. Optional, and left out here.
+#
+# Without this section there is exactly one implicit node — this machine — and
+# every path behaves as it did before nodes existed. Declare it only when more
+# than one machine shares the queue.
+#
+# A name is the whole declaration. Per-node capacity and per-node Docker
+# endpoint are added by the changes that read them; an option nothing consumes
+# would be a lie in this file.
+#
+# The name must be kebab-case, like every other registry section. A process
+# picks its own node from OMASHIKI_NODE, falling back to the hostname, so a
+# machine named after its host needs no environment variable. Declaring nodes
+# and then booting on a machine that is not in the list fails config load
+# rather than letting it claim work under a node id nothing else knows about.
+#
+# The node list is deliberately outside the registry digest: adding or draining
+# a machine is a deployment, not configuration drift, and must not invalidate
+# the digest every in-flight job was admitted under.
+#
+# [nodes.builder-01]
+# [nodes.builder-02]
+
 [repositories.omashiki]
 path = "."
 base_branch = "master"

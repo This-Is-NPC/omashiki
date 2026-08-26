@@ -2,7 +2,7 @@ defmodule Omashiki.Config.RegistryTest do
   use ExUnit.Case, async: false
 
   alias Omashiki.Config
-  alias Omashiki.Config.{Environment, Error, Repository, ResolvedJob, Step}
+  alias Omashiki.Config.{Environment, Error, Node, Repository, ResolvedJob, Step}
   alias Omashiki.Credentials.Credential
 
   setup do
@@ -262,6 +262,93 @@ defmodule Omashiki.Config.RegistryTest do
     end
   end
 
+  test "declares execution nodes", ctx do
+    put_env!("OMASHIKI_NODE", "builder-01")
+    declared = Map.put(fixture(ctx), "nodes", %{"builder-02" => %{}, "builder-01" => %{}})
+    assert :ok = Config.load_map!(declared, path: Path.join(ctx.root, "omashiki.toml"))
+
+    assert [%Node{name: "builder-01"}, %Node{name: "builder-02"}] = Config.nodes()
+    assert Config.current_node() == %Node{name: "builder-01"}
+  end
+
+  test "rejects unknown node fields and malformed node names", ctx do
+    unknown = Map.put(fixture(ctx), "nodes", %{"builder-01" => %{"docker_socket" => "/x.sock"}})
+
+    assert_raise Error, ~r/nodes\.builder-01: unknown fields \["docker_socket"\]/, fn ->
+      Config.load_map!(unknown, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+
+    for name <- ["Builder-01", "builder_01", "builder--01", "-builder", ""] do
+      invalid = Map.put(fixture(ctx), "nodes", %{name => %{}})
+
+      assert_raise Error, ~r/name must be kebab-case/, fn ->
+        Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+      end
+    end
+
+    not_a_table = Map.put(fixture(ctx), "nodes", %{"builder-01" => "socket"})
+
+    assert_raise Error, ~r/nodes\.builder-01 must be a table/, fn ->
+      Config.load_map!(not_a_table, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+  end
+
+  # The compatibility contract. Everything below the config layer — the claim
+  # path, recovery, the operator UI — reads `current_node/0`, so an absent
+  # section must still answer, and must answer with exactly one node.
+  test "no [nodes] section yields exactly one implicit local node", ctx do
+    put_env!("OMASHIKI_NODE", "implicit-host")
+    refute Map.has_key?(fixture(ctx), "nodes")
+    assert :ok = Config.load_map!(fixture(ctx), path: Path.join(ctx.root, "omashiki.toml"))
+
+    assert [%Node{name: "implicit-host"}] = Config.nodes()
+    assert Config.current_node() == %Node{name: "implicit-host"}
+  end
+
+  test "the implicit local node falls back to the hostname", ctx do
+    put_env!("OMASHIKI_NODE", nil)
+    {:ok, host} = :inet.gethostname()
+    assert :ok = Config.load_map!(fixture(ctx), path: Path.join(ctx.root, "omashiki.toml"))
+
+    assert [%Node{name: name}] = Config.nodes()
+    assert name == List.to_string(host)
+  end
+
+  # One declared node is how an operator names this machine, so it is this
+  # machine whatever the hostname says. More than one is a cluster, and a host
+  # in none of them would claim work under a node id no other machine, and no
+  # per-node capacity row, has ever heard of.
+  test "a single declared node is this machine regardless of hostname", ctx do
+    put_env!("OMASHIKI_NODE", nil)
+    declared = Map.put(fixture(ctx), "nodes", %{"solo" => %{}})
+    assert :ok = Config.load_map!(declared, path: Path.join(ctx.root, "omashiki.toml"))
+    assert Config.current_node() == %Node{name: "solo"}
+  end
+
+  test "rejects a machine that is absent from the declared node list", ctx do
+    put_env!("OMASHIKI_NODE", "ghost")
+    declared = Map.put(fixture(ctx), "nodes", %{"builder-01" => %{}, "builder-02" => %{}})
+
+    assert_raise Error, ~r/"ghost", which is not declared in \[nodes\]/, fn ->
+      Config.load_map!(declared, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+  end
+
+  # Adding or draining a machine is a deployment, not configuration drift. If
+  # the node list were hashed, every in-flight job's admitted digest would go
+  # stale on a routine scale-out.
+  test "the registry digest ignores the node list", ctx do
+    put_env!("OMASHIKI_NODE", "builder-01")
+    assert :ok = Config.load_map!(fixture(ctx), path: Path.join(ctx.root, "omashiki.toml"))
+    without_nodes = Config.current_digest()
+
+    declared = Map.put(fixture(ctx), "nodes", %{"builder-01" => %{}, "builder-02" => %{}})
+    assert :ok = Config.load_map!(declared, path: Path.join(ctx.root, "omashiki.toml"))
+
+    assert Config.current_digest() == without_nodes
+    assert length(Config.nodes()) == 2
+  end
+
   test "rejects policy rules when policy mode is off", ctx do
     invalid =
       put_in(
@@ -485,6 +572,21 @@ defmodule Omashiki.Config.RegistryTest do
       Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
     end
   end
+
+  defp put_env!(name, nil) do
+    previous = System.get_env(name)
+    System.delete_env(name)
+    on_exit(fn -> restore_env(name, previous) end)
+  end
+
+  defp put_env!(name, value) do
+    previous = System.get_env(name)
+    System.put_env(name, value)
+    on_exit(fn -> restore_env(name, previous) end)
+  end
+
+  defp restore_env(name, nil), do: System.delete_env(name)
+  defp restore_env(name, previous), do: System.put_env(name, previous)
 
   defp fixture(ctx) do
     %{
