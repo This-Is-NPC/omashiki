@@ -63,10 +63,10 @@ defmodule Omashiki.Jobs.DispatchWorker do
       nil ->
         {:cancel, :job_missing}
 
-      %Job{status: "queued"} ->
+      %Job{status: "queued"} = job ->
         case Jobs.claim(job_id, "oban:#{oban_id}") do
           {:ok, attempt} ->
-            case attempt_runner().run(attempt) do
+            case attempt_runner().run(attempt, await_timeout_ms: await_timeout_ms(job)) do
               {:ok, %Job{status: status}} when status in @terminal ->
                 :ok
 
@@ -160,4 +160,14 @@ defmodule Omashiki.Jobs.DispatchWorker do
 
   defp attempt_runner,
     do: Application.get_env(:omashiki, :dispatch_attempt_runner, AttemptSupervisor)
+
+  defp await_timeout_ms(%Job{environment_snapshot: env}) when is_map(env) do
+    job_timeout = Map.get(env, "timeout_ms", 60_000)
+    slack = Application.get_env(:omashiki, :dispatch_await_slack_ms, 60_000)
+    job_timeout + slack
+  end
+
+  defp await_timeout_ms(_job) do
+    Application.get_env(:omashiki, :dispatch_await_timeout_ms, 3_660_000)
+  end
 end

@@ -66,6 +66,15 @@ config :mime, :types, %{
 # Job events remain streamable for this durable observation horizon.
 config :omashiki, :job_event_retention_days, 30
 
+# Outbound provider HTTP must not block a DispatchWorker forever. The receive
+# loop enforces this as a total request deadline (connect timeout is separate).
+config :omashiki, :gateway_provider_request_timeout_ms, 120_000
+
+# Dispatch waits for the attempt coordinator at most job `timeout_ms` plus this
+# slack. Without a bound, a hung runner keeps heartbeating and Oban stays in
+# `executing` until Lifeline fires.
+config :omashiki, :dispatch_await_slack_ms, 60_000
+
 # Oban retains durable queue rows for the same 30-day horizon as job data.
 # The `scheduler` limit is a second, independent concurrency ceiling: it caps how
 # many DispatchWorkers run at once, so it bounds live attempts regardless of

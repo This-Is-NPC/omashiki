@@ -19,16 +19,55 @@ defmodule Omashiki.Runtime.AttemptSupervisor do
   @doc "Run an attempt through its registered coordinator and wait for its terminal result."
   def run(%JobAttempt{} = attempt, opts \\ []) do
     spec = {Attempt, {attempt, opts}}
+    await_timeout = Keyword.get(opts, :await_timeout_ms, default_await_timeout_ms())
 
-    case DynamicSupervisor.start_child(__MODULE__, spec) do
-      {:ok, pid} -> Attempt.await(pid)
-      {:error, {:already_started, pid}} -> Attempt.await(pid)
-      {:error, reason} -> {:error, {:attempt_start_failed, reason}}
+    with {:ok, pid} <- start_attempt(spec),
+         result when result != :await_timeout <- await_attempt(pid, attempt, await_timeout) do
+      result
+    else
+      :await_timeout ->
+        {:error, :dispatch_await_timeout}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   catch
     :exit, reason ->
       _ = fail_if_active(attempt, reason)
       {:error, {:attempt_process_exit, reason}}
+  end
+
+  defp start_attempt(spec) do
+    case DynamicSupervisor.start_child(__MODULE__, spec) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, {:already_started, pid}} -> {:ok, pid}
+      {:error, reason} -> {:error, {:attempt_start_failed, reason}}
+    end
+  end
+
+  defp await_attempt(pid, _attempt, :infinity), do: Attempt.await(pid)
+
+  defp await_attempt(pid, attempt, timeout) when is_integer(timeout) and timeout > 0 do
+    try do
+      Attempt.await(pid, timeout)
+    catch
+      :exit, {:timeout, _} ->
+        stop_attempt_coordinator(pid, attempt)
+        :await_timeout
+    end
+  end
+
+  defp stop_attempt_coordinator(pid, attempt) do
+    if Process.alive?(pid) do
+      Attempt.cancel(pid)
+      Process.exit(pid, :kill)
+    end
+
+    _ = fail_if_active(attempt, :dispatch_await_timeout)
+  end
+
+  defp default_await_timeout_ms do
+    Application.get_env(:omashiki, :dispatch_await_timeout_ms, 3_660_000)
   end
 
   @doc "Interrupt the active runtime for a job after cancellation is durable."

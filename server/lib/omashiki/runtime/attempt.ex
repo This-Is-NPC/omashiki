@@ -20,7 +20,7 @@ defmodule Omashiki.Runtime.Attempt do
     }
   end
 
-  def await(server), do: GenServer.call(server, :await, :infinity)
+  def await(server, timeout \\ :infinity), do: GenServer.call(server, :await, timeout)
   def cancel(server), do: GenServer.cast(server, :cancel)
 
   @impl true
@@ -48,7 +48,7 @@ defmodule Omashiki.Runtime.Attempt do
   def handle_continue(:run, state) do
     task =
       Task.Supervisor.async_nolink(Omashiki.Runtime.TaskSupervisor, fn ->
-        Omashiki.Jobs.Runner.run(state.attempt, Keyword.put(state.opts, :heartbeat, false))
+        runner_module(state.opts).run(state.attempt, Keyword.put(state.opts, :heartbeat, false))
       end)
 
     {:noreply, %{state | task: task}}
@@ -143,6 +143,9 @@ defmodule Omashiki.Runtime.Attempt do
 
     {:stop, :normal, %{state | result: result, waiters: [], heartbeat_timer: nil}}
   end
+
+  defp runner_module(opts),
+    do: Keyword.get(opts, :runner, Application.get_env(:omashiki, :jobs_runner, Omashiki.Jobs.Runner))
 
   defp schedule_heartbeat(%{heartbeat_interval_ms: interval} = state)
        when is_integer(interval) and interval > 0 do

@@ -30,6 +30,8 @@ defmodule Omashiki.Gateway.Providers.OpenaiCompat do
 
   @anthropic_oai_base "https://api.anthropic.com/v1"
   @openai_base "https://api.openai.com/v1"
+  @default_request_timeout_ms 120_000
+  @recv_chunk_timeout_ms 30_000
 
   @impl true
   def chat_completions(%Credential{} = cred, body, model) do
@@ -187,7 +189,8 @@ defmodule Omashiki.Gateway.Providers.OpenaiCompat do
              transport_opts: [timeout: 30_000]
            ),
          {:ok, conn, ref} <- Mint.HTTP.request(conn, "POST", path, mint_headers, body) do
-      receive_http(conn, ref, "", nil)
+      deadline = System.monotonic_time(:millisecond) + provider_request_timeout_ms()
+      receive_http(conn, ref, "", nil, deadline)
     end
   rescue
     e -> {:error, e}
@@ -198,28 +201,45 @@ defmodule Omashiki.Gateway.Providers.OpenaiCompat do
     if query, do: base <> "?" <> query, else: base
   end
 
-  defp receive_http(conn, ref, body, status) do
-    case Mint.HTTP.recv(conn, 0, 120_000) do
-      {:ok, conn, responses} ->
-        {body, status, done?} =
-          Enum.reduce(responses, {body, status, false}, fn
-            {:status, ^ref, s}, {b, _, d} -> {b, s, d}
-            {:headers, ^ref, _}, acc -> acc
-            {:data, ^ref, chunk}, {b, s, d} -> {b <> chunk, s, d}
-            {:done, ^ref}, {b, s, _} -> {b, s, true}
-            _, acc -> acc
-          end)
+  defp provider_request_timeout_ms do
+    Application.get_env(:omashiki, :gateway_provider_request_timeout_ms, @default_request_timeout_ms)
+  end
 
-        if done? do
+  defp receive_http(conn, ref, body, status, deadline) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      Mint.HTTP.close(conn)
+      {:error, :timeout}
+    else
+      recv_timeout = min(remaining, @recv_chunk_timeout_ms)
+
+      case Mint.HTTP.recv(conn, 0, recv_timeout) do
+        {:ok, conn, responses} ->
+          {body, status, done?} =
+            Enum.reduce(responses, {body, status, false}, fn
+              {:status, ^ref, s}, {b, _, d} -> {b, s, d}
+              {:headers, ^ref, _}, acc -> acc
+              {:data, ^ref, chunk}, {b, s, d} -> {b <> chunk, s, d}
+              {:done, ^ref}, {b, s, _} -> {b, s, true}
+              _, acc -> acc
+            end)
+
+          if done? do
+            Mint.HTTP.close(conn)
+            {:ok, status || 0, body}
+          else
+            receive_http(conn, ref, body, status, deadline)
+          end
+
+        {:error, conn, reason, _} ->
           Mint.HTTP.close(conn)
-          {:ok, status || 0, body}
-        else
-          receive_http(conn, ref, body, status)
-        end
-
-      {:error, conn, reason, _} ->
-        Mint.HTTP.close(conn)
-        {:error, reason}
+          {:error, normalize_http_error(reason)}
+      end
     end
   end
+
+  defp normalize_http_error(:timeout), do: :timeout
+  defp normalize_http_error(%Mint.TransportError{reason: :timeout}), do: :timeout
+  defp normalize_http_error(reason), do: reason
 end

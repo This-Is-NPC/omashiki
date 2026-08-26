@@ -74,6 +74,10 @@ config :omashiki, :sync_execution_capacity_on_boot, false
 # `Oban.drain_queue/1` or `perform_job/2` explicitly.
 config :omashiki, Oban, testing: :manual
 
+# Keep provider/dispatch timeout tests fast without weakening production bounds.
+config :omashiki, :gateway_provider_request_timeout_ms, 500
+config :omashiki, :dispatch_await_slack_ms, 200
+
 # Host credential copies stay inside the test sandbox, never /dev/shm.
 config :omashiki,
        :host_credential_root,

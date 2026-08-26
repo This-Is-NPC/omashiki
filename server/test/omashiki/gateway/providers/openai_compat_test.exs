@@ -295,6 +295,61 @@ defmodule Omashiki.Gateway.Providers.OpenaiCompatTest do
 
       refute match?({:ok, _}, reason)
     end
+
+    test "a provider that accepts but never responds times out instead of hanging forever" do
+      silent = start_silent_provider!()
+
+      on_exit(fn -> stop_silent_provider!(silent) end)
+
+      base_url = "http://localhost:#{silent.port}"
+      started = System.monotonic_time(:millisecond)
+
+      assert {:error, :timeout} =
+               OpenaiCompat.chat_completions(
+                 cred(provider: "openai", base_url: base_url),
+                 %{"messages" => []},
+                 "gpt-5-mini"
+               )
+
+      elapsed = System.monotonic_time(:millisecond) - started
+      assert elapsed < 5_000
+    end
+  end
+
+  defp start_silent_provider! do
+    {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+    {:ok, port} = :inet.port(listen)
+    parent = self()
+
+    pid =
+      spawn_link(fn ->
+        accept_silent(listen, parent)
+      end)
+
+    %{port: port, pid: pid, listen: listen}
+  end
+
+  defp accept_silent(listen, parent) do
+    case :gen_tcp.accept(listen) do
+      {:ok, client} ->
+        send(parent, {:silent_provider_accept, client})
+
+        spawn(fn ->
+          _ = :gen_tcp.recv(client, 0, 60_000)
+          receive do
+          end
+        end)
+
+        accept_silent(listen, parent)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp stop_silent_provider!(%{listen: listen, pid: pid}) do
+    if Process.alive?(pid), do: Process.exit(pid, :kill)
+    :gen_tcp.close(listen)
   end
 
   defp json(conn, payload) do

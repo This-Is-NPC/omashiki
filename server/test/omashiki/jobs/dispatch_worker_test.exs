@@ -8,6 +8,10 @@ defmodule Omashiki.Jobs.DispatchWorkerTest do
   use Omashiki.DataCase, async: false
   use Oban.Testing, repo: Omashiki.Repo
 
+  import Phoenix.ConnTest
+
+  @endpoint OmashikiWeb.Endpoint
+
   import Omashiki.JobFixtures
 
   alias Omashiki.Jobs
@@ -67,10 +71,22 @@ defmodule Omashiki.Jobs.DispatchWorkerTest do
     end
   end
 
+  defmodule HungRunner do
+    @moduledoc "Simulates a runner wedged on a provider that never answers."
+
+    def run(%JobAttempt{}, _opts \\ []) do
+      receive do
+      end
+    end
+  end
+
   setup do
     user = user_fixture()
     {token, _plaintext} = api_token_fixture(user)
-    on_exit(fn -> Application.delete_env(:omashiki, :dispatch_attempt_runner) end)
+    on_exit(fn ->
+      Application.delete_env(:omashiki, :dispatch_attempt_runner)
+      Application.delete_env(:omashiki, :jobs_runner)
+    end)
     {:ok, user: user, token: token}
   end
 
@@ -240,5 +256,33 @@ defmodule Omashiki.Jobs.DispatchWorkerTest do
 
     assert :ok = perform_final_attempt(job.id)
     assert Repo.get!(Job, job.id).status == "succeeded"
+  end
+
+  @tag timeout: 10_000
+  test "a hung provider attempt times out without wedging dispatch or /health", %{
+    user: user,
+    token: token
+  } do
+    Application.put_env(:omashiki, :jobs_runner, HungRunner)
+
+    {job, _attempt} =
+      job_fixture(user, token, %{
+        environment_snapshot: %{"name" => "opencode", "timeout_ms" => 300}
+      })
+
+    dispatch_task = Task.async(fn -> perform_final_attempt(job.id) end)
+
+    health_started = System.monotonic_time(:millisecond)
+    conn = get(build_conn(), "/api/v1/health")
+    health_elapsed = System.monotonic_time(:millisecond) - health_started
+
+    assert json_response(conn, 200)["status"] == "ok"
+    assert health_elapsed < 2_000
+
+    assert {:ok, {:error, :dispatch_await_timeout}} = Task.yield(dispatch_task, 5_000)
+
+    reloaded = Repo.get!(Job, job.id)
+    refute reloaded.status in @non_terminal
+    assert reloaded.terminal_error
   end
 end
