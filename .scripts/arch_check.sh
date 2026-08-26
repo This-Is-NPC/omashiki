@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
 # Architectural consistency gate.
 #
-#   .scripts/arch_check.sh            full  — static checks + ExUnit arch suite
-#   .scripts/arch_check.sh --fast     static checks only
+#   .scripts/arch_check.sh            full  — all 13 invariants
+#   .scripts/arch_check.sh --fast     the 11 static invariants only; INV5/INV7
+#                                     are skipped and reported as skipped
 #   .scripts/arch_check.sh --strict   ignore .scripts/arch-exceptions.txt and
 #                                     show every violation, declared or not
 #
-# Static checks are grep-based so they provide a fast standalone architecture
-# check. Queue-only reflection checks are optional because the legacy
-# activity/behaviour suite was deleted with the legacy workflow domains.
+# Eleven invariants are decidable from source text, so they are greps and run
+# standalone in milliseconds. Two are not. INV5 must enumerate every behaviour
+# actually compiled into the app and read its typespecs rather than its file
+# text; INV7 must classify container rows and read the boot call graph. Those
+# two live in server/test/omashiki/architecture_test.exs and the full run
+# executes them.
+#
+# No path through this script prints PASS for a check it did not run. If the
+# reflection suite is missing, that is a failure — two invariants would be
+# unenforced — not a "not applicable".
 #
 # Known violations are listed in .scripts/arch-exceptions.txt with a reason
 # and an owner item. An exception is a tracked debt, not a silenced check —
@@ -191,29 +199,60 @@ if [ "$excepted" -gt 0 ]; then
 fi
 
 # ---------------------------------------------------------------- ExUnit
+# INV5 and INV7 are the two invariants a grep cannot decide. They are ExUnit
+# because they need the compiled application, not because they are optional.
+REFLECTION_SUITE="test/omashiki/architecture_test.exs"
+
 if [ "$FAST" -eq 0 ]; then
+  enforced=13
   echo
   DB_PORT="${OMASHIKI_DB_PORT:-5442}"
   echo "Reflection checks (ExUnit) -- INV5 vocabulary, INV7 orphan behaviour"
   printf '%s  test database at localhost:%s (OMASHIKI_DB_PORT)%s\n' "$DIM" "$DB_PORT" "$RST"
-  if [ -f "$SRV/test/omashiki/architecture_test.exs" ]; then
-    if (cd "$SRV" && OMASHIKI_DB_PORT="$DB_PORT" MIX_ENV=test mix test test/omashiki/architecture_test.exs --color 2>&1 | tail -5); then
-      :
+
+  if [ -f "$SRV/$REFLECTION_SUITE" ]; then
+    reflection_out="$(cd "$SRV" && OMASHIKI_DB_PORT="$DB_PORT" MIX_ENV=test \
+      mix test "$REFLECTION_SUITE" --color 2>&1)"
+    reflection_status=$?
+
+    if [ "$reflection_status" -eq 0 ]; then
+      printf '%s\n' "$reflection_out" | tail -3
+      printf '%s  PASS%s  INV5  port contracts use no vendor vocabulary\n' "$GRN" "$RST"
+      printf '%s  PASS%s  INV7  orphan reclamation is a property of the runtime port\n' \
+        "$GRN" "$RST"
     else
+      # Print everything, not tail -5: the whole point is to name the invariant
+      # that broke.
+      printf '%s\n' "$reflection_out"
       failures=$((failures + 1))
-      printf '%s  for database errors, set OMASHIKI_DB_PORT to your PostgreSQL port%s\n' "$YEL" "${RST}"
+      printf '%s  FAIL%s  INV5/INV7 reflection suite failed (exit %d)\n' \
+        "$RED" "$RST" "$reflection_status"
+      printf '%s  for database errors, set OMASHIKI_DB_PORT to your PostgreSQL port%s\n' \
+        "$YEL" "${RST}"
     fi
   else
-    printf '%s  PASS%s  INV5/INV7 reflection suite not applicable: no active queue-only reflection test exists after legacy-domain deletion\n' "$GRN" "$RST"
+    # Absent suite = two unenforced invariants. Count both, and do not let the
+    # summary keep claiming 13.
+    failures=$((failures + 2))
+    enforced=11
+    printf '%s  FAIL%s  INV5/INV7 reflection suite missing: %s\n' \
+      "$RED" "$RST" "$SRV/$REFLECTION_SUITE"
+    printf '        INV5 and INV7 cannot be decided by grep, so this gate now enforces\n'
+    printf '        11 of the 13 invariants it names. Restore the suite, or delete the\n'
+    printf '        INV5/INV7 headings and lower the advertised count to match.\n'
   fi
 else
-  printf '%s  --fast: INV5 and INV7 run in the mix test suite, not here%s\n' "$DIM" "$RST"
+  enforced=11
+  printf '%s  --fast: INV5 and INV7 NOT checked here -- they need the compiled\n' "$YEL"
+  printf '  application. Run without --fast to enforce them.%s\n' "$RST"
 fi
 
 echo
 if [ "$failures" -gt 0 ]; then
-  printf '%s%d check(s) failed.%s\n' "$RED" "$failures" "$RST"
+  printf '%s%d check(s) failed.%s %s(%d of 13 invariants enforced on this run)%s\n' \
+    "$RED" "$failures" "$RST" "$DIM" "$enforced" "$RST"
   echo "Fix the violations or declare a justified exception in .scripts/arch-exceptions.txt"
   exit 1
 fi
-printf '%sArchitecture consistent.%s\n' "$GRN" "$RST"
+printf '%sArchitecture consistent.%s %s(%d of 13 invariants enforced on this run)%s\n' \
+  "$GRN" "$RST" "$DIM" "$enforced" "$RST"
