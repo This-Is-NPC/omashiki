@@ -568,6 +568,33 @@ defmodule Omashiki.Jobs.ClaimsTest do
       assert %JobAttempt{status: "cancelled"} = current_attempt(job)
     end
 
+    test "several stranded jobs are recovered in one pass, oldest first", %{token: token} do
+      jobs =
+        Enum.map(1..3, fn n ->
+          {:ok, job} = Jobs.Admission.admit(token, request("orphan-batch-#{n}"))
+          discard_dispatch!(job.id)
+          job
+        end)
+
+      assert {:ok, 3} = Jobs.recover_orphaned_dispatches(past_grace())
+
+      for job <- jobs do
+        assert Repo.get!(Job, job.id).status == "cancelled"
+        assert %JobAttempt{status: "cancelled"} = current_attempt(job)
+      end
+
+      # The drain condition the load test asserts: nothing left non-terminal.
+      ids = Enum.map(jobs, & &1.id)
+
+      assert Repo.aggregate(
+               from(j in Job,
+                 where: j.id in ^ids and j.status not in ["succeeded", "failed", "cancelled"]
+               ),
+               :count,
+               :id
+             ) == 0
+    end
+
     test "a cancelled dispatch is swept, since Oban will never run it", %{token: token} do
       {:ok, job} = Jobs.Admission.admit(token, request("orphan-cancelled"))
       set_dispatch_state!(job.id, "cancelled")

@@ -32,6 +32,7 @@ defmodule Omashiki.Jobs do
   # mistake destroys user work, whereas delaying an already-stranded row by half
   # a minute costs nothing. The asymmetry justifies the wait.
   @orphan_grace_ms 30_000
+  @orphan_batch_size 100
 
   @event_data_keys %{
     "blocked" => ~w(parent_job_id),
@@ -230,6 +231,17 @@ defmodule Omashiki.Jobs do
 
   Terminal state is `cancelled`, never `failed`: a job that never started has a
   null `started_at`, which `jobs_start_timestamps` forbids for `failed`.
+
+  Rows are cancelled rather than re-enqueued. `DispatchWorker`'s uniqueness
+  would permit the re-insert — `discarded` is not an incomplete state — but a
+  row only reaches this sweep after Oban has already spent its five attempts,
+  and the sweep re-runs every second with nothing to decrement. Re-enqueueing a
+  permanently poisoned job would loop it between sweep and queue forever. The
+  goal is that a lost dispatch be *visible* (NFR-001); `retry/1` is the
+  deliberate, operator-driven way back into the queue.
+
+  At most `#{@orphan_batch_size}` rows are cancelled per call; the caller's tick
+  drains any larger backlog across successive passes.
   """
   def recover_orphaned_dispatches(at \\ nil) do
     at = at || now()
@@ -603,9 +615,6 @@ defmodule Omashiki.Jobs do
         cancel_orphaned!(job, attempt)
         recovered + 1
       else
-        nil ->
-          recovered
-
         %JobAttempt{} = attempt ->
           # The job says `queued` but its attempt disagrees. Claiming moves both
           # together, so this is a torn row rather than a stranded one; leave it
@@ -639,18 +648,23 @@ defmodule Omashiki.Jobs do
       where: j.status == "queued" and j.queued_at < ^cutoff,
       where: not exists(live_dispatch),
       order_by: [asc: j.queued_at, asc: j.id],
-      select: j.id
+      select: j.id,
+      # One tick cancels at most a batch. A mass stranding (a node lost with a
+      # full queue behind it) would otherwise lock and rewrite every row in a
+      # single transaction; oldest-first order plus the 1s tick drains the
+      # backlog across ticks instead, bounding how long those locks are held.
+      limit: @orphan_batch_size
     )
     |> Repo.all()
   end
 
+  # The row-locked twin of the `not exists` prefilter in `orphaned_job_ids/1`.
+  # Same predicate, different shape: the prefilter correlates against the job
+  # table to keep the scan set-based, this one takes a bound id after the lock.
   defp incomplete_dispatch?(job_id) do
-    from(o in Oban.Job,
-      where:
-        o.worker == "Omashiki.Jobs.DispatchWorker" and
-          fragment("(?->>'job_id')", o.args) == ^job_id and
-          o.state in ^@oban_incomplete_states
-    )
+    job_id
+    |> dispatch_query()
+    |> where([o], o.state in ^@oban_incomplete_states)
     |> Repo.exists?()
   end
 
@@ -816,15 +830,20 @@ defmodule Omashiki.Jobs do
   end
 
   defp active_dispatch(job_id) do
-    from(j in Oban.Job,
-      where:
-        j.worker == "Omashiki.Jobs.DispatchWorker" and
-          fragment("(?->>'job_id')", j.args) == ^job_id and
-          j.state in ^["available", "scheduled", "retryable", "executing"],
-      order_by: [desc: j.id],
-      limit: 1
-    )
+    job_id
+    |> dispatch_query()
+    |> where([o], o.state in ^@oban_incomplete_states)
+    |> order_by([o], desc: o.id)
+    |> limit(1)
     |> Repo.one()
+  end
+
+  defp dispatch_query(job_id) do
+    from(o in Oban.Job,
+      where:
+        o.worker == "Omashiki.Jobs.DispatchWorker" and
+          fragment("(?->>'job_id')", o.args) == ^job_id
+    )
   end
 
   defp unique_dispatch_error?(%Ecto.Changeset{errors: errors}) do
