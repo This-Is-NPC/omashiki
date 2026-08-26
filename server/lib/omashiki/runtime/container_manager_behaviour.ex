@@ -15,10 +15,27 @@ defmodule Omashiki.Runtime.ContainerManager.Behaviour do
   @callback exec(String.t(), [String.t()], pos_integer()) ::
               {:ok, %{stdout: String.t(), exit_code: non_neg_integer() | nil}} | {:error, term()}
 
+  @type census_entry :: %{
+          required(:id) => String.t(),
+          required(:scope_id) => String.t() | nil,
+          required(:state) => String.t(),
+          required(:status) => String.t(),
+          required(:created_at) => integer() | nil
+        }
+
   @callback destroy(String.t()) :: :ok | {:error, term()}
   @callback cancel_scope(String.t()) :: :ok | {:error, term()}
   @callback cleanup_orphans() :: {:ok, [String.t()]} | {:error, term()}
   @callback fetch_logs(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
+
+  @doc """
+  Read-only census of every sandbox this host is running, reclaimable or not.
+
+  `cleanup_orphans/0` already classifies the same set, but it destroys what it
+  classifies, so it cannot be used to look. Separating the two is what lets an
+  operator see an abandoned sandbox before something reclaims it.
+  """
+  @callback census() :: {:ok, [census_entry()]} | {:error, term()}
 end
 
 defmodule Omashiki.Runtime.ContainerManager.Operations do
@@ -30,4 +47,5 @@ defmodule Omashiki.Runtime.ContainerManager.Operations do
   @callback op_cancel_scope(String.t()) :: :ok | {:error, term()}
   @callback op_cleanup_orphans() :: {:ok, [String.t()]} | {:error, term()}
   @callback op_fetch_logs(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
+  @callback op_census() :: {:ok, [map()]} | {:error, term()}
 end

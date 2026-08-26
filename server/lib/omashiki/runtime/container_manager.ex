@@ -88,6 +88,19 @@ defmodule Omashiki.Runtime.ContainerManager do
   end
 
   @doc """
+  Read-only census of every labelled container on this host. Destroys nothing.
+
+  `cleanup_orphans/0` reads the same list, but reclaiming is the only thing it
+  can do with what it finds. Looking without reclaiming is what an operator
+  needs when a container has outlived its attempt and the question is *why*,
+  not *how fast can it go away*.
+  """
+  @impl true
+  def census do
+    GenServer.call(__MODULE__, :census, call_timeout_ms())
+  end
+
+  @doc """
   Returns the tail of the container's combined stdout/stderr as a single
   string. Best-effort diagnostic — callers should log/persist the output but
   not depend on a specific format. Stderr chunks are prefixed `[stderr] `.
@@ -134,6 +147,18 @@ defmodule Omashiki.Runtime.ContainerManager do
 
   def handle_call(:cleanup_orphans, from, state) do
     async_reply(from, fn -> state.operations.op_cleanup_orphans() end)
+    {:noreply, state}
+  end
+
+  # `{:error, :docker_unavailable}`, not `{:ok, []}`: an empty census and an
+  # unreachable daemon look identical to a reader, and telling an operator
+  # "nothing is running" while the runtime is down is the wrong answer to the
+  # only question they are asking.
+  def handle_call(:census, _from, %{available: false} = state),
+    do: {:reply, {:error, :docker_unavailable}, state}
+
+  def handle_call(:census, from, state) do
+    async_reply(from, fn -> state.operations.op_census() end)
     {:noreply, state}
   end
 
@@ -228,6 +253,10 @@ defmodule Omashiki.Runtime.ContainerManager do
   @doc false
   @impl Omashiki.Runtime.ContainerManager.Operations
   def op_fetch_logs(container_id, opts), do: do_fetch_logs(container_id, opts)
+
+  @doc false
+  @impl Omashiki.Runtime.ContainerManager.Operations
+  def op_census, do: do_census()
 
   defp do_provision_for_job(
          %Job{} = job,
@@ -1573,6 +1602,31 @@ defmodule Omashiki.Runtime.ContainerManager do
       err ->
         err
     end
+  end
+
+  defp do_census do
+    filter = Jason.encode!(%{"label" => ["#{@container_label}=true"]})
+
+    case docker_get("/containers/json?all=true&filters=#{URI.encode_www_form(filter)}") do
+      {:ok, containers} when is_list(containers) -> {:ok, Enum.map(containers, &census_entry/1)}
+      {:ok, other} -> {:error, {:unexpected_census_shape, other}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Normalises one `/containers/json` row down to what a reader needs. The raw
+  # Docker row carries mounts, command lines and the full environment; none of
+  # that belongs on an operator screen, and dropping it here means no caller can
+  # leak it by accident.
+  @doc false
+  def census_entry(container) when is_map(container) do
+    %{
+      id: Map.get(container, "Id") || "",
+      scope_id: job_scope_id_from_container(container),
+      state: Map.get(container, "State") || "unknown",
+      status: Map.get(container, "Status") || "",
+      created_at: Map.get(container, "Created")
+    }
   end
 
   defp do_cancel_scope(scope_id) do
