@@ -158,9 +158,25 @@ docker build -t omashiki/agent-jcode:ci-check -f agent/Dockerfile.jcode agent/
 .scripts/agent_image_check.sh omashiki/agent-jcode:ci-check 1024 bash git jcode
 """
 
+# Same narrow contract as jcode, and for the same reasons: no HEALTHCHECK, no
+# supply-chain relay, no caches and empty pre_steps, so neither curl, python3
+# nor mise is installed. pi is not a node program despite shipping on npm — the
+# release tarball is a bun-compiled executable linking only glibc — so `node`
+# does not belong on this list either.
+#
+# 512MB against a measured 430MB. Deliberately tighter than jcode's 1024: this
+# image exists to be small, its only growth path is the pinned PI_VERSION, and
+# bumping that is an ARG edit a reviewer already has to look at.
+[tasks."ci:docker:pi"]
+description = "Build pinned pi agent Docker image (dry-run, no push)"
+run         = """
+docker build -t omashiki/agent-pi:ci-check -f agent/Dockerfile.pi agent/
+.scripts/agent_image_check.sh omashiki/agent-pi:ci-check 512 bash git pi
+"""
+
 [tasks."ci:docker"]
 description = "Build server + agent Docker images (dry-run, no push)"
-depends     = ["ci:docker:server", "ci:docker:agent", "ci:docker:claude", "ci:docker:codex", "ci:docker:jcode"]
+depends     = ["ci:docker:server", "ci:docker:agent", "ci:docker:claude", "ci:docker:codex", "ci:docker:jcode", "ci:docker:pi"]
 
 [tasks.ci]
 description = "Run the full local CI matrix"
@@ -199,6 +215,10 @@ run         = "docker build -t omashiki/agent-claude:latest -f agent/Dockerfile.
 [tasks."agent:jcode:build"]
 description = "Build omashiki/agent-jcode:latest from agent/Dockerfile.jcode"
 run         = "docker build -t omashiki/agent-jcode:latest -f agent/Dockerfile.jcode agent/"
+
+[tasks."agent:pi:build"]
+description = "Build omashiki/agent-pi:latest from agent/Dockerfile.pi"
+run         = "docker build -t omashiki/agent-pi:latest -f agent/Dockerfile.pi agent/"
 
 [tasks."agent:cache-smoke"]
 description = "Validate cold/warm/offline and concurrent mise/npm cache use"

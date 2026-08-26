@@ -293,3 +293,45 @@ mode = "off"
 cpus = 2.0
 memory = "2GB"
 pids = 256
+
+# ---------------------------------------------------------------------------
+# pi
+# ---------------------------------------------------------------------------
+# pi is a single `bun build --compile` executable: no node, no mise, no npm and
+# no cache mounts. Like jcode it has no host-auth route — it always reaches the
+# model through the gateway — so its environment needs a gateway credential and
+# a network that is not "none".
+#
+# The harness is declared live and the environment is not, which is the same
+# split [harnesses.claude-code] already uses: a harness with no environment is
+# legal and costs nothing, but [environments.pi] would have to name a
+# credential, and the only one that fits is [credentials.local-llm] above.
+# That credential resolves `${env:OMASHIKI_LOCAL_LLM_BASE_URL}` at *load*, so
+# uncommenting it with the variable unset aborts the boot of every entrypoint
+# that reads this file — `mise run dev` and the two working overture E2Es
+# included. Uncomment both together, after exporting the variable.
+
+[harnesses.pi]
+adapter = "pi"
+runtime = "docker"
+image = "omashiki/agent-pi:latest"
+options = { timeout_ms = 1800000 }
+
+#[environments.pi]
+#harness = "pi"
+#executables = ["git"]
+#credentials = ["local-llm"]
+#caches = []
+#timeout_ms = 1800000
+#network = "restricted"
+#mounts = []
+#post_steps = []
+#pre_steps = []
+#
+#[environments.pi.policy]
+#mode = "off"
+#
+#[environments.pi.resources]
+#cpus = 1.0
+#memory = "1GB"
+#pids = 256
