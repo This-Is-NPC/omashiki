@@ -497,14 +497,112 @@ defmodule Omashiki.GatewayTest do
       # `provider` follows the credential that actually served the turn.
       assert entry.provider == "anthropic"
 
-      # DEFECT (reported, not fixed here): `model` is resolved once from the
-      # *primary* credential and reused for the whole fallback chain. The
-      # fallback is asked for "gpt-5-mini", a model it does not serve, and the
-      # ledger attributes the spend to a model that never ran. Flip these two
-      # assertions to "claude-haiku-4-5" when the resolve-per-credential fix
-      # lands. See Gateway.forward_with_fallback/4.
-      assert_received {:fallback_upstream, %{"model" => "gpt-5-mini"}}
-      assert entry.model == "gpt-5-mini"
+      # `model` follows the credential too. The fallback is asked for its own
+      # model, not the primary's "gpt-5-mini", and the ledger records what
+      # actually ran. See Gateway.forward_with_fallback/4 (task 2806).
+      assert_received {:fallback_upstream, %{"model" => "claude-haiku-4-5"}}
+      assert entry.model == "claude-haiku-4-5"
+    end
+
+    test "the fallback is asked for its own model even when the engine named the primary's",
+         %{user: user} do
+      # Provision points the engine at `modelID: <primary>.model`, so the body
+      # that reaches the gateway always carries the primary's model name. A
+      # fix that only re-resolved a *missing* body model would be a no-op on
+      # the real production path; this pins that path directly.
+      primary_bypass = Bypass.open()
+      fallback_bypass = Bypass.open()
+      n = System.unique_integer([:positive])
+      primary = "named-primary-#{n}"
+      fallback = "named-fallback-#{n}"
+
+      put_credentials!(%{
+        fallback => %{
+          "provider" => "anthropic",
+          "model" => "claude-haiku-4-5",
+          "api_key" => "sk-fallback",
+          "base_url" => "http://localhost:#{fallback_bypass.port}"
+        },
+        primary => %{
+          "provider" => "openai",
+          "model" => "gpt-5-mini",
+          "api_key" => "sk-primary",
+          "base_url" => "http://localhost:#{primary_bypass.port}",
+          "fallback_chain" => [fallback]
+        }
+      })
+
+      Bypass.expect(primary_bypass, "POST", "/v1/chat/completions", fn conn ->
+        Plug.Conn.resp(conn, 503, ~s({"error":"overloaded"}))
+      end)
+
+      parent = self()
+
+      Bypass.expect_once(fallback_bypass, "POST", "/v1/chat/completions", fn conn ->
+        {:ok, raw, conn} = Plug.Conn.read_body(conn)
+        send(parent, {:fallback_upstream, Jason.decode!(raw)})
+        json(conn, response("chatcmpl-named", 3, 4))
+      end)
+
+      job = running_job(user, [primary, fallback])
+
+      assert {:ok, %{"id" => "chatcmpl-named"}} =
+               Gateway.chat_completions(
+                 %{"model" => "gateway/gpt-5-mini", "messages" => []},
+                 claims(job, primary)
+               )
+
+      assert_received {:fallback_upstream, %{"model" => "claude-haiku-4-5"}}
+      assert [%{provider: "anthropic", model: "claude-haiku-4-5"}] = ledger(job)
+    end
+
+    test "a fallback alias translates the primary's model name", %{user: user} do
+      primary_bypass = Bypass.open()
+      fallback_bypass = Bypass.open()
+      n = System.unique_integer([:positive])
+      primary = "alias-primary-#{n}"
+      fallback = "alias-fallback-#{n}"
+
+      put_credentials!(%{
+        fallback => %{
+          "provider" => "anthropic",
+          "model" => "claude-haiku-4-5",
+          "api_key" => "sk-fallback",
+          "base_url" => "http://localhost:#{fallback_bypass.port}",
+          # The operator's declared translation wins over the bare default.
+          "model_aliases" => %{"gpt-5-mini" => "claude-sonnet-4-5"}
+        },
+        primary => %{
+          "provider" => "openai",
+          "model" => "gpt-5-mini",
+          "api_key" => "sk-primary",
+          "base_url" => "http://localhost:#{primary_bypass.port}",
+          "fallback_chain" => [fallback]
+        }
+      })
+
+      Bypass.expect(primary_bypass, "POST", "/v1/chat/completions", fn conn ->
+        Plug.Conn.resp(conn, 503, ~s({"error":"overloaded"}))
+      end)
+
+      parent = self()
+
+      Bypass.expect_once(fallback_bypass, "POST", "/v1/chat/completions", fn conn ->
+        {:ok, raw, conn} = Plug.Conn.read_body(conn)
+        send(parent, {:fallback_upstream, Jason.decode!(raw)})
+        json(conn, response("chatcmpl-alias-fb", 1, 1))
+      end)
+
+      job = running_job(user, [primary, fallback])
+
+      assert {:ok, _} =
+               Gateway.chat_completions(
+                 %{"model" => "gpt-5-mini", "messages" => []},
+                 claims(job, primary)
+               )
+
+      assert_received {:fallback_upstream, %{"model" => "claude-sonnet-4-5"}}
+      assert [%{model: "claude-sonnet-4-5"}] = ledger(job)
     end
 
     test "a fallback the environment did not declare is not used", %{user: user} do

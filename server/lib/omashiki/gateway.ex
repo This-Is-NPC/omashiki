@@ -113,11 +113,11 @@ defmodule Omashiki.Gateway do
            Credentials.get_credential(credential_name) || :credential_missing,
          :ok <- Claims.authorize_credential(job, credential_name),
          :ok <- Budget.check(job),
-         model <- resolve_model(body, cred),
-         {:ok, result, used_cred} <-
-           forward_with_fallback(cred, body, model, Claims.credential_names(job)) do
-      _ = record_usage(job, used_cred, model, result.usage)
-      _ = emit_llm_called(job, used_cred, model, result, "ok")
+         requested <- requested_model(body, cred),
+         {:ok, result, used_cred, used_model} <-
+           forward_with_fallback(cred, body, requested, Claims.credential_names(job)) do
+      _ = record_usage(job, used_cred, used_model, result.usage)
+      _ = emit_llm_called(job, used_cred, used_model, result, "ok")
       {:ok, result.response}
     else
       {:error, reason} when reason in [:job_missing, :job_not_active, :expired, :invalid] ->
@@ -145,19 +145,46 @@ defmodule Omashiki.Gateway do
     end
   end
 
-  defp resolve_model(body, %Credential{} = cred) do
+  # The name the caller asked for, normalized. Anchored to the *primary*
+  # credential because that is the one the request was addressed to; the
+  # fallback hops translate this name against themselves in `hop_model/3`.
+  defp requested_model(body, %Credential{} = cred) do
     requested = body["model"] || body[:model] || cred.model
-    # Strip optional "gateway/" or "provider/" prefix from engine.
-    short =
-      requested
-      |> to_string()
-      |> String.split("/")
-      |> List.last()
 
-    aliases = normalize_aliases(cred.model_aliases)
-    Map.get(aliases, short) || short
+    # Strip optional "gateway/" or "provider/" prefix from engine.
+    requested
+    |> to_string()
+    |> String.split("/")
+    |> List.last()
   rescue
     _ -> cred.model
+  end
+
+  # Resolve the model against the credential that is about to serve the hop.
+  #
+  # A credential's alias table always wins — that is the operator's declared
+  # translation for a foreign model name. Without an alias the two roles
+  # differ, and the difference is the whole point:
+  #
+  #   * `:primary` honours the requested name verbatim. The request was
+  #     addressed to this credential, so an unlisted name is plausibly still
+  #     one it serves (any OpenAI model against an OpenAI credential).
+  #
+  #   * `:fallback` falls back to the credential's *own* declared model. A
+  #     fallback is a different provider/account that never saw the request;
+  #     forwarding the primary's model name at it either fails outright or —
+  #     worse — succeeds and bills the ledger for a model that never ran.
+  #
+  # Provision points the engine at `modelID: credential.model` of the primary
+  # (see `Harness.OpenCode`), so in practice the requested name *is* the
+  # primary's model. Resolving it verbatim on a fallback hop is exactly the
+  # cross-provider mis-attribution this guards against.
+  defp hop_model(requested, %Credential{} = cred, :primary) do
+    Map.get(normalize_aliases(cred.model_aliases), requested) || requested
+  end
+
+  defp hop_model(requested, %Credential{} = cred, :fallback) do
+    Map.get(normalize_aliases(cred.model_aliases), requested) || cred.model || requested
   end
 
   defp normalize_aliases(aliases) when is_map(aliases) do
@@ -166,16 +193,21 @@ defmodule Omashiki.Gateway do
 
   defp normalize_aliases(_), do: %{}
 
-  defp forward_with_fallback(%Credential{} = cred, body, model, allowed_names) do
-    chain = [cred | load_fallback_credentials(cred, allowed_names)]
+  # Returns `{:ok, result, credential, model}` — the model is returned because
+  # each hop resolves its own, and the ledger must record the one that ran.
+  defp forward_with_fallback(%Credential{} = cred, body, requested, allowed_names) do
+    fallbacks = Enum.map(load_fallback_credentials(cred, allowed_names), &{&1, :fallback})
+    chain = [{cred, :primary} | fallbacks]
 
-    Enum.reduce_while(chain, {:error, :circuit_open}, fn c, _acc ->
+    Enum.reduce_while(chain, {:error, :circuit_open}, fn {c, role}, _acc ->
       case CircuitBreaker.allow?(c.name) do
         :ok ->
+          model = hop_model(requested, c, role)
+
           case Provider.chat_completions(c, body, model) do
             {:ok, result} ->
               CircuitBreaker.record_success(c.name)
-              {:halt, {:ok, result, c}}
+              {:halt, {:ok, result, c, model}}
 
             {:error, reason} ->
               CircuitBreaker.record_failure(c.name)
