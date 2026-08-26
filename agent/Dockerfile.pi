@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1
+# pi agent sandbox.
+#
+# Like Dockerfile.jcode this does not build on the omaterm base, and for the
+# same reason: there is no runtime to install. Despite pi being published as an
+# npm package, the release tarball is a `bun build --compile` executable — a
+# single ELF whose only shared objects are libc, libm, libpthread and libdl
+# (glibc 2.17 floor). It needs no node, no npm and no mise, so do not copy the
+# node-bearing package list from Dockerfile.claude or Dockerfile.codex onto it.
+FROM debian:13-slim
+
+ARG PI_VERSION=v0.84.3
+# From the release's own SHA256SUMS. The tarball is 42MB of executable fetched
+# over the network at build time; pinning the version alone would still let the
+# contents move under a retagged release.
+ARG PI_SHA256=6f8bb67c21bc6b8a8a106d354f56d7fd4a190a3cd8ad3a32db45f6d281a5d008
+
+# The tarball unpacks to a `pi/` directory holding the executable beside the
+# assets it loads by relative path (themes, the photon wasm), so it is installed
+# whole and only the executable is put on PATH.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl git \
+    && curl -fsSL "https://github.com/earendil-works/pi/releases/download/${PI_VERSION}/pi-linux-x64.tar.gz" \
+         -o /tmp/pi.tar.gz \
+    && echo "${PI_SHA256}  /tmp/pi.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/pi.tar.gz -C /opt \
+    && ln -s /opt/pi/pi /usr/local/bin/pi \
+    && rm -f /tmp/pi.tar.gz \
+    && apt-get purge -y curl && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && PI_OFFLINE=1 /usr/local/bin/pi --version
+
+# Matches the uid the orchestrator runs containers as.
+RUN useradd --uid 1000 --create-home --shell /bin/bash omaterm
+
+COPY pi_runner.sh /usr/local/bin/omashiki-pi-runner
+COPY pi_entrypoint.sh /usr/local/bin/omashiki-pi-entrypoint
+RUN chmod 0755 /usr/local/bin/omashiki-pi-runner /usr/local/bin/omashiki-pi-entrypoint
+
+# PI_OFFLINE is set here as well as in the adapter's launch plan. The launch
+# plan covers an attempt; this covers the readiness probe and any bare
+# `docker exec`, either of which would otherwise hang instead of failing.
+ENV PI_OFFLINE=1
+# A sandboxed agent must not phone home. PI_OFFLINE already suppresses
+# install/update telemetry; this also drops the provider attribution headers.
+ENV PI_TELEMETRY=0
+ENV PATH="/usr/local/bin:${PATH}"
+
+USER 1000:1000
+ENTRYPOINT ["/usr/local/bin/omashiki-pi-entrypoint"]
