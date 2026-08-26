@@ -11,6 +11,18 @@ defmodule OmashikiWeb.Endpoint do
     same_site: "Lax"
   ]
 
+  # assets/js/app.js has always connected here. Without this declaration there
+  # was nothing on the other end, so every LiveView rendered once and stayed
+  # dead: `connected?/1` was permanently false, which quietly disabled the
+  # periodic refresh in OverviewLive and every PubSub subscription behind it.
+  #
+  # `:peer_data` is requested because OmashikiWeb.AuthHooks needs the peer
+  # address to keep /dashboard off the LAN when login is disabled — over the
+  # websocket that is only readable if the socket asks for it at connect time.
+  socket "/live", Phoenix.LiveView.Socket,
+    websocket: [connect_info: [:peer_data, session: @session_options]],
+    longpoll: [connect_info: [:peer_data, session: @session_options]]
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # You should set gzip to true if you are running phx.digest
