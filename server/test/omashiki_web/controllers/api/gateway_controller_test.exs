@@ -12,8 +12,9 @@ defmodule OmashikiWeb.Api.GatewayControllerTest do
   These tests drive the exact path an agent container takes: the URL is derived
   from `Gateway.openai_base_url/0` (what the container is actually told), the
   request goes through the real router and endpoint, and a fake provider stands
-  in for the upstream. Delete the route from `router.ex` and every test in the
-  "ingress" describe block goes red.
+  in for the upstream. Delete the route from `router.ex` and all 13 tests in
+  this module go red (404 / Phoenix.Router.NoRouteError); restore it and they
+  go green — verified, not assumed.
   """
 
   use OmashikiWeb.ConnCase, async: false
@@ -211,11 +212,13 @@ defmodule OmashikiWeb.Api.GatewayControllerTest do
       assert json_response(conn, 401) == %{"error" => %{"message" => "invalid_token"}}
     end
 
-    test "the provider is never called for a rejected token", %{conn: conn, bypass: bypass} do
+    test "a rejected token never reaches the provider", %{conn: conn, bypass: bypass} do
+      # With the provider down, any forwarding attempt would surface as 502.
+      # A clean 401 proves the refusal happened before the outbound call.
       Bypass.down(bypass)
 
       conn = post_completion(conn, "not-a-real-token", %{"messages" => []})
-      assert json_response(conn, 401)
+      assert json_response(conn, 401) == %{"error" => %{"message" => "invalid_token"}}
     end
   end
 
