@@ -23,6 +23,13 @@
           Queue
         </.link>
         <.link
+          navigate="/runtime"
+          class={nav_link_class(:runtime, assigns)}
+          aria-current={if assigns[:active_tab] == :runtime, do: "page", else: nil}
+        >
+          Runtime
+        </.link>
+        <.link
           navigate="/config"
           class={nav_link_class(:config, assigns)}
           aria-current={if assigns[:active_tab] == :config, do: "page", else: nil}

@@ -38,6 +38,7 @@ defmodule OmashikiWeb.Router do
     live_session :authenticated, on_mount: {OmashikiWeb.AuthHooks, :require_user} do
       live "/", OverviewLive, :index
       live "/queue", QueueLive, :index
+      live "/runtime", RuntimeLive, :index
       live "/jobs/:id", JobLive, :show
       live "/config", ConfigLive, :index
     end
