@@ -387,6 +387,7 @@ defmodule Omashiki.Jobs.Runner do
 
   defp invoke_step(state, step, input, fun) do
     started_at = DateTime.utc_now(:microsecond)
+    monotonic_started_at = System.monotonic_time(:millisecond)
     step = update_step!(step, %{status: "running", input: input, started_at: started_at})
 
     result = safe_call(fun)
@@ -394,6 +395,8 @@ defmodule Omashiki.Jobs.Runner do
 
     case result do
       {:ok, output} ->
+        emit_step_telemetry(step, monotonic_started_at, "ok")
+
         step =
           update_step!(step, %{
             status: "succeeded",
@@ -404,10 +407,19 @@ defmodule Omashiki.Jobs.Runner do
         {%{state | steps: replace_step(state.steps, step)}, {:ok, output}}
 
       {:error, reason} ->
+        emit_step_telemetry(step, monotonic_started_at, "error")
         error = error_map("step_failed", reason)
         step = update_step!(step, %{status: "failed", error: error, finished_at: finished_at})
         {%{state | steps: replace_step(state.steps, step)}, {:error, reason}}
     end
+  end
+
+  defp emit_step_telemetry(step, started_at, outcome) do
+    :telemetry.execute(
+      [:omashiki, :runtime, :step],
+      %{duration_ms: max(System.monotonic_time(:millisecond) - started_at, 0)},
+      %{kind: step.kind, outcome: outcome}
+    )
   end
 
   defp safe_call(fun) do
