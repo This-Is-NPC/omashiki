@@ -485,9 +485,18 @@ defmodule Omashiki.Config do
 
         provider = require_string_field!(attrs, "provider", where)
         model = require_string_field!(attrs, "model", where)
-        base_url = optional_string_field!(attrs, "base_url", where)
+
+        base_url =
+          attrs
+          |> optional_string_field!("base_url", where)
+          |> resolve_env_reference!(where, "base_url")
+
         validate_credential_base_url!(base_url, where)
-        api_key = resolve_api_key!(optional_string_field!(attrs, "api_key", where) || "", where)
+
+        api_key =
+          (optional_string_field!(attrs, "api_key", where) || "")
+          |> resolve_env_reference!(where, "api_key")
+
         fallback_chain = Map.get(attrs, "fallback_chain", [])
         model_aliases = Map.get(attrs, "model_aliases", %{})
 
@@ -551,20 +560,24 @@ defmodule Omashiki.Config do
   end
 
   # `api_key = "${env:VAR}"` keeps a live key in the operator's environment
-  # instead of in this file, which is tracked by git. Anything else is used
-  # verbatim, so existing plaintext declarations keep working.
+  # instead of in this file, which is tracked by git. `base_url` takes the same
+  # form so a private LAN address for a local model server stays out of the
+  # tracked file too. Anything else is used verbatim, so existing plaintext
+  # declarations keep working.
   @env_reference ~r/^\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/
 
-  defp resolve_api_key!(value, where) do
+  defp resolve_env_reference!(nil, _where, _field), do: nil
+
+  defp resolve_env_reference!(value, where, field) do
     case Regex.run(@env_reference, value) do
       [_, name] ->
         case System.get_env(name) do
-          key when is_binary(key) and key != "" ->
-            key
+          resolved when is_binary(resolved) and resolved != "" ->
+            resolved
 
           _ ->
             raise Error,
-                  "#{where}.api_key references environment variable #{name}, which is unset or empty"
+                  "#{where}.#{field} references environment variable #{name}, which is unset or empty"
         end
 
       nil ->

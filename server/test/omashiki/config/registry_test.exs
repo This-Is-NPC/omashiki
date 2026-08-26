@@ -460,6 +460,54 @@ defmodule Omashiki.Config.RegistryTest do
     assert %Credential{api_key: "${env:not a var name}"} = Config.get_credential("provider")
   end
 
+  test "resolves a base_url declared as an environment reference", ctx do
+    var = "OMASHIKI_TEST_BASE_URL_#{System.unique_integer([:positive])}"
+    referenced = put_in(fixture(ctx), ["credentials", "provider", "base_url"], "${env:#{var}}")
+
+    on_exit(fn -> System.delete_env(var) end)
+
+    assert_raise Error, ~r/references environment variable #{var}, which is unset or empty/, fn ->
+      Config.load_map!(referenced, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+
+    System.put_env(var, "")
+
+    assert_raise Error, ~r/references environment variable #{var}, which is unset or empty/, fn ->
+      Config.load_map!(referenced, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+
+    System.put_env(var, "http://192.0.2.10:8080/v1")
+
+    assert :ok = Config.load_map!(referenced, path: Path.join(ctx.root, "omashiki.toml"))
+    assert %Credential{base_url: "http://192.0.2.10:8080/v1"} = Config.get_credential("provider")
+  end
+
+  test "validates the resolved base_url, not the reference", ctx do
+    var = "OMASHIKI_TEST_BASE_URL_#{System.unique_integer([:positive])}"
+    referenced = put_in(fixture(ctx), ["credentials", "provider", "base_url"], "${env:#{var}}")
+
+    on_exit(fn -> System.delete_env(var) end)
+    System.put_env(var, "https://operator:secret@example.test/v1")
+
+    assert_raise Error, ~r/base_url must be an HTTP URL without embedded credentials/, fn ->
+      Config.load_map!(referenced, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+  end
+
+  test "leaves a base_url that is not an environment reference verbatim", ctx do
+    literal =
+      put_in(
+        fixture(ctx),
+        ["credentials", "provider", "base_url"],
+        "http://example.test/${env:X}"
+      )
+
+    assert :ok = Config.load_map!(literal, path: Path.join(ctx.root, "omashiki.toml"))
+
+    assert %Credential{base_url: "http://example.test/${env:X}"} =
+             Config.get_credential("provider")
+  end
+
   test "rejects symlinked Git metadata", ctx do
     File.rm_rf!(Path.join(ctx.repo, ".git"))
     external_git = Path.join(ctx.root, "external.git")
