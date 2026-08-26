@@ -73,10 +73,62 @@ def compose(*args: str, check: bool = True) -> int:
     return run(["docker", "compose", *args], cwd=SERVER, check=check)
 
 
-def mix(*args: str, check: bool = True) -> int:
-    # +Bc keeps Ctrl-C from killing the BEAM before its shutdown hooks run.
+NODE_NAME = "omashiki@127.0.0.1"
+NODE_COOKIE = "omashiki"
+
+
+def node_name() -> str:
+    return os.environ.get("OMASHIKI_NODE_NAME", NODE_NAME)
+
+
+def node_cookie() -> str:
+    return os.environ.get("OMASHIKI_NODE_COOKIE", NODE_COOKIE)
+
+
+def erl_options(distributed: bool) -> str:
+    """Flags for the BEAM a task starts.
+
+    `+Bc` keeps Ctrl-C from killing the BEAM before its shutdown hooks run, and
+    every task wants it.
+
+    `distributed` additionally names the node. An unnamed BEAM is
+    `nonode@nohost` and there is nothing for `--remsh` to attach to: during a
+    seventeen-minute deadlock the only way to ask a wedged process what it was
+    doing was `Process.info(pid, :current_stacktrace)`, and there was no way in
+    to make the call. Only the long-running server asks for this — giving a
+    one-shot `mix ecto.migrate` the same name would refuse to start whenever the
+    server already held it.
+
+    `-name omashiki@127.0.0.1` rather than `-sname omashiki`, because the
+    address is the part that has to be right. The distribution listener is
+    pinned to loopback below, and a short name resolves through whatever the
+    host's name service says: on a machine with no /etc/hosts entry for its own
+    hostname it comes back as a link-local IPv6 address, and the console cannot
+    reach a socket bound to 127.0.0.1. Naming the node after the interface it
+    listens on removes the resolution step entirely.
+
+    The cookie is set on purpose rather than left to the random one in
+    ~/.erlang.cookie, because a value that changes per machine is a value no
+    documented `--remsh` line can use. That is only safe next to the loopback
+    pin: with a known cookie on a routable interface the console is remote code
+    execution for the whole LAN, and `app.host` is 0.0.0.0 by default because
+    agent containers need the bridge. Both are overridable.
+    """
+    options = ["+Bc"]
+
+    if distributed:
+        options += [
+            f"-name {node_name()}",
+            f"-setcookie {node_cookie()}",
+            "-kernel inet_dist_use_interface {127,0,0,1}",
+        ]
+
+    return " ".join(options)
+
+
+def mix(*args: str, check: bool = True, distributed: bool = False) -> int:
     return run(["mix", *args], cwd=SERVER, check=check,
-               env={**task_env(), "ELIXIR_ERL_OPTIONS": "+Bc"})
+               env={**task_env(), "ELIXIR_ERL_OPTIONS": erl_options(distributed)})
 
 
 def docker_lines(args: list) -> list:

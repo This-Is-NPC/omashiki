@@ -6,7 +6,7 @@ import sys
 import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / ".scripts"))
-from omashiki import compose, config, mix
+from omashiki import compose, config, mix, node_cookie, node_name
 
 
 def already_listening(host: str, port: int) -> bool:
@@ -31,7 +31,16 @@ if already_listening(host, port):
 # exit is safe: clean shutdown, Ctrl-C or crash all belong to this process.
 # A failure in one of the dependencies leaves the database up, which is what
 # you want while debugging the failure.
+# Print the attach line rather than leaving it to be rediscovered. The whole
+# point of naming the node is that someone can reach a wedged process without
+# first working out what the node is called.
+print(
+    f"✔ node {node_name()} — attach a remote console with:\n"
+    f"    iex --name console@127.0.0.1 --cookie {node_cookie()} --remsh {node_name()}",
+    flush=True,
+)
+
 try:
-    mix("phx.server")
+    mix("phx.server", distributed=True)
 finally:
     compose("stop", "db", check=False)
