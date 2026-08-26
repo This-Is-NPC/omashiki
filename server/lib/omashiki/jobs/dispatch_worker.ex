@@ -36,13 +36,13 @@ defmodule Omashiki.Jobs.DispatchWorker do
     do: trunc(:math.pow(2, attempt)) + :rand.uniform(5)
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"job_id" => job_id}} = oban_job) do
+  def perform(%Oban.Job{} = oban_job) do
     oban_job
-    |> guarded_dispatch(job_id)
-    |> settle(job_id, oban_job)
+    |> guarded_dispatch()
+    |> settle(oban_job)
   end
 
-  defp guarded_dispatch(%Oban.Job{} = oban_job, job_id) do
+  defp guarded_dispatch(%Oban.Job{args: %{"job_id" => job_id}} = oban_job) do
     dispatch(oban_job)
   rescue
     error ->
@@ -94,12 +94,12 @@ defmodule Omashiki.Jobs.DispatchWorker do
 
   # Oban is about to record an error. Before it does, make sure the jobs row
   # carries a terminal state of its own, so nothing is lost silently.
-  defp settle({:error, reason} = result, job_id, %Oban.Job{} = oban_job) do
+  defp settle({:error, reason} = result, %Oban.Job{args: %{"job_id" => job_id}} = oban_job) do
     _ = terminate_stranded(job_id, reason, final_attempt?(oban_job))
     result
   end
 
-  defp settle(result, _job_id, _oban_job), do: result
+  defp settle(result, _oban_job), do: result
 
   defp final_attempt?(%Oban.Job{attempt: attempt, max_attempts: max_attempts}),
     do: attempt >= max_attempts
