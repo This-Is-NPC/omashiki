@@ -21,6 +21,7 @@ defmodule Omashiki.Application do
         Omashiki.Repo,
         {Phoenix.PubSub, name: Omashiki.PubSub},
         {Task.Supervisor, name: Omashiki.OpencodeTaskSupervisor},
+        Omashiki.Runtime.PortAllocator,
         Omashiki.Runtime.ContainerManager,
         Omashiki.Runtimes.CacheMaintenance,
         {Oban, Application.fetch_env!(:omashiki, Oban)},
