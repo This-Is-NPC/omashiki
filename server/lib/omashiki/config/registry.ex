@@ -1,7 +1,13 @@
 defmodule Omashiki.Config.Repository do
-  @moduledoc "Immutable registered repository definition."
+  @moduledoc """
+  Immutable registered repository definition.
+
+  `remote` is the canonical Git remote a finished job artifact is published to.
+  It is optional, and `nil` keeps the single-node behaviour of leaving the
+  artifact branch only in the local repository.
+  """
   @enforce_keys [:name, :path, :base_branch]
-  defstruct [:name, :path, :base_branch]
+  defstruct [:name, :path, :base_branch, :remote]
 end
 
 defmodule Omashiki.Config.Step do
@@ -119,7 +125,7 @@ defmodule Omashiki.Config.Registry do
       where = "repositories.#{name}"
       validate_name!(name, where)
       attrs = require_table!(attrs, where)
-      reject_unknown!(attrs, ~w(path base_branch), where)
+      reject_unknown!(attrs, ~w(path base_branch remote), where)
       path = attrs |> require_string!("path", where) |> resolve_path(base_dir)
 
       unless contained?(path, base_dir) do
@@ -137,9 +143,35 @@ defmodule Omashiki.Config.Registry do
         raise Error, "#{where}.base_branch is not a safe Git branch"
       end
 
-      %Repository{name: name, path: path, base_branch: base_branch}
+      %Repository{
+        name: name,
+        path: path,
+        base_branch: base_branch,
+        remote: optional_remote!(attrs, where)
+      }
     end)
     |> Enum.sort_by(& &1.name)
+  end
+
+  defp optional_remote!(attrs, where) do
+    case Map.get(attrs, "remote") do
+      nil ->
+        nil
+
+      value when is_binary(value) and value != "" ->
+        unless valid_remote?(value), do: raise(Error, "#{where}.remote is not a safe Git remote")
+        value
+
+      _ ->
+        raise Error, "#{where}.remote must be a non-empty string"
+    end
+  end
+
+  # An `ext::` remote runs an arbitrary command on every fetch and push, and a
+  # leading dash is read by git as an option rather than a location.
+  defp valid_remote?(value) do
+    String.valid?(value) and not String.contains?(value, [<<0>>, "\n", " "]) and
+      not String.starts_with?(value, ["-", "ext::"])
   end
 
   defp build_environments!(section, harnesses, caches, credentials, host_credentials, base_dir) do

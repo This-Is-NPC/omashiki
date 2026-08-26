@@ -20,7 +20,13 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
     Config.load_map!(
       %{
-        "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "main"}},
+        "repositories" => %{
+          "app" => %{
+            "path" => "repo",
+            "base_branch" => "main",
+            "remote" => "/srv/canonical/app.git"
+          }
+        },
         "harnesses" => %{
           "opencode" => %{
             "adapter" => "opencode",
@@ -74,6 +80,11 @@ defmodule Omashiki.Jobs.AdmissionTest do
     assert job.payload == %{"instruction" => "run"}
     assert job.payload_hash == sha256(Jason.encode!(job.payload))
     assert job.repository_snapshot["name"] == "app"
+
+    # The key GitArtifact reads to find the canonical remote. Losing it here
+    # silently downgrades every job to a local-only, unreachable artifact.
+    assert job.repository_snapshot["remote"] == "/srv/canonical/app.git"
+
     assert job.environment_snapshot["name"] == "safe"
     assert [%{"read_only" => false}] = job.environment_snapshot["mounts"]
     refute inspect(job.environment_snapshot) =~ "do-not-persist"

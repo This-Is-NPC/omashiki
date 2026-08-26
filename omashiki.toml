@@ -90,6 +90,19 @@ HEX_HOME = "/omashiki-cache/global/hex"
 path = "."
 base_branch = "master"
 
+# Canonical Git remote for finished job artifacts. Optional: without it the
+# `omashiki/job-<id>` branch only exists in `path`, on the node that ran the
+# attempt, so any other node reports success while delivering nothing.
+#
+# The remote is also what arbitrates a branch-name collision between nodes —
+# the push refuses a name that already exists there — so a cluster must declare
+# one. Push credentials are not declared here: the push runs on the host as the
+# Omashiki user and authenticates through the SSH agent, `~/.ssh/config`, or a
+# credential helper. Keeping them off this file keeps them out of the agent
+# container, where they would let an agent bypass the artifact safety checks.
+#
+# remote = "git@github.com:example/omashiki.git"
+
 [harnesses.opencode]
 adapter = "opencode"
 runtime = "docker"

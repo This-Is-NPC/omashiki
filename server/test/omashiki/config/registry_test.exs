@@ -24,7 +24,9 @@ defmodule Omashiki.Config.RegistryTest do
   test "loads a complete repository and environment registry", ctx do
     assert :ok = Config.load_map!(fixture(ctx), path: Path.join(ctx.root, "omashiki.toml"))
 
-    assert [%Repository{name: "app", path: path, base_branch: "main"}] = Config.repositories()
+    assert [%Repository{name: "app", path: path, base_branch: "main", remote: nil}] =
+             Config.repositories()
+
     assert path == ctx.repo
 
     assert [
@@ -237,6 +239,24 @@ defmodule Omashiki.Config.RegistryTest do
       invalid = put_in(fixture(ctx), ["repositories", "app", "base_branch"], branch)
 
       assert_raise Error, ~r/not a safe Git branch/, fn ->
+        Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+      end
+    end
+  end
+
+  test "declares an optional canonical remote per repository", ctx do
+    declared = put_in(fixture(ctx), ["repositories", "app", "remote"], "git@host:app.git")
+    assert :ok = Config.load_map!(declared, path: Path.join(ctx.root, "omashiki.toml"))
+    assert [%Repository{remote: "git@host:app.git"}] = Config.repositories()
+    assert {:ok, resolved} = Config.resolve_job("app", "opencode")
+    assert resolved.repository.remote == "git@host:app.git"
+  end
+
+  test "rejects unsafe canonical remotes", ctx do
+    for remote <- ["ext::sh -c whoami", "--upload-pack=rm -rf /", "git@host:a b.git", ""] do
+      invalid = put_in(fixture(ctx), ["repositories", "app", "remote"], remote)
+
+      assert_raise Error, ~r/remote/, fn ->
         Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
       end
     end
