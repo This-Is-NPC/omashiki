@@ -464,6 +464,7 @@ defmodule Omashiki.Jobs do
 
     release_capacity_if_reserved!(attempt)
     record_event!(updated, status, %{"error_code" => error_code(error)}, completed_attempt)
+    cancel_blocked_children!(updated, status)
     updated
   end
 
@@ -586,6 +587,53 @@ defmodule Omashiki.Jobs do
     end)
 
     :ok
+  end
+  defp cancel_blocked_children!(%Job{} = parent, parent_status)
+       when parent_status in ~w(failed cancelled) do
+    children =
+      from(j in Job,
+        where: j.parent_job_id == ^parent.id and j.status == "blocked",
+        order_by: [asc: j.priority, asc: j.inserted_at, asc: j.id],
+        lock: "FOR UPDATE"
+      )
+      |> Repo.all()
+
+    now = now()
+    error = parent_terminal_child_error(parent, parent_status)
+
+    Enum.each(children, fn child ->
+      updated =
+        update_job!(child, %{
+          status: "cancelled",
+          finished_at: now,
+          terminal_result: nil,
+          terminal_error: error
+        })
+
+      attempt = current_attempt!(updated)
+
+      completed_attempt =
+        update_attempt!(attempt, %{
+          status: "cancelled",
+          finished_at: now,
+          error: error,
+          capacity_reserved: false,
+          lease_token: nil,
+          lease_expires_at: nil
+        })
+
+      record_event!(updated, "cancelled", %{"error_code" => error_code(error)}, completed_attempt)
+    end)
+
+    :ok
+  end
+
+  defp parent_terminal_child_error(%Job{} = parent, parent_status) do
+    %{
+      "code" => "parent_#{parent_status}",
+      "message" => "parent job #{parent.id} reached #{parent_status}",
+      "details" => %{"parent_job_id" => parent.id, "parent_status" => parent_status}
+    }
   end
 
   defp recover_stale_locked(at) do
