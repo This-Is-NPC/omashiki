@@ -69,6 +69,25 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
     assert Enum.any?(errors, &(&1.field == "jobs.depends_on" and &1.code == "cycle"))
   end
 
+  test "failed dependency with block edge keeps child blocked", %{token: token} do
+    assert {:ok, [a, c]} =
+             Jobs.Admission.admit_batch(
+               token,
+               %{
+                 "schema_version" => 1,
+                 "correlation_id" => "block-edge",
+                 "jobs" => [
+                   batch_job("a", []),
+                   batch_job("c", [%{"ref" => "a", "on_failure" => "block"}])
+                 ]
+               }
+             )
+
+    fail_job!(a)
+
+    assert Repo.get!(Job, c.id).status == "blocked"
+  end
+
   test "failed dependency with cancel edge cancels child", %{token: token} do
     assert {:ok, [a, c]} =
              Jobs.Admission.admit_batch(

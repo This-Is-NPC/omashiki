@@ -55,6 +55,30 @@ defmodule Omashiki.Jobs.Contract.V1Test do
     assert_error(errors, "payload.atom_key", "unknown_field")
   end
 
+  test "rejects malformed single depends_on entries at contract validation" do
+    assert {:error, errors} =
+             single_request()
+             |> Map.put("depends_on", ["not-an-object"])
+             |> V1.validate_single()
+
+    assert_error(errors, "depends_on", "object_required")
+
+    assert {:error, on_failure_errors} =
+             single_request()
+             |> Map.put("depends_on", [%{"id" => @parent_job_id, "on_failure" => "explode"}])
+             |> V1.validate_single()
+
+    assert_error(on_failure_errors, "depends_on.on_failure", "unsupported")
+  end
+
+  test "accepts well-formed single depends_on entries" do
+    request =
+      single_request()
+      |> Map.put("depends_on", [%{"id" => @parent_job_id, "on_failure" => "block"}])
+
+    assert {:ok, ^request} = V1.validate_single(request)
+  end
+
   test "validates an atomic same-batch parent chain" do
     batch = %{
       "schema_version" => 1,

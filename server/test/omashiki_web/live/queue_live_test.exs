@@ -4,6 +4,9 @@ defmodule OmashikiWeb.QueueLiveTest do
   import Phoenix.LiveViewTest
   import Omashiki.JobFixtures
 
+  alias Omashiki.Jobs.JobDependency
+  alias Omashiki.Repo
+
   test "renders blocked, queued, and running jobs with operational fields", %{
     conn: conn,
     user: user,
@@ -12,12 +15,20 @@ defmodule OmashikiWeb.QueueLiveTest do
     {parent, _attempt} = job_fixture(user, token, %{idempotency_key: "parent-ui"})
     {_queued, _attempt} = job_fixture(user, token, %{idempotency_key: "queued-ui", priority: 2})
 
-    {_blocked, _attempt} =
+    {blocked, _attempt} =
       job_fixture(user, token, %{
         idempotency_key: "blocked-ui",
-        status: "blocked",
-        parent_job_id: parent.id
+        status: "blocked"
       })
+
+    %JobDependency{}
+    |> JobDependency.changeset(%{
+      job_id: blocked.id,
+      depends_on_job_id: parent.id,
+      user_id: user.id,
+      on_failure: "cancel"
+    })
+    |> Repo.insert!()
 
     {_running, _attempt} =
       job_fixture(user, token, %{idempotency_key: "running-ui", status: "running"})
