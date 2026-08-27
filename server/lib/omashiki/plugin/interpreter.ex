@@ -107,7 +107,7 @@ defmodule Omashiki.Plugin.Interpreter do
     credential = context.credential || credential_from_environment(context.environment)
     llm_egress = context.llm_egress || :engine
     payload = message_payload(invocation)
-    payload = if credential, do: put_model(payload, credential, llm_egress, manifest, context), else: payload
+    payload = put_model(payload, credential, llm_egress, manifest, context)
 
     with %Capability{} = capability <- context.capability,
          {:ok, session} <- Http.start_session(capability),
@@ -394,9 +394,30 @@ defmodule Omashiki.Plugin.Interpreter do
   defp put_model(payload, %Credential{} = c, :gateway, _m, _ctx),
     do: Map.put(payload, :model, %{providerID: "gateway", modelID: c.model})
 
-  defp put_model(payload, %Credential{} = c, _, _manifest, ctx) do
-    model = Map.get(ctx.profile.options, "model") || c.model
-    Map.put(payload, :model, %{providerID: c.provider, modelID: model})
+  defp put_model(payload, credential, _, _manifest, ctx) do
+    preset_model = profile_option(ctx.profile, "model")
+    fallback = if match?(%Credential{}, credential), do: credential.model
+    provider_fallback = if match?(%Credential{}, credential), do: credential.provider, else: "opencode"
+
+    case preset_model || fallback do
+      model when is_binary(model) and model != "" ->
+        {provider, model_id} = split_provider_model(model, provider_fallback)
+        Map.put(payload, :model, %{providerID: provider, modelID: model_id})
+
+      _ ->
+        payload
+    end
+  end
+
+  defp profile_option(%{options: options}, key) when is_map(options), do: Map.get(options, key)
+  defp profile_option(%{"options" => options}, key) when is_map(options), do: Map.get(options, key)
+  defp profile_option(_, _), do: nil
+
+  defp split_provider_model(model, fallback) when is_binary(model) do
+    case String.split(model, "/", parts: 2) do
+      [provider, id] when provider != "" and id != "" -> {provider, id}
+      _ -> {fallback, model}
+    end
   end
 
   defp normalize_http_result({:ok, %Result{} = r}), do: {:ok, r}

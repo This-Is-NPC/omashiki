@@ -104,5 +104,10 @@ defmodule Omashiki.Plugin.OptionSchemaTest do
              OptionSchema.validate(manifest, %{"readiness_timeout_ms" => 0})
 
     assert {:error, :invalid_timeout} = OptionSchema.validate(manifest, %{"internal_port" => 0})
+
+    assert :ok =
+             OptionSchema.validate(manifest, %{"model" => "opencode-go/glm-5.3-flash"})
+
+    assert {:error, :invalid_model} = OptionSchema.validate(manifest, %{"model" => "--oss"})
   end
 end

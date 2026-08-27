@@ -43,6 +43,18 @@ defmodule Omashiki.Config.RegistryTest do
     end
   end
 
+  test "tracked omashiki.toml boots and pins OpenCode Go GLM-5.3-Flash" do
+    path = Path.expand("../../../../omashiki.toml", __DIR__)
+    assert :ok = Config.load!(path)
+
+    preset = Enum.find(Config.presets(), &(&1.name == "opencode"))
+    environment = Enum.find(Config.environments(), &(&1.name == "opencode"))
+
+    assert preset.options["model"] == "opencode-go/glm-5.3-flash"
+    assert environment.network == "restricted"
+    assert preset.manifest.prepare == "opencode_host"
+  end
+
   test "loads a complete repository and environment registry", ctx do
     assert :ok = Config.load_map!(fixture(ctx), path: Path.join(ctx.root, "omashiki.toml"))
 

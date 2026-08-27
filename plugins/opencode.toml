@@ -1,5 +1,5 @@
 transport = "http"
-prepare = "opencode_gateway"
+prepare = "opencode_host"
 readiness = { kind = "http", path = "/doc", timeout_ms = 60_000 }
 
 [http]
@@ -33,6 +33,10 @@ default = "/doc"
 [options.readiness_timeout_ms]
 type = "positive_int"
 default = 60_000
+
+[options.model]
+type = "model"
+optional = true
 
 [output]
 shape = "object"

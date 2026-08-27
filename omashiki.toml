@@ -165,7 +165,7 @@ base_branch = "master"
 [presets.opencode]
 
 plugin = "opencode"
-options = { model = "openai/gpt-4.1", auth_path = "/run/omashiki/state/auth.json", config_path = "/run/omashiki/state/opencode.json" }
+options = { model = "opencode-go/glm-5.3-flash", auth_path = "/run/omashiki/state/auth.json", config_path = "/run/omashiki/state/opencode.json" }
 
 [presets.claude-code]
 
@@ -182,7 +182,7 @@ executables = ["mise", "git"]
 credentials = ["opencode-local"]
 caches = ["global"]
 timeout_ms = 1800000
-network = "none"
+network = "restricted"
 mounts = []
 post_steps = []
 pre_steps = [{ argv = ["mise", "install", "--yes"], condition = "always", timeout_ms = 600000 }]

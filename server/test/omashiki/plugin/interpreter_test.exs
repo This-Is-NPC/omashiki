@@ -170,6 +170,46 @@ defmodule Omashiki.Plugin.InterpreterTest do
              |> List.flatten()
   end
 
+  test "opencode host prepare writes the preset model into OPENCODE_CONFIG_CONTENT", %{
+    plugins: plugins
+  } do
+    tmp = Path.join(System.tmp_dir!(), "omashiki-opencode-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(tmp)
+    auth = Path.join(tmp, "auth.json")
+    config = Path.join(tmp, "opencode.json")
+    File.write!(auth, "{}")
+    File.write!(config, "{}")
+
+    try do
+      manifest = Map.fetch!(plugins, "opencode")
+      spec = preset(manifest, %{"model" => "opencode-go/glm-5.3-flash"})
+
+      context = %Context{
+        job: nil,
+        profile: spec,
+        runtime_mounts: [
+          {auth, "/run/omashiki/state/auth.json", false},
+          {config, "/run/omashiki/state/opencode.json", false}
+        ]
+      }
+
+      assert {:ok, plan} = Interpreter.prepare(spec, context)
+      assert plan.llm_egress == :engine
+
+      content =
+        plan.environment
+        |> Enum.find_value(fn
+          "OPENCODE_CONFIG_CONTENT=" <> json -> json
+          _ -> nil
+        end)
+        |> Jason.decode!()
+
+      assert content["model"] == "opencode-go/glm-5.3-flash"
+    after
+      File.rm_rf!(tmp)
+    end
+  end
+
   test "admitted snapshot keeps only path, contents, and digest", %{manifest: manifest} do
     snapshot = Manifest.admitted_snapshot(manifest)
 
