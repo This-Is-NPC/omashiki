@@ -42,6 +42,11 @@ defmodule Omashiki.Jobs.SinkTest do
              Admission.admit(token, single_request("none-env", "app"))
   end
 
+  test "files sink with repository is rejected", %{token: token} do
+    assert {:error, :repository_not_allowed} =
+             Admission.admit(token, single_request("files-env", "app"))
+  end
+
   test "files sink without repository is admitted", %{token: token} do
     request = single_request("files-env") |> Map.delete("repo")
 
@@ -69,6 +74,41 @@ defmodule Omashiki.Jobs.SinkTest do
     assert completed_attempt.head_sha == nil
     assert completed_attempt.worktree_clean == nil
     assert completed_attempt.result == result
+  end
+
+  test "git sink cannot succeed without git fields", %{token: token} do
+    assert {:ok, job} = Admission.admit(token, single_request("git-env", "app"))
+    assert {:ok, attempt} = Omashiki.Jobs.claim(job, "sink-runner")
+
+    assert {:error, :invalid_success_result} =
+             Omashiki.Jobs.complete(attempt, attempt.lease_token, :succeeded, %{
+               result: %{"summary" => "done"}
+             })
+  end
+
+  test "none sink cannot succeed with git fields", %{token: token} do
+    request = single_request("none-env") |> Map.delete("repo")
+    assert {:ok, job} = Admission.admit(token, request)
+    assert {:ok, attempt} = Omashiki.Jobs.claim(job, "sink-runner")
+
+    assert {:error, :invalid_success_result} =
+             Omashiki.Jobs.complete(attempt, attempt.lease_token, :succeeded, %{
+               result: %{"summary" => "done"},
+               branch: "jobs/sink",
+               base_sha: String.duplicate("a", 40),
+               head_sha: String.duplicate("b", 40),
+               worktree_clean: true
+             })
+  end
+
+  test "provision rejects environment missing sink", %{token: token} do
+    assert {:ok, job} = Admission.admit(token, single_request("git-env", "app"))
+    assert {:ok, attempt} = Omashiki.Jobs.claim(job, "sink-runner")
+
+    environment = job.admitted_environment |> Map.delete("sink") |> Map.delete(:sink)
+
+    assert {:error, {:unsupported_sink, :missing}} =
+             Omashiki.Jobs.Runner.DockerContainer.provision(job, attempt, environment, [])
   end
 
   test "validate still fails files sink on secret in blob" do
