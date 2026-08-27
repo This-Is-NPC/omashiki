@@ -4,11 +4,11 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
 
   ## What "two nodes" means here
 
-  There is one machine and one BEAM. A node is `Config.current_node/0`, which
+  There is one machine and one BEAM. A node is `Config.current_machine/0`, which
   lives in `:persistent_term` and is therefore global to the VM, so these tests
   *become* one node at a time rather than running two at once. Every assertion
   below still goes through the real `reserve_capacity!`, `release_capacity!`,
-  `sync_capacity/0` and `recover_stale/1` against two distinct `node_id` rows in
+  `sync_capacity/0` and `recover_stale/1` against two distinct `machine_id` rows in
   one Postgres — the code path is genuine, the concurrency between two hosts is
   not.
 
@@ -87,7 +87,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
 
     assert {:ok, _} = Jobs.sync_capacity()
     assert {:ok, attempt} = Jobs.claim(job, "runner-1")
-    assert attempt.node_id == "node-a"
+    assert attempt.machine_id == "node-a"
     assert row("node-a").active == 1
   end
 
@@ -119,8 +119,8 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
              :id
            ) == 20
 
-    assert Enum.map(a_claims, & &1.node_id) |> Enum.uniq() == ["node-a"]
-    assert Enum.map(b_claims, & &1.node_id) |> Enum.uniq() == ["node-b"]
+    assert Enum.map(a_claims, & &1.machine_id) |> Enum.uniq() == ["node-a"]
+    assert Enum.map(b_claims, & &1.machine_id) |> Enum.uniq() == ["node-b"]
     assert Jobs.cluster_capacity() == %{capacity: 20, active: 20}
   end
 
@@ -190,7 +190,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
   # DONE WHEN, parts two and three. This is the assertion the whole node-identity
   # phase was ordered for: `recover_stale/1` runs on *every* node, so the machine
   # that fails an expired attempt is routinely not the machine that reserved for
-  # it. Releasing against `current_node/0` would strand a slot on the dead node
+  # it. Releasing against `current_machine/0` would strand a slot on the dead node
   # forever and drive the survivor's counter below what it actually holds.
   test "a sweeping node releases the reserving node's slots and never its own", %{
     root: root,
@@ -275,7 +275,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     assert {:error, :capacity_exhausted} = Jobs.claim(eleventh, "eleventh-runner")
   end
 
-  # Attempts claimed before `job_attempts.node_id` existed carry NULL. They were
+  # Attempts claimed before `job_attempts.machine_id` existed carry NULL. They were
   # counted in the singleton row the migration re-keyed to `'local'`, so that is
   # the only row that can honestly give the slot back.
   test "an attempt with no recorded node releases against the migrated row", %{
@@ -290,9 +290,9 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     assert row("local").active == 1
 
     # Erase the node the way an upgraded row has it erased.
-    Repo.update_all(from(a in JobAttempt, where: a.id == ^attempt.id), set: [node_id: nil])
+    Repo.update_all(from(a in JobAttempt, where: a.id == ^attempt.id), set: [machine_id: nil])
     attempt = Repo.get!(JobAttempt, attempt.id)
-    assert attempt.node_id == nil
+    assert attempt.machine_id == nil
 
     assert {:ok, _} =
              Jobs.complete(attempt, attempt.lease_token, :failed, %{error: error("worker_exit")})
@@ -316,7 +316,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     nodes = if Map.has_key?(@nodes, node), do: @nodes, else: %{}
 
     load_config!(root, nodes, %{"max_concurrent_containers" => max_concurrent})
-    assert Config.current_node().name == node
+    assert Config.current_machine().name == node
     :ok
   end
 
@@ -353,16 +353,15 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
       %{
         "nodes" => nodes,
         "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "main"}},
-        "harnesses" => %{
-          "opencode" => %{
-            "adapter" => "opencode",
-            "runtime" => "docker",
-            "image" => "agent:latest"
-          }
+        "presets" => %{
+          "opencode" => %{"plugin" => "opencode", "options" => %{}}
         },
         "environments" => %{
           "safe" => %{
-            "harness" => "opencode",
+            "isolation" => "docker",
+          "image" => "omashiki/agent:latest",
+          "sink" => "git",
+          "preset" => "opencode",
             "executables" => ["git"],
             "timeout_ms" => 1_000,
             "caches" => [],

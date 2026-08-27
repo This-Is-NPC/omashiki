@@ -16,13 +16,13 @@ defmodule OmashikiWeb.Api.DiscoveryController do
   end
 
   defp environment_json(environment) do
-    profile = environment.harness_profile
+    profile = environment.preset
 
     %{
       name: environment.name,
-      harness: environment.harness,
-      adapter: inspect(profile.adapter),
-      runtime: profile.runtime.kind,
+      preset: environment.preset.name,
+      plugin: inspect(profile.adapter),
+      isolation: profile.runtime.kind,
       timeout_ms: environment.timeout_ms,
       network: environment.network,
       capabilities: environment.capabilities,

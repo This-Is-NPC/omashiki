@@ -1,10 +1,14 @@
 defmodule Omashiki.Harness.CodexTest do
   use ExUnit.Case, async: true
 
-  alias Omashiki.Harness.{Context, Invocation, Spec}
+  alias Omashiki.Plugin.Preset
+  alias Omashiki.Isolation
+
+  alias Omashiki.Harness.{Context, Invocation}
+  alias Omashiki.Plugin.Preset
   alias Omashiki.Harness.Codex
   alias Omashiki.Runtime.Capability
-  alias Omashiki.Runtimes.Runtime
+  alias Omashiki.Isolation
 
   test "validates the strict profile surface" do
     assert :ok = Codex.validate_options(%{})
@@ -32,7 +36,7 @@ defmodule Omashiki.Harness.CodexTest do
     spec = profile(%{})
 
     snapshot = %{
-      "harness_profile" => %{
+      "preset" => %{
         "name" => spec.name,
         "adapter_key" => spec.adapter_key,
         "options" => spec.options,
@@ -278,12 +282,12 @@ defmodule Omashiki.Harness.CodexTest do
   end
 
   defp profile(options) do
-    %Spec{
+    %Preset{
       name: "codex",
       adapter: Codex,
       adapter_key: "codex",
       options: options,
-      runtime: %Runtime{
+      runtime: %Isolation{
         key: "codex",
         kind: "docker",
         config: %{"image" => "agent"},

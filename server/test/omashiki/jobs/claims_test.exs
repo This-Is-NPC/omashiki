@@ -61,8 +61,8 @@ defmodule Omashiki.Jobs.ClaimsTest do
     {:ok, job} = Jobs.Admission.admit(token, request("declared-node"))
 
     assert {:ok, attempt} = Jobs.claim(job, "oban:1")
-    assert attempt.node_id == "builder-01"
-    assert Repo.get!(JobAttempt, attempt.id).node_id == "builder-01"
+    assert attempt.machine_id == "builder-01"
+    assert Repo.get!(JobAttempt, attempt.id).machine_id == "builder-01"
 
     # The dedicated column, not an overloaded runner id.
     assert attempt.runner_id == "oban:1"
@@ -90,7 +90,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     {:ok, job} = Jobs.Admission.admit(token, request("implicit-node"))
 
     assert {:ok, attempt} = Jobs.claim(job, "oban:2")
-    assert attempt.node_id == "implicit-claim-host"
+    assert attempt.machine_id == "implicit-claim-host"
   end
 
   test "worker crash before claim leaves the job queued without capacity", %{token: token} do
@@ -695,16 +695,15 @@ defmodule Omashiki.Jobs.ClaimsTest do
       %{
         "nodes" => nodes,
         "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "main"}},
-        "harnesses" => %{
-          "opencode" => %{
-            "adapter" => "opencode",
-            "runtime" => "docker",
-            "image" => "agent:latest"
-          }
+        "presets" => %{
+          "opencode" => %{"plugin" => "opencode", "options" => %{}}
         },
         "environments" => %{
           "safe" => %{
-            "harness" => "opencode",
+            "isolation" => "docker",
+          "image" => "omashiki/agent:latest",
+          "sink" => "git",
+          "preset" => "opencode",
             "executables" => ["git"],
             "timeout_ms" => 1_000,
             "caches" => [],

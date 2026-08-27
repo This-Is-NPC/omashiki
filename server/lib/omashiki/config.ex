@@ -16,7 +16,7 @@ defmodule Omashiki.Config do
   every successful write bumps `generation/0`. Exactly **one** generation lives
   in `:persistent_term` at a time — the live one, which admission resolves
   against. The generations still owed to running work are not held in memory at
-  all: each job captured its own `repository_snapshot`, `environment_snapshot`
+  all: each job captured its own `admitted_repository`, `admitted_environment`
   and `registry_digest` at admission, so the prior generation lives durably in
   the `jobs` row that needs it. That is what bounds the writes. `:persistent_term.put/2`
   scans every process holding a reference to the old term, so it is paid once
@@ -33,13 +33,13 @@ defmodule Omashiki.Config do
   `load!/1` raises `Omashiki.Config.Error` (never a raw `KeyError`) when:
 
     * the file is missing
-    * a required top-level section is missing (`repositories`, `environments`, `harnesses`,
+    * a required top-level section is missing (`repositories`, `environments`, `presets`,
       or `limits`; `credentials`, `host_credentials`, and `caches` are optional)
     * a required field on an entry is missing
   """
 
   alias Omashiki.Credentials.Credential
-  alias Omashiki.Config.{HostCredential, Node, Registry, ResolvedJob}
+  alias Omashiki.Config.{HostCredential, Machine, Registry, ResolvedJob}
   alias Omashiki.Runtimes.CacheGroup
   alias Omashiki.SupplyChain.Policy
 
@@ -60,7 +60,7 @@ defmodule Omashiki.Config do
   )
   # Domain sections that must appear in a real TOML file. `credentials` is
   # optional when jobs use host-authenticated providers.
-  @required_sections ~w(repositories environments harnesses limits)
+  @required_sections ~w(repositories environments presets limits)
 
   # How a hot reload lands. `[limits]` is per-container resource budget and
   # `HostSettings` takes exactly four keys out of it; a rollout strategy is not
@@ -72,11 +72,11 @@ defmodule Omashiki.Config do
     credentials: [],
     host_credentials: [],
     caches: [],
-    harnesses: [],
+    presets: [],
     repositories: [],
     environments: [],
     nodes: [],
-    current_node: nil,
+    current_machine: nil,
     registry_digest: nil,
     limits: %{},
     reload_policy: @default_reload_policy,
@@ -193,7 +193,7 @@ defmodule Omashiki.Config do
   def credentials, do: snapshot().credentials
   def host_credentials, do: snapshot().host_credentials
   def caches, do: snapshot().caches
-  def harnesses, do: snapshot().harnesses
+  def presets, do: snapshot().presets
   def repositories, do: snapshot().repositories
   def environments, do: snapshot().environments
   def current_digest, do: snapshot().registry_digest
@@ -207,7 +207,7 @@ defmodule Omashiki.Config do
   """
   def nodes do
     case snapshot().nodes do
-      [] -> [current_node()]
+      [] -> [current_machine()]
       nodes -> nodes
     end
   end
@@ -219,11 +219,11 @@ defmodule Omashiki.Config do
   configuration has been loaded at all, so it never returns nil and never
   raises on the claim path.
   """
-  def current_node, do: snapshot().current_node || local_node()
+  def current_machine, do: snapshot().current_machine || local_machine()
 
   @doc "Current immutable repository/environment registry snapshot."
   def current_snapshot do
-    Map.take(snapshot(), [:repositories, :harnesses, :environments, :registry_digest])
+    Map.take(snapshot(), [:repositories, :presets, :environments, :registry_digest])
   end
 
   @doc "Resolve names to values captured for one admitted job."
@@ -332,11 +332,11 @@ defmodule Omashiki.Config do
   # otherwise claim work and stamp attempts with a node id no other machine, and
   # no per-node capacity row, has ever heard of. Failing config load is the only
   # place that is still cheap to notice.
-  defp resolve_current_node!([]), do: local_node()
-  defp resolve_current_node!([%Node{} = only]), do: only
+  defp resolve_current_machine!([]), do: local_machine()
+  defp resolve_current_machine!([%Machine{} = only]), do: only
 
-  defp resolve_current_node!(nodes) do
-    name = local_node_name()
+  defp resolve_current_machine!(nodes) do
+    name = local_machine_name()
 
     Enum.find(nodes, &(&1.name == name)) ||
       raise Error,
@@ -344,9 +344,9 @@ defmodule Omashiki.Config do
               "set OMASHIKI_NODE to one of #{inspect(Enum.map(nodes, & &1.name))}"
   end
 
-  defp local_node, do: %Node{name: local_node_name()}
+  defp local_machine, do: %Machine{name: local_machine_name()}
 
-  defp local_node_name do
+  defp local_machine_name do
     case System.get_env("OMASHIKI_NODE") do
       name when is_binary(name) and name != "" -> name
       _ -> hostname()
@@ -362,6 +362,7 @@ defmodule Omashiki.Config do
 
   defp build_snapshot!(map, path, source, opts) when is_map(map) do
     map = stringify_keys(map)
+    reject_legacy_sections!(map)
 
     if Keyword.get(opts, :require_sections?, false) do
       Enum.each(@required_sections, fn section ->
@@ -381,7 +382,7 @@ defmodule Omashiki.Config do
       Registry.build!(
         section(map, "repositories"),
         section(map, "environments"),
-        section(map, "harnesses"),
+        section(map, "presets"),
         section(map, "nodes"),
         caches,
         credentials,
@@ -396,11 +397,11 @@ defmodule Omashiki.Config do
       credentials: credentials,
       host_credentials: host_credentials,
       caches: caches,
-      harnesses: registry.harnesses,
+      presets: registry.presets,
       repositories: registry.repositories,
       environments: registry.environments,
       nodes: registry.nodes,
-      current_node: resolve_current_node!(registry.nodes),
+      current_machine: resolve_current_machine!(registry.nodes),
       registry_digest: registry.registry_digest,
       limits: limits,
       reload_policy: reload_policy,
@@ -875,4 +876,12 @@ defmodule Omashiki.Config do
 
   defp expand_path("~/" <> rest), do: Path.join(System.user_home!(), rest)
   defp expand_path(path) when is_binary(path), do: path
+
+  defp reject_legacy_sections!(map) do
+    for key <- ["harnesses"], Map.has_key?(map, key) do
+      raise Error, "omashiki.toml: unknown section #{inspect(key)}"
+    end
+
+    :ok
+  end
 end

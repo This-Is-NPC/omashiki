@@ -142,10 +142,10 @@ defmodule OmashikiWeb.ConfigLive do
             </div>
             <dl class="mt-4 grid gap-2 font-mono text-xs sm:grid-cols-[8rem_1fr]">
               <dt class="text-on-surface-variant">runtime</dt><dd class="text-on-surface">
-                {environment.harness_profile.runtime.kind}
+                {environment.preset.runtime.kind}
               </dd>
               <dt class="text-on-surface-variant">image</dt><dd class="break-all text-on-surface">
-                {Omashiki.Runtimes.docker_image(environment.harness_profile.runtime)}
+                {Omashiki.Runtimes.docker_image(environment.preset.runtime)}
               </dd>
               <dt class="text-on-surface-variant">harness</dt><dd class="text-on-surface">
                 {environment.harness}

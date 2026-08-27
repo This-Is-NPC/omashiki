@@ -145,8 +145,8 @@ defmodule Omashiki.Jobs.SchemaTest do
     token = persist_token(user)
     job = persist_job(user, token)
 
-    assert job.repository_snapshot == %{"base_branch" => "main", "name" => "app"}
-    assert job.environment_snapshot == %{"name" => "opencode"}
+    assert job.admitted_repository == %{"base_branch" => "main", "name" => "app"}
+    assert job.admitted_environment == %{"name" => "opencode"}
 
     attempt =
       %JobAttempt{}
@@ -361,10 +361,10 @@ defmodule Omashiki.Jobs.SchemaTest do
       environment: "opencode",
       payload: %{"instruction" => "run"},
       payload_hash: @digest,
-      repository_snapshot: %{"name" => "app", "base_branch" => "main"},
-      repository_digest: @digest,
-      environment_snapshot: %{"name" => "opencode"},
-      environment_digest: @digest,
+      admitted_repository: %{"name" => "app", "base_branch" => "main"},
+      admitted_repository_digest: @digest,
+      admitted_environment: %{"name" => "opencode"},
+      admitted_environment_digest: @digest,
       registry_digest: @digest,
       queue: "default",
       priority: 0,

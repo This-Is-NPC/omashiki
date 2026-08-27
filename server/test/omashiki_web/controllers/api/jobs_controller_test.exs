@@ -14,16 +14,15 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     Config.load_map!(
       %{
         "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "main"}},
-        "harnesses" => %{
-          "opencode" => %{
-            "adapter" => "opencode",
-            "runtime" => "docker",
-            "image" => "agent:latest"
-          }
+        "presets" => %{
+          "opencode" => %{"plugin" => "opencode", "options" => %{}}
         },
         "environments" => %{
           "safe" => %{
-            "harness" => "opencode",
+            "isolation" => "docker",
+          "image" => "omashiki/agent:latest",
+          "sink" => "git",
+          "preset" => "opencode",
             "executables" => ["git"],
             "credentials" => [],
             "capabilities" => [],

@@ -1,5 +1,5 @@
-defmodule Omashiki.Harness.Spec do
-  @moduledoc "Immutable, configured harness profile resolved from the registry."
+defmodule Omashiki.Plugin.Preset do
+  @moduledoc "Immutable, configured preset resolved from the registry."
 
   @enforce_keys [:name, :adapter, :adapter_key, :options, :runtime, :launch_plan]
   defstruct @enforce_keys
@@ -9,7 +9,7 @@ defmodule Omashiki.Harness.Spec do
           adapter: module(),
           adapter_key: String.t(),
           options: map(),
-          runtime: Omashiki.Runtimes.Runtime.t(),
+          runtime: Omashiki.Isolation.t(),
           launch_plan: Omashiki.Harness.LaunchPlan.t()
         }
 end
@@ -21,7 +21,7 @@ defmodule Omashiki.Harness.LaunchPlan do
   defstruct @enforce_keys ++ [llm_egress: nil]
 
   @type t :: %__MODULE__{
-          runtime: Omashiki.Runtimes.Runtime.t(),
+          runtime: Omashiki.Isolation.t(),
           transport: map(),
           startup: map() | nil,
           readiness: map() | nil,
@@ -32,7 +32,7 @@ defmodule Omashiki.Harness.LaunchPlan do
 end
 
 defmodule Omashiki.Harness.Invocation do
-  @moduledoc "Neutral instruction and JSON context passed to a harness adapter."
+  @moduledoc "Neutral instruction and JSON context passed to a plugin."
 
   @enforce_keys [:instruction, :context]
   defstruct @enforce_keys
@@ -45,7 +45,7 @@ defmodule Omashiki.Harness.Invocation do
 end
 
 defmodule Omashiki.Harness.Result do
-  @moduledoc "Neutral result returned by a harness adapter."
+  @moduledoc "Neutral result returned by a plugin."
 
   defstruct assistant_text: "",
             input_tokens: nil,
@@ -87,7 +87,7 @@ defmodule Omashiki.Harness.Context do
           job: map() | nil,
           credential: map() | nil,
           environment: map(),
-          profile: Omashiki.Harness.Spec.t() | map() | nil,
+          profile: Omashiki.Plugin.Preset.t() | map() | nil,
           capability: Omashiki.Runtime.Capability.t() | nil,
           llm_egress: atom() | nil,
           runtime_mounts: map() | list(),

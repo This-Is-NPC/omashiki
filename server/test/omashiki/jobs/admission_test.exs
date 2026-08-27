@@ -42,13 +42,9 @@ defmodule Omashiki.Jobs.AdmissionTest do
           "remote" => "/srv/canonical/app.git"
         }
       },
-      "harnesses" => %{
-        "opencode" => %{
-          "adapter" => "opencode",
-          "runtime" => "docker",
-          "image" => "agent:latest"
-        }
-      },
+      "presets" => %{
+          "opencode" => %{"plugin" => "opencode", "options" => %{}}
+        },
       "credentials" => %{
         "secret" => %{
           "provider" => "anthropic",
@@ -58,7 +54,10 @@ defmodule Omashiki.Jobs.AdmissionTest do
       },
       "environments" => %{
         "safe" => %{
-          "harness" => "opencode",
+          "isolation" => "docker",
+          "image" => "omashiki/agent:latest",
+          "sink" => "git",
+          "preset" => "opencode",
           "executables" => ["git"],
           "credentials" => ["secret"],
           "timeout_ms" => 1_000,
@@ -86,15 +85,15 @@ defmodule Omashiki.Jobs.AdmissionTest do
     assert job.status == "queued"
     assert job.payload == %{"instruction" => "run"}
     assert job.payload_hash == sha256(Jason.encode!(job.payload))
-    assert job.repository_snapshot["name"] == "app"
+    assert job.admitted_repository["name"] == "app"
 
     # The key GitArtifact reads to find the canonical remote. Losing it here
     # silently downgrades every job to a local-only, unreachable artifact.
-    assert job.repository_snapshot["remote"] == "/srv/canonical/app.git"
+    assert job.admitted_repository["remote"] == "/srv/canonical/app.git"
 
-    assert job.environment_snapshot["name"] == "safe"
-    assert [%{"read_only" => false}] = job.environment_snapshot["mounts"]
-    refute inspect(job.environment_snapshot) =~ "do-not-persist"
+    assert job.admitted_environment["name"] == "safe"
+    assert [%{"read_only" => false}] = job.admitted_environment["mounts"]
+    refute inspect(job.admitted_environment) =~ "do-not-persist"
 
     assert Repo.aggregate(from(a in JobAttempt, where: a.job_id == ^job.id), :count, :id) == 1
     assert Repo.aggregate(from(e in JobEvent, where: e.job_id == ^job.id), :count, :event_id) == 1
@@ -142,13 +141,13 @@ defmodule Omashiki.Jobs.AdmissionTest do
   test "the model a job was admitted with survives a hot swap",
        %{token: token, load_config: load_config} do
     assert {:ok, job} = Admission.admit(token, single_request())
-    assert [%{"name" => "secret", "model" => "test"}] = job.environment_snapshot["credentials"]
+    assert [%{"name" => "secret", "model" => "test"}] = job.admitted_environment["credentials"]
 
     load_config.("swapped-after-admission")
 
     assert %{model: "swapped-after-admission"} = Config.get_credential("secret")
 
-    pinned = Credentials.admitted(job.environment_snapshot, "secret")
+    pinned = Credentials.admitted(job.admitted_environment, "secret")
     assert pinned.model == "test"
     assert pinned.provider == "anthropic"
 
@@ -161,7 +160,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
     assert {:ok, next} =
              Admission.admit(token, single_request(%{"idempotency_key" => "request-2"}))
 
-    assert [%{"model" => "swapped-after-admission"}] = next.environment_snapshot["credentials"]
+    assert [%{"model" => "swapped-after-admission"}] = next.admitted_environment["credentials"]
   end
 
   @doc false

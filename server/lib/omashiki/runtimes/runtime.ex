@@ -1,4 +1,4 @@
-defmodule Omashiki.Runtimes.Runtime do
+defmodule Omashiki.Isolation do
   @moduledoc """
   Where an agent harness runs (Docker image today).
 

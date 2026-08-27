@@ -2,9 +2,10 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
   use ExUnit.Case, async: false
 
   alias Omashiki.Config.HostCredential
-  alias Omashiki.Harness.{ClaudeCode, Context, Spec}
+  alias Omashiki.Harness.{ClaudeCode, Context}
+  alias Omashiki.Plugin.Preset
   alias Omashiki.Runtime.HostCredentials
-  alias Omashiki.Runtimes.Runtime
+  alias Omashiki.Isolation
 
   setup do
     origins =
@@ -153,12 +154,12 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
   end
 
   defp claude_profile do
-    %Spec{
+    %Preset{
       name: "claude-code",
       adapter: ClaudeCode,
       adapter_key: "claude-code",
       options: %{},
-      runtime: %Runtime{
+      runtime: %Isolation{
         key: "claude-code",
         kind: "docker",
         config: %{"image" => "agent"},

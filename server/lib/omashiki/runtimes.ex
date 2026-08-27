@@ -4,9 +4,9 @@ defmodule Omashiki.Runtimes do
   """
 
   alias Omashiki.Config
-  alias Omashiki.Runtimes.Runtime
+  alias Omashiki.Isolation
 
-  def docker_image(%Runtime{kind: "docker", config: config}) when is_map(config) do
+  def docker_image(%Isolation{kind: "docker", config: config}) when is_map(config) do
     case Map.get(config, "image") || Map.get(config, :image) do
       image when is_binary(image) and image != "" -> image
       _ -> nil
@@ -22,7 +22,7 @@ defmodule Omashiki.Runtimes do
 
   def docker_image(_), do: nil
 
-  def mounts(%Runtime{config: config}) when is_map(config) do
+  def mounts(%Isolation{config: config}) when is_map(config) do
     case Map.get(config, "mounts") || Map.get(config, :mounts) do
       mounts when is_map(mounts) -> mounts
       _ -> %{}

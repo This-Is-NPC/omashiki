@@ -45,7 +45,7 @@ defmodule OmashikiWeb.Api.GatewayControllerTest do
 
     user = user_fixture()
     job = running_job(user, credential.name)
-    token = Gateway.sign_token(job.id, user.id, job.environment_digest, credential.name)
+    token = Gateway.sign_token(job.id, user.id, job.admitted_environment_digest, credential.name)
 
     %{bypass: bypass, credential: credential, user: user, job: job, token: token}
   end
@@ -195,7 +195,7 @@ defmodule OmashikiWeb.Api.GatewayControllerTest do
             "kind" => "gateway",
             "job_id" => job.id,
             "token_owner" => job.user_id,
-            "environment_digest" => job.environment_digest,
+            "admitted_environment_digest" => job.admitted_environment_digest,
             "credential" => credential.name
           },
           signed_at: System.os_time(:second) - (Omashiki.Runtime.Claims.max_age_seconds() + 60)
@@ -241,7 +241,7 @@ defmodule OmashikiWeb.Api.GatewayControllerTest do
       other =
         credential_fixture(%{provider: "openai", model: "gpt-5-mini", api_key: "sk-other"})
 
-      token = Gateway.sign_token(job.id, job.user_id, job.environment_digest, other.name)
+      token = Gateway.sign_token(job.id, job.user_id, job.admitted_environment_digest, other.name)
 
       conn = post_completion(conn, token, %{"messages" => []})
 
@@ -311,17 +311,17 @@ defmodule OmashikiWeb.Api.GatewayControllerTest do
       environment: "agentic",
       payload: %{"instruction" => "work"},
       payload_hash: String.duplicate("a", 64),
-      repository_snapshot: %{"path" => "/tmp/repo", "base_branch" => "main"},
-      repository_digest: String.duplicate("b", 64),
+      admitted_repository: %{"path" => "/tmp/repo", "base_branch" => "main"},
+      admitted_repository_digest: String.duplicate("b", 64),
       # The environment declares an LLM harness plus the credential the agent
       # is allowed to spend through — this is what makes "zero LLM calls" a bug.
-      environment_snapshot: %{
+      admitted_environment: %{
         "name" => "agentic",
-        "harness" => "opencode",
+        "preset" => "opencode",
         "credentials" => [%{"name" => credential_name}],
         "capabilities" => []
       },
-      environment_digest: String.duplicate("c", 64),
+      admitted_environment_digest: String.duplicate("c", 64),
       registry_digest: String.duplicate("d", 64),
       queue: "default",
       priority: 1,

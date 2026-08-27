@@ -105,8 +105,8 @@ defmodule Omashiki.Jobs.Admission do
     %{
       repository: repository,
       environment: environment,
-      repository_digest: digest(repository),
-      environment_digest: digest(environment),
+      admitted_repository_digest: digest(repository),
+      admitted_environment_digest: digest(environment),
       registry_digest: resolved.digest
     }
   end
@@ -303,10 +303,10 @@ defmodule Omashiki.Jobs.Admission do
       environment: request["environment"],
       payload: request["payload"],
       payload_hash: digest_payload(request["payload"]),
-      repository_snapshot: resolved.repository,
-      repository_digest: resolved.repository_digest,
-      environment_snapshot: resolved.environment,
-      environment_digest: resolved.environment_digest,
+      admitted_repository: resolved.repository,
+      admitted_repository_digest: resolved.admitted_repository_digest,
+      admitted_environment: resolved.environment,
+      admitted_environment_digest: resolved.admitted_environment_digest,
       registry_digest: resolved.registry_digest,
       queue: @default_queue,
       priority: request["priority"],

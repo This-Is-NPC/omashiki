@@ -264,8 +264,8 @@ defmodule Omashiki.Runtime.ContainerManager do
          environment,
          opts
        ) do
-    worktree_path = Keyword.get(opts, :worktree_path, get_in(job.repository_snapshot, ["path"]))
-    profile = Keyword.get(opts, :harness_profile) || Omashiki.Harnesses.profile(environment)
+    worktree_path = Keyword.get(opts, :worktree_path, get_in(job.admitted_repository, ["path"]))
+    profile = Keyword.get(opts, :preset) || Omashiki.Harnesses.profile(environment)
     credential = Keyword.get(opts, :credential) || credential_for_environment(environment)
     runtime_mount_defs = environment_mounts(environment)
     cache_groups = environment_cache_groups(environment)
@@ -275,7 +275,7 @@ defmodule Omashiki.Runtime.ContainerManager do
     opts =
       opts
       |> Keyword.put(:worktree_path, worktree_path)
-      |> Keyword.put(:harness_profile, profile)
+      |> Keyword.put(:preset, profile)
       |> Keyword.put(:job, job)
       |> Keyword.put(:credential, credential)
       |> Keyword.put(:environment, environment)
@@ -286,7 +286,7 @@ defmodule Omashiki.Runtime.ContainerManager do
 
     worktree_path = Keyword.fetch!(opts, :worktree_path)
     credential = Keyword.get(opts, :credential)
-    profile = Keyword.get(opts, :harness_profile)
+    profile = Keyword.get(opts, :preset)
     launch_plan = profile.launch_plan
     protocol = transport_kind(launch_plan)
 
@@ -501,7 +501,7 @@ defmodule Omashiki.Runtime.ContainerManager do
             host_gid: host_gid,
             secret_host_path: secret_host_path,
             secret_target: secret_target,
-            harness_profile: profile,
+            preset: profile,
             launch_plan: launch,
             job: runtime_job,
             environment: Keyword.get(opts, :environment, %{}),
@@ -632,7 +632,7 @@ defmodule Omashiki.Runtime.ContainerManager do
           Omashiki.SupplyChain.Proxy.sign_token(
             job.id,
             job.user_id,
-            job.environment_digest,
+            job.admitted_environment_digest,
             group.name,
             policy.digest || Policy.digest(policy)
           )
@@ -858,10 +858,10 @@ defmodule Omashiki.Runtime.ContainerManager do
     end)
   end
 
-  defp runtime_of(%{runtime: %Omashiki.Runtimes.Runtime{} = runtime}), do: runtime
+  defp runtime_of(%{runtime: %Omashiki.Isolation{} = runtime}), do: runtime
 
   defp runtime_of(%{runtime: %{"kind" => kind, "config" => config}}),
-    do: %Omashiki.Runtimes.Runtime{kind: kind, config: config, key: nil, status: "active"}
+    do: %Omashiki.Isolation{kind: kind, config: config, key: nil, status: "active"}
 
   defp runtime_of(%{runtime: runtime}) when not is_nil(runtime), do: runtime
 
@@ -1249,7 +1249,7 @@ defmodule Omashiki.Runtime.ContainerManager do
     * `:worktree_path` (string, absolute) — agent's WORKDIR.
     * `:repo_root` (string, absolute) — parent repo root used as RO bind.
     * `:host_port` (integer) — host TCP port to map to the container's :4096.
-    * `:credential` — optional credential passed to the harness adapter.
+    * `:credential` — optional credential passed to the plugin.
     * `:host_uid`, `:host_gid` (integers) — runtime UID/GID; ensures files
       written by the agent inside the bind mounts are owned by the host
       user, regardless of the image's default `USER`.
@@ -1262,7 +1262,7 @@ defmodule Omashiki.Runtime.ContainerManager do
     host_uid = Keyword.fetch!(opts, :host_uid)
     host_gid = Keyword.fetch!(opts, :host_gid)
     secret_host_path = Keyword.get(opts, :secret_host_path)
-    profile = Keyword.fetch!(opts, :harness_profile)
+    profile = Keyword.fetch!(opts, :preset)
     launch_plan = Keyword.fetch!(opts, :launch_plan)
     job = Keyword.get(opts, :job)
     protocol = transport_kind(launch_plan)
@@ -1355,7 +1355,7 @@ defmodule Omashiki.Runtime.ContainerManager do
 
       _ ->
         raise ArgumentError,
-              "harness profile must provide a Docker runtime image"
+              "preset must provide a Docker runtime image"
     end
   end
 

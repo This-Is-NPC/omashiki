@@ -15,7 +15,7 @@ defmodule Omashiki.Jobs.GitArtifactTest do
     job = %Job{
       id: "job-#{System.unique_integer([:positive])}",
       current_attempt: 2,
-      repository_snapshot: %{"path" => repo, "base_branch" => "main"}
+      admitted_repository: %{"path" => repo, "base_branch" => "main"}
     }
 
     on_exit(fn -> File.rm_rf!(root) end)
@@ -153,7 +153,7 @@ defmodule Omashiki.Jobs.GitArtifactTest do
     assert {:error, :container_failed} =
              GitArtifact.provision(failed_job, [], fn _artifact -> {:error, :container_failed} end)
 
-    refute branch?(failed_job.repository_snapshot["path"], "omashiki/job-#{failed_job.id}")
+    refute branch?(failed_job.admitted_repository["path"], "omashiki/job-#{failed_job.id}")
   end
 
   test "prunes expired successful branches but retains recent branches", %{job: job, repo: repo} do
@@ -280,7 +280,7 @@ defmodule Omashiki.Jobs.GitArtifactTest do
   defp at_node(%Job{} = job, path, remote) do
     %{
       job
-      | repository_snapshot: %{"path" => path, "base_branch" => "main", "remote" => remote}
+      | admitted_repository: %{"path" => path, "base_branch" => "main", "remote" => remote}
     }
   end
 

@@ -161,7 +161,7 @@ defmodule Omashiki.Jobs.DispatchWorker do
   defp attempt_runner,
     do: Application.get_env(:omashiki, :dispatch_attempt_runner, AttemptSupervisor)
 
-  defp await_timeout_ms(%Job{environment_snapshot: env}) when is_map(env) do
+  defp await_timeout_ms(%Job{admitted_environment: env}) when is_map(env) do
     job_timeout = Map.get(env, "timeout_ms", 60_000)
     slack = Application.get_env(:omashiki, :dispatch_await_slack_ms, 60_000)
     job_timeout + slack

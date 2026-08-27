@@ -1,5 +1,5 @@
 defmodule Omashiki.Runtime.Capability do
-  @moduledoc "Runtime-only operations exposed to harness adapters."
+  @moduledoc "Runtime-only operations exposed to plugins."
 
   @type endpoint :: %{host: String.t(), port: pos_integer()}
   @type exec_result :: %{stdout: String.t(), exit_code: non_neg_integer() | nil}

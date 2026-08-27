@@ -8,7 +8,7 @@ defmodule Omashiki.Runtime.Inspector do
     * **Containers** — the runtime port's `census/0`. What this host is actually
       running, whether or not anything owns it.
     * **Attempts** — `job_attempts`, which knows the job, the status and the
-      `node_id` that claimed it.
+      `machine_id` that claimed it.
 
   Each source read alone looks healthy during the failure this exists to catch.
   Joined on the attempt id, the disagreements become the diagnosis: a container
@@ -218,7 +218,7 @@ defmodule Omashiki.Runtime.Inspector do
   def build(:configured), do: build(configured_census())
 
   def build(census) do
-    node_id = current_node_id()
+    machine_id = current_machine_id()
     live_digest = live_digest()
 
     {containers, runtime} =
@@ -227,10 +227,10 @@ defmodule Omashiki.Runtime.Inspector do
         {:error, reason} -> {[], {:error, reason}}
       end
 
-    rows = correlate(containers, active_attempts(), attempt_processes(), node_id, live_digest)
+    rows = correlate(containers, active_attempts(), attempt_processes(), machine_id, live_digest)
 
     %{
-      node_id: node_id,
+      machine_id: machine_id,
       taken_at: DateTime.utc_now(),
       runtime: runtime,
       supervised: supervised_count(),
@@ -244,7 +244,7 @@ defmodule Omashiki.Runtime.Inspector do
 
   defp empty_snapshot do
     %{
-      node_id: nil,
+      machine_id: nil,
       taken_at: nil,
       runtime: :never_polled,
       supervised: 0,
@@ -266,12 +266,12 @@ defmodule Omashiki.Runtime.Inspector do
 
   Pure, and public so the classification can be tested without a daemon, a
   database or a supervision tree. `containers` are `census/0` entries,
-  `attempts` are maps with `:id`, `:job_id`, `:status`, `:node_id` and
+  `attempts` are maps with `:id`, `:job_id`, `:status`, `:machine_id` and
   `:started_at`, and `processes` are `{attempt_id, pid}` pairs.
   """
   @spec correlate([map()], [map()], [{String.t(), pid()}], String.t() | nil, String.t() | nil) ::
           [map()]
-  def correlate(containers, attempts, processes, node_id, live_digest \\ nil) do
+  def correlate(containers, attempts, processes, machine_id, live_digest \\ nil) do
     by_process = Map.new(processes)
     by_attempt = Map.new(attempts, &{&1.id, &1})
 
@@ -288,7 +288,7 @@ defmodule Omashiki.Runtime.Inspector do
 
     (Map.keys(by_attempt) ++ Map.keys(by_process) ++ Map.keys(by_container))
     |> Enum.uniq()
-    |> Enum.map(&row(&1, by_attempt, by_process, by_container, node_id, live_digest))
+    |> Enum.map(&row(&1, by_attempt, by_process, by_container, machine_id, live_digest))
     |> Enum.sort_by(&{link_rank(&1.link), &1.attempt_id || "", &1.key_label})
   end
 
@@ -299,7 +299,7 @@ defmodule Omashiki.Runtime.Inspector do
     Map.new(@link_order, &{&1, Map.get(tallied, &1, 0)})
   end
 
-  defp row(key, by_attempt, by_process, by_container, node_id, live_digest) do
+  defp row(key, by_attempt, by_process, by_container, machine_id, live_digest) do
     attempt = Map.get(by_attempt, key)
     pid = Map.get(by_process, key)
     containers = Map.get(by_container, key, [])
@@ -310,11 +310,11 @@ defmodule Omashiki.Runtime.Inspector do
       attempt_id: attempt_id,
       job_id: attempt && attempt.job_id,
       status: attempt && attempt.status,
-      node_id: (attempt && attempt.node_id) || implicit_node(pid, containers, node_id),
+      machine_id: (attempt && attempt.machine_id) || implicit_node(pid, containers, machine_id),
       pid: pid,
       containers: containers,
       started_at: attempt && attempt.started_at,
-      link: link(attempt, pid, containers, node_id),
+      link: link(attempt, pid, containers, machine_id),
       registry_digest: attempt && Map.get(attempt, :registry_digest),
       generation: generation(attempt, live_digest)
     }
@@ -342,14 +342,14 @@ defmodule Omashiki.Runtime.Inspector do
   # A process or a container observed here is on this machine by definition,
   # even when no row claims it.
   defp implicit_node(nil, [], _node_id), do: nil
-  defp implicit_node(_pid, _containers, node_id), do: node_id
+  defp implicit_node(_pid, _containers, machine_id), do: machine_id
 
-  defp link(attempt, pid, containers, node_id) do
+  defp link(attempt, pid, containers, machine_id) do
     cond do
       pid != nil and containers != [] -> :linked
       pid != nil -> :process_without_container
       containers != [] -> :orphan_container
-      attempt != nil and attempt.node_id not in [nil, node_id] -> :remote
+      attempt != nil and attempt.machine_id not in [nil, machine_id] -> :remote
       true -> :attempt_without_process
     end
   end
@@ -378,7 +378,7 @@ defmodule Omashiki.Runtime.Inspector do
           id: attempt.id,
           job_id: attempt.job_id,
           status: attempt.status,
-          node_id: attempt.node_id,
+          machine_id: attempt.machine_id,
           started_at: attempt.started_at,
           registry_digest: job.registry_digest
         }
@@ -476,8 +476,8 @@ defmodule Omashiki.Runtime.Inspector do
     end
   end
 
-  defp current_node_id do
-    Omashiki.Config.current_node().name
+  defp current_machine_id do
+    Omashiki.Config.current_machine().name
   rescue
     _ -> nil
   end

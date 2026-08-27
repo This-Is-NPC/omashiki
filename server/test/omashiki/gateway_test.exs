@@ -59,19 +59,19 @@ defmodule Omashiki.GatewayTest do
   describe "sign_token/4 and verify_token/1" do
     test "mints a job-bound token that verifies back to its claims",
          %{job: job, credential_name: name} do
-      token = Gateway.sign_token(job.id, job.user_id, job.environment_digest, name)
+      token = Gateway.sign_token(job.id, job.user_id, job.admitted_environment_digest, name)
       assert is_binary(token)
 
       assert {:ok, claims} = Gateway.verify_token(token)
       assert claims["kind"] == "gateway"
       assert claims["job_id"] == job.id
       assert claims["token_owner"] == job.user_id
-      assert claims["environment_digest"] == job.environment_digest
+      assert claims["admitted_environment_digest"] == job.admitted_environment_digest
       assert claims["credential"] == name
     end
 
     test "never leaks the provider key into the token", %{job: job, credential_name: name} do
-      token = Gateway.sign_token(job.id, job.user_id, job.environment_digest, name)
+      token = Gateway.sign_token(job.id, job.user_id, job.admitted_environment_digest, name)
       {:ok, claims} = Gateway.verify_token(token)
 
       refute Map.has_key?(claims, "api_key")
@@ -82,7 +82,7 @@ defmodule Omashiki.GatewayTest do
       assert Gateway.sign_token(
                Ecto.UUID.generate(),
                job.user_id,
-               job.environment_digest,
+               job.admitted_environment_digest,
                name
              ) == nil
     end
@@ -98,7 +98,7 @@ defmodule Omashiki.GatewayTest do
         })
         |> Repo.update()
 
-      assert Gateway.sign_token(job.id, job.user_id, job.environment_digest, name) == nil
+      assert Gateway.sign_token(job.id, job.user_id, job.admitted_environment_digest, name) == nil
     end
 
     test "rejects a garbage token" do
@@ -114,7 +114,7 @@ defmodule Omashiki.GatewayTest do
             "kind" => "gateway",
             "job_id" => job.id,
             "token_owner" => job.user_id,
-            "environment_digest" => job.environment_digest,
+            "admitted_environment_digest" => job.admitted_environment_digest,
             "credential" => name
           },
           signed_at: System.os_time(:second) - (Claims.max_age_seconds() + 60)
@@ -201,7 +201,7 @@ defmodule Omashiki.GatewayTest do
                  "kind" => "gateway",
                  "job_id" => job.id,
                  "token_owner" => job.user_id,
-                 "environment_digest" => job.environment_digest,
+                 "admitted_environment_digest" => job.admitted_environment_digest,
                  "credential" => name,
                  credential: name
                })
@@ -356,7 +356,7 @@ defmodule Omashiki.GatewayTest do
     end
 
     test "a stale environment digest gets 403", %{job: job, credential_name: name} do
-      claims = claims(job, name) |> Map.put("environment_digest", String.duplicate("f", 64))
+      claims = claims(job, name) |> Map.put("admitted_environment_digest", String.duplicate("f", 64))
 
       assert {:error, %{status: 403, error: %{message: "environment_changed"}}} =
                Gateway.chat_completions(%{"messages" => []}, claims)
@@ -849,14 +849,14 @@ defmodule Omashiki.GatewayTest do
       environment: "agentic",
       payload: %{"instruction" => "work"},
       payload_hash: String.duplicate("a", 64),
-      repository_snapshot: %{"path" => "/tmp/repo"},
-      repository_digest: String.duplicate("b", 64),
-      environment_snapshot: %{
+      admitted_repository: %{"path" => "/tmp/repo"},
+      admitted_repository_digest: String.duplicate("b", 64),
+      admitted_environment: %{
         "name" => "agentic",
-        "harness" => "opencode",
+        "preset" => "opencode",
         "credentials" => entries
       },
-      environment_digest: String.duplicate("c", 64),
+      admitted_environment_digest: String.duplicate("c", 64),
       registry_digest: String.duplicate("d", 64),
       queue: "default",
       priority: 1,
@@ -873,7 +873,7 @@ defmodule Omashiki.GatewayTest do
       "kind" => "gateway",
       "job_id" => job.id,
       "token_owner" => job.user_id,
-      "environment_digest" => job.environment_digest,
+      "admitted_environment_digest" => job.admitted_environment_digest,
       "credential" => credential_name
     }
   end
@@ -921,14 +921,14 @@ defmodule Omashiki.GatewayTest do
       environment: "agentic",
       payload: Map.merge(%{"instruction" => "work"}, payload_extra),
       payload_hash: String.duplicate("a", 64),
-      repository_snapshot: %{"path" => "/tmp/repo"},
-      repository_digest: String.duplicate("b", 64),
-      environment_snapshot: %{
+      admitted_repository: %{"path" => "/tmp/repo"},
+      admitted_repository_digest: String.duplicate("b", 64),
+      admitted_environment: %{
         "name" => "agentic",
-        "harness" => "opencode",
+        "preset" => "opencode",
         "credentials" => Enum.map(credential_names, &%{"name" => &1})
       },
-      environment_digest: String.duplicate("c", 64),
+      admitted_environment_digest: String.duplicate("c", 64),
       registry_digest: String.duplicate("d", 64),
       queue: "default",
       priority: 1,

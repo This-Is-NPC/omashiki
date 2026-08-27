@@ -1,10 +1,14 @@
 defmodule Omashiki.Harness.JcodeTest do
   use ExUnit.Case, async: true
 
-  alias Omashiki.Harness.{Context, Invocation, Spec}
+  alias Omashiki.Plugin.Preset
+  alias Omashiki.Isolation
+
+  alias Omashiki.Harness.{Context, Invocation}
+  alias Omashiki.Plugin.Preset
   alias Omashiki.Harness.Jcode
   alias Omashiki.Runtime.Capability
-  alias Omashiki.Runtimes.Runtime
+  alias Omashiki.Isolation
 
   test "validates the strict profile surface" do
     assert :ok = Jcode.validate_options(%{})
@@ -106,12 +110,12 @@ defmodule Omashiki.Harness.JcodeTest do
     do: %Invocation{instruction: instruction, context: %{}}
 
   defp profile(options) do
-    %Spec{
+    %Preset{
       name: "jcode",
       adapter_key: "jcode",
       adapter: Jcode,
       options: options,
-      runtime: %Runtime{
+      runtime: %Isolation{
         key: "jcode",
         kind: "docker",
         config: %{"image" => "omashiki/agent-jcode:latest"},

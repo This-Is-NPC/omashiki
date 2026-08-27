@@ -3,7 +3,8 @@ defmodule Omashiki.Harness.ClaudeCode do
 
   @behaviour Omashiki.Harness.Adapter
 
-  alias Omashiki.Harness.{CliJson, Context, Invocation, LaunchPlan, Result, Spec}
+  alias Omashiki.Harness.{CliJson, Context, Invocation, LaunchPlan, Result}
+  alias Omashiki.Plugin.Preset
   alias Omashiki.Runtime.Capability
 
   @credentials_path "/run/omashiki/state/claude-credentials.json"
@@ -61,7 +62,7 @@ defmodule Omashiki.Harness.ClaudeCode do
   def validate_options(_), do: CliJson.validate_options_map(nil)
 
   @impl true
-  def launch_plan(%Spec{runtime: runtime, options: raw_options}) do
+  def launch_plan(%Preset{runtime: runtime, options: raw_options}) do
     options = Map.merge(@default_options, raw_options)
     argv = cli_argv(options)
 
@@ -89,7 +90,7 @@ defmodule Omashiki.Harness.ClaudeCode do
   end
 
   @impl true
-  def prepare(%Spec{} = spec, %Context{} = context) do
+  def prepare(%Preset{} = spec, %Context{} = context) do
     options = Map.merge(@default_options, spec.options)
 
     with :ok <- require_mount(context.runtime_mounts, options["credentials_path"]),

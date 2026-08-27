@@ -1,10 +1,14 @@
 defmodule Omashiki.Harness.PiTest do
   use ExUnit.Case, async: true
 
-  alias Omashiki.Harness.{Context, Invocation, Spec}
+  alias Omashiki.Plugin.Preset
+  alias Omashiki.Isolation
+
+  alias Omashiki.Harness.{Context, Invocation}
+  alias Omashiki.Plugin.Preset
   alias Omashiki.Harness.Pi
   alias Omashiki.Runtime.Capability
-  alias Omashiki.Runtimes.Runtime
+  alias Omashiki.Isolation
 
   test "validates the strict profile surface" do
     assert :ok = Pi.validate_options(%{})
@@ -164,12 +168,12 @@ defmodule Omashiki.Harness.PiTest do
     do: %Invocation{instruction: instruction, context: %{}}
 
   defp profile(options) do
-    %Spec{
+    %Preset{
       name: "pi",
       adapter_key: "pi",
       adapter: Pi,
       options: options,
-      runtime: %Runtime{
+      runtime: %Isolation{
         key: "pi",
         kind: "docker",
         config: %{"image" => "omashiki/agent-pi:latest"},

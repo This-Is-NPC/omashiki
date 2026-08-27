@@ -83,17 +83,17 @@ defmodule Omashiki.Runtime.InspectorTest do
       [row] = Inspector.correlate([], [attempt("a")], [], @node)
 
       assert row.link == :attempt_without_process
-      assert row.node_id == @node
+      assert row.machine_id == @node
     end
 
     # Without this the console on a two-node install would report every attempt
     # running on the other machine as stranded, which is the fastest way to make
     # an operator stop believing the screen.
     test "an attempt owned by another node is not stranded, it is remote" do
-      [row] = Inspector.correlate([], [attempt("a", node_id: "other-host")], [], @node)
+      [row] = Inspector.correlate([], [attempt("a", machine_id: "other-host")], [], @node)
 
       assert row.link == :remote
-      assert row.node_id == "other-host"
+      assert row.machine_id == "other-host"
     end
 
     test "the two orphan states sort ahead of the healthy ones" do
@@ -338,7 +338,7 @@ defmodule Omashiki.Runtime.InspectorTest do
       id: id,
       job_id: "job-row-#{id}",
       status: Keyword.get(opts, :status, "running"),
-      node_id: Keyword.get(opts, :node_id, @node),
+      machine_id: Keyword.get(opts, :machine_id, @node),
       started_at: Keyword.get(opts, :started_at),
       registry_digest: Keyword.get(opts, :registry_digest)
     }

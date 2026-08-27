@@ -30,7 +30,8 @@ defmodule Omashiki.Harness.Pi do
 
   @behaviour Omashiki.Harness.Adapter
 
-  alias Omashiki.Harness.{CliJson, Context, Invocation, LaunchPlan, Result, Spec}
+  alias Omashiki.Harness.{CliJson, Context, Invocation, LaunchPlan, Result}
+  alias Omashiki.Plugin.Preset
   alias Omashiki.Runtime.Capability
 
   @invocation_path "/tmp/omashiki-pi-invocation.txt"
@@ -69,7 +70,7 @@ defmodule Omashiki.Harness.Pi do
   def validate_options(_), do: CliJson.validate_options_map(nil)
 
   @impl true
-  def launch_plan(%Spec{runtime: runtime, options: raw_options}) do
+  def launch_plan(%Preset{runtime: runtime, options: raw_options}) do
     options = Map.merge(@default_options, raw_options)
 
     {:ok,
@@ -98,7 +99,7 @@ defmodule Omashiki.Harness.Pi do
   end
 
   @impl true
-  def prepare(%Spec{} = spec, %Context{} = context) do
+  def prepare(%Preset{} = spec, %Context{} = context) do
     CliJson.prepare_gateway(spec, context, @default_options, &launch_plan/1, fn
       credential, gateway_token, ctx ->
         [

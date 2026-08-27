@@ -43,10 +43,10 @@ defmodule Omashiki.Jobs.Job do
     :environment,
     :payload,
     :payload_hash,
-    :repository_snapshot,
-    :repository_digest,
-    :environment_snapshot,
-    :environment_digest,
+    :admitted_repository,
+    :admitted_repository_digest,
+    :admitted_environment,
+    :admitted_environment_digest,
     :registry_digest,
     :queue,
     :priority
@@ -69,10 +69,10 @@ defmodule Omashiki.Jobs.Job do
     field :environment, :string
     field :payload, Omashiki.Jobs.JsonValue
     field :payload_hash, :string
-    field :repository_snapshot, :map
-    field :repository_digest, :string
-    field :environment_snapshot, :map
-    field :environment_digest, :string
+    field :admitted_repository, :map
+    field :admitted_repository_digest, :string
+    field :admitted_environment, :map
+    field :admitted_environment_digest, :string
     field :registry_digest, :string
     field :queue, :string, default: "default"
     field :priority, :integer, default: 0
@@ -107,10 +107,10 @@ defmodule Omashiki.Jobs.Job do
       :environment,
       :payload,
       :payload_hash,
-      :repository_snapshot,
-      :repository_digest,
-      :environment_snapshot,
-      :environment_digest,
+      :admitted_repository,
+      :admitted_repository_digest,
+      :admitted_environment,
+      :admitted_environment_digest,
       :registry_digest,
       :queue,
       :priority,

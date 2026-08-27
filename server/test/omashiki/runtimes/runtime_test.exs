@@ -1,9 +1,9 @@
-defmodule Omashiki.Runtimes.RuntimeTest do
+defmodule Omashiki.IsolationTest do
   use ExUnit.Case, async: false
 
   alias Omashiki.Config
   alias Omashiki.Config.Error
-  alias Omashiki.Runtimes.Runtime
+  alias Omashiki.Isolation
 
   setup do
     Config.reset!()
@@ -25,15 +25,15 @@ defmodule Omashiki.Runtimes.RuntimeTest do
   end
 
   test "kinds lists only runtimes with an executor today" do
-    assert Runtime.kinds() == ["docker"]
+    assert Isolation.kinds() == ["docker"]
   end
 
-  test "rejects an unsupported harness runtime kind at config load", ctx do
+  test "rejects runtime= on presets at config load", ctx do
     invalid =
       fixture(ctx)
-      |> put_in(["harnesses", "opencode", "runtime"], "kata")
+      |> put_in(["presets", "opencode", "runtime"], "kata")
 
-    assert_raise Error, ~r/unsupported runtime "kata"/, fn ->
+    assert_raise Error, ~r/unknown field "runtime"/, fn ->
       Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
     end
   end
@@ -43,13 +43,8 @@ defmodule Omashiki.Runtimes.RuntimeTest do
       "repositories" => %{
         "app" => %{"path" => "repo", "base_branch" => "main"}
       },
-      "harnesses" => %{
-        "opencode" => %{
-          "adapter" => "opencode",
-          "runtime" => "docker",
-          "image" => "omashiki/agent:latest",
-          "options" => %{}
-        }
+      "presets" => %{
+        "opencode" => %{"plugin" => "opencode", "options" => %{}}
       },
       "credentials" => %{
         "provider" => %{
@@ -63,7 +58,10 @@ defmodule Omashiki.Runtimes.RuntimeTest do
       },
       "environments" => %{
         "opencode" => %{
-          "harness" => "opencode",
+          "isolation" => "docker",
+          "image" => "omashiki/agent:latest",
+          "sink" => "git",
+          "preset" => "opencode",
           "executables" => ["mise", "git"],
           "credentials" => ["provider"],
           "timeout_ms" => 1_800_000,

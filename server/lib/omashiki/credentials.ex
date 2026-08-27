@@ -12,7 +12,7 @@ defmodule Omashiki.Credentials do
   the model under a running attempt without a restart.
 
   `pin/1` and `admitted/2` read the credential the job was *admitted* with,
-  from its own `environment_snapshot`. Everything the gateway needs to route a
+  from its own `admitted_environment`. Everything the gateway needs to route a
   turn — provider, model, base URL, aliases, fallback chain — was captured
   there at admission, so an attempt keeps talking to the model it started on
   even after the operator swaps it.
@@ -49,10 +49,10 @@ defmodule Omashiki.Credentials do
   a job admitted before the environment declared it, or a fixture with a bare
   snapshot.
   """
-  def admitted(environment_snapshot, name)
-      when is_map(environment_snapshot) and is_binary(name) do
-    environment_snapshot
-    |> Map.get(:credentials, Map.get(environment_snapshot, "credentials", []))
+  def admitted(admitted_environment, name)
+      when is_map(admitted_environment) and is_binary(name) do
+    admitted_environment
+    |> Map.get(:credentials, Map.get(admitted_environment, "credentials", []))
     |> List.wrap()
     |> Enum.find(&(entry_name(&1) == name))
     |> case do
@@ -61,11 +61,11 @@ defmodule Omashiki.Credentials do
     end
   end
 
-  def admitted(_environment_snapshot, name) when is_binary(name), do: get_credential(name)
-  def admitted(_environment_snapshot, _name), do: nil
+  def admitted(_admitted_environment, name) when is_binary(name), do: get_credential(name)
+  def admitted(_admitted_environment, _name), do: nil
 
   @doc """
-  Turn one captured `environment_snapshot` credential entry into a `Credential`.
+  Turn one captured `admitted_environment` credential entry into a `Credential`.
 
   A `%Credential{}` is already live and returned unchanged. A captured map is
   rebuilt from what it captured, with `api_key` filled in from the live

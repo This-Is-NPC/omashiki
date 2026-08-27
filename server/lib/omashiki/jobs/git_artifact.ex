@@ -45,7 +45,7 @@ defmodule Omashiki.Jobs.GitArtifact do
   @doc "Create the isolated job worktree from the captured base branch SHA."
   def provision_worktree(job, opts \\ [])
 
-  def provision_worktree(%Job{id: job_id, repository_snapshot: snapshot}, opts) do
+  def provision_worktree(%Job{id: job_id, admitted_repository: snapshot}, opts) do
     with :ok <- valid_job_id(job_id),
          {:ok, repo_path} <- snapshot_string(snapshot, "path"),
          {:ok, base_branch} <- snapshot_string(snapshot, "base_branch"),

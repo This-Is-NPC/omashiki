@@ -179,10 +179,8 @@ defmodule Omashiki.Config.RolloutTest do
     path = "repo"
     base_branch = "main"
 
-    [harnesses.opencode]
-    adapter = "opencode"
-    runtime = "docker"
-    image = "omashiki/agent:latest"
+    [presets.opencode]
+    plugin = "opencode"
 
     [credentials.provider]
     provider = "openai_compat"
@@ -190,7 +188,10 @@ defmodule Omashiki.Config.RolloutTest do
     api_key = "plaintext-key"
 
     [environments.opencode]
-    harness = "opencode"
+    isolation = "docker"
+    image = "omashiki/agent:latest"
+    sink = "git"
+    preset = "opencode"
     executables = ["git"]
     credentials = ["provider"]
     caches = []

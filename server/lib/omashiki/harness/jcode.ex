@@ -6,12 +6,13 @@ defmodule Omashiki.Harness.Jcode do
   through a named provider profile, so it runs entirely on the gateway path:
   the container is handed a job-bound token and a loopback base URL, never a
   provider key. That is also why this adapter has no host-auth branch — the
-  subscription routes jcode supports are covered by the other harnesses.
+  subscription routes jcode supports are covered by the other presets.
   """
 
   @behaviour Omashiki.Harness.Adapter
 
-  alias Omashiki.Harness.{CliJson, Context, Invocation, LaunchPlan, Result, Spec}
+  alias Omashiki.Harness.{CliJson, Context, Invocation, LaunchPlan, Result}
+  alias Omashiki.Plugin.Preset
   alias Omashiki.Runtime.Capability
 
   @invocation_path "/tmp/omashiki-jcode-invocation.txt"
@@ -48,7 +49,7 @@ defmodule Omashiki.Harness.Jcode do
   def validate_options(_), do: CliJson.validate_options_map(nil)
 
   @impl true
-  def launch_plan(%Spec{runtime: runtime, options: raw_options}) do
+  def launch_plan(%Preset{runtime: runtime, options: raw_options}) do
     options = Map.merge(@default_options, raw_options)
 
     {:ok,
@@ -75,7 +76,7 @@ defmodule Omashiki.Harness.Jcode do
   end
 
   @impl true
-  def prepare(%Spec{} = spec, %Context{} = context) do
+  def prepare(%Preset{} = spec, %Context{} = context) do
     CliJson.prepare_gateway(spec, context, @default_options, &launch_plan/1, fn
       credential, gateway_token, ctx ->
         [

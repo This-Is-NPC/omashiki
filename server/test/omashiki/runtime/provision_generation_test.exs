@@ -4,7 +4,7 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
 
   A job can sit queued across a hot reload. `Jobs.Runner.DockerContainer` never
   passes `:credential`, so `do_provision_for_job/4` resolves it itself from the
-  environment it was handed — which is `job.environment_snapshot`, the capture
+  environment it was handed — which is `job.admitted_environment`, the capture
   taken at admission. Resolving it from the live generation instead would
   provision the job against configuration it was never admitted under, while
   its own `jobs` row and its `registry_digest` still say otherwise.
@@ -22,11 +22,12 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
   use Omashiki.DataCase, async: false
 
   alias Omashiki.Config
-  alias Omashiki.Harness.{LaunchPlan, Spec}
+  alias Omashiki.Harness.LaunchPlan
+  alias Omashiki.Plugin.Preset
   alias Omashiki.Jobs.Admission
   alias Omashiki.Repo
   alias Omashiki.Runtime.ContainerManager
-  alias Omashiki.Runtimes.Runtime
+  alias Omashiki.Isolation
 
   # Returns an error so provisioning stops here: what is being tested happened
   # before this was reached.
@@ -78,7 +79,7 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
   test "a job queued across a hot swap is provisioned with the model it was admitted with",
        %{token: token, repo_path: repo_path, load_config: load_config} do
     assert {:ok, job} = Admission.admit(token, request())
-    assert [%{"model" => "admitted-model"}] = job.environment_snapshot["credentials"]
+    assert [%{"model" => "admitted-model"}] = job.admitted_environment["credentials"]
 
     # The operator swaps the model while the job is still queued.
     load_config.("swapped-after-admission")
@@ -106,27 +107,27 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
   end
 
   # `Jobs.Runner.DockerContainer.provision/4` passes `:worktree_path` and
-  # `:harness_profile` and nothing else. If it ever started passing
+  # `:preset` and nothing else. If it ever started passing
   # `:credential`, line 269 would short-circuit and the pin would stop being
   # reachable — so the production caller's option set is part of the contract.
   defp provision(job, repo_path) do
     attempt = Repo.get_by!(Omashiki.Jobs.JobAttempt, job_id: job.id)
 
-    ContainerManager.op_provision(job, attempt, job.environment_snapshot,
+    ContainerManager.op_provision(job, attempt, job.admitted_environment,
       worktree_path: repo_path,
-      harness_profile: profile()
+      preset: profile()
     )
   end
 
   defp profile do
-    runtime = %Runtime{
+    runtime = %Isolation{
       key: "opencode",
       kind: "docker",
       config: %{"image" => "agent:latest"},
       status: "active"
     }
 
-    %Spec{
+    %Preset{
       name: "opencode",
       adapter: CapturingAdapter,
       adapter_key: "opencode",
@@ -160,13 +161,9 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
   defp config_map(model) do
     %{
       "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "main"}},
-      "harnesses" => %{
-        "opencode" => %{
-          "adapter" => "opencode",
-          "runtime" => "docker",
-          "image" => "agent:latest"
-        }
-      },
+      "presets" => %{
+          "opencode" => %{"plugin" => "opencode", "options" => %{}}
+        },
       "credentials" => %{
         "secret" => %{
           "provider" => "anthropic",
@@ -176,7 +173,10 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
       },
       "environments" => %{
         "safe" => %{
-          "harness" => "opencode",
+          "isolation" => "docker",
+          "image" => "omashiki/agent:latest",
+          "sink" => "git",
+          "preset" => "opencode",
           "executables" => ["git"],
           "credentials" => ["secret"],
           "timeout_ms" => 1_000,

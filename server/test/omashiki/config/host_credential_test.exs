@@ -175,16 +175,8 @@ defmodule Omashiki.Config.HostCredentialTest do
   defp fixture(ctx) do
     %{
       "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "master"}},
-      "harnesses" => %{
-        "opencode" => %{
-          "adapter" => "opencode",
-          "runtime" => "docker",
-          "image" => "omashiki/agent:latest",
-          "options" => %{
-            "auth_path" => "/run/omashiki/state/auth.json",
-            "config_path" => "/run/omashiki/state/opencode.json"
-          }
-        }
+      "presets" => %{
+        "opencode" => %{"plugin" => "opencode", "options" => %{}}
       },
       "host_credentials" => %{
         "opencode-local" => %{
@@ -195,7 +187,10 @@ defmodule Omashiki.Config.HostCredentialTest do
       },
       "environments" => %{
         "opencode" => %{
-          "harness" => "opencode",
+          "isolation" => "docker",
+          "image" => "omashiki/agent:latest",
+          "sink" => "git",
+          "preset" => "opencode",
           "executables" => ["git"],
           "credentials" => ["opencode-local"],
           "timeout_ms" => 900_000,

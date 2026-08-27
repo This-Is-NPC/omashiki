@@ -23,7 +23,7 @@ defmodule Omashiki.Runtime.Claims do
           "kind" => kind,
           "job_id" => job.id,
           "token_owner" => job.user_id,
-          "environment_digest" => job.environment_digest,
+          "admitted_environment_digest" => job.admitted_environment_digest,
           "issued_at" => DateTime.utc_now(:second) |> DateTime.to_unix()
         })
 
@@ -61,7 +61,7 @@ defmodule Omashiki.Runtime.Claims do
          :ok <- match_environment(job, claims),
          :ok <- match_credential(job, claims),
          :ok <- match_cache_policy(job, claims, opts) do
-      {:ok, %{job: job, environment: job.environment_snapshot || %{}}}
+      {:ok, %{job: job, environment: job.admitted_environment || %{}}}
     else
       nil -> {:error, :job_missing}
       {:error, _} = error -> error
@@ -80,7 +80,7 @@ defmodule Omashiki.Runtime.Claims do
 
   @doc "Return the credential names captured in the job environment snapshot."
   def credential_names(%Job{} = job) do
-    job.environment_snapshot
+    job.admitted_environment
     |> value("credentials", [])
     |> List.wrap()
     |> Enum.map(&value(&1, "name"))
@@ -97,7 +97,7 @@ defmodule Omashiki.Runtime.Claims do
 
   @doc "Return one captured cache policy, including its immutable digest."
   def cache_snapshot(%Job{} = job, cache_group) when is_binary(cache_group) do
-    job.environment_snapshot
+    job.admitted_environment
     |> value("caches", [])
     |> List.wrap()
     |> Enum.find(fn cache -> value(cache, "name") == cache_group end)
@@ -107,15 +107,15 @@ defmodule Omashiki.Runtime.Claims do
 
   @doc "Return the capability allowlist captured by the environment."
   def capabilities(%Job{} = job),
-    do: job.environment_snapshot |> value("capabilities", []) |> List.wrap()
+    do: job.admitted_environment |> value("capabilities", []) |> List.wrap()
 
   def capabilities(_), do: []
 
   @doc "Return the internal MCP declarations captured by the environment."
-  def mcp_servers(%Job{} = job), do: job.environment_snapshot |> value("mcp_servers", %{})
+  def mcp_servers(%Job{} = job), do: job.admitted_environment |> value("mcp_servers", %{})
   def mcp_servers(_), do: %{}
 
-  defp valid_job(%Job{id: id, user_id: owner, environment_digest: digest, status: status})
+  defp valid_job(%Job{id: id, user_id: owner, admitted_environment_digest: digest, status: status})
        when is_binary(id) and is_binary(owner) and is_binary(digest) and
               status in @active_statuses,
        do: :ok
@@ -147,7 +147,7 @@ defmodule Omashiki.Runtime.Claims do
       not is_binary(claims["token_owner"]) ->
         {:error, :invalid_owner_claim}
 
-      not is_binary(claims["environment_digest"]) ->
+      not is_binary(claims["admitted_environment_digest"]) ->
         {:error, :invalid_environment_claim}
 
       kind == "gateway" and not is_binary(claims["credential"]) ->
@@ -169,7 +169,7 @@ defmodule Omashiki.Runtime.Claims do
   defp match_owner(%Job{user_id: owner}, %{"token_owner" => owner}), do: :ok
   defp match_owner(_, _), do: {:error, :owner_mismatch}
 
-  defp match_environment(%Job{environment_digest: digest}, %{"environment_digest" => digest}),
+  defp match_environment(%Job{admitted_environment_digest: digest}, %{"admitted_environment_digest" => digest}),
     do: :ok
 
   defp match_environment(_, _), do: {:error, :environment_changed}

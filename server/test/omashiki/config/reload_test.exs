@@ -203,10 +203,8 @@ defmodule Omashiki.Config.ReloadTest do
     path = "repo"
     base_branch = "main"
 
-    [harnesses.opencode]
-    adapter = "opencode"
-    runtime = "docker"
-    image = "omashiki/agent:latest"
+    [presets.opencode]
+    plugin = "opencode"
 
     [credentials.provider]
     provider = "openai_compat"
@@ -214,7 +212,10 @@ defmodule Omashiki.Config.ReloadTest do
     api_key = "#{api_key}"
 
     [environments.opencode]
-    harness = "opencode"
+    isolation = "docker"
+    image = "omashiki/agent:latest"
+    sink = "git"
+    preset = "opencode"
     executables = ["git"]
     credentials = ["provider"]
     caches = []

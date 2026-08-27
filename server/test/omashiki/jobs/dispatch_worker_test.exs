@@ -267,7 +267,7 @@ defmodule Omashiki.Jobs.DispatchWorkerTest do
 
     {job, _attempt} =
       job_fixture(user, token, %{
-        environment_snapshot: %{"name" => "opencode", "timeout_ms" => 300}
+        admitted_environment: %{"name" => "opencode", "timeout_ms" => 300}
       })
 
     dispatch_task = Task.async(fn -> perform_final_attempt(job.id) end)

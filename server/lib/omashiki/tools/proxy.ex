@@ -7,13 +7,13 @@ defmodule Omashiki.Tools.Proxy do
   alias Omashiki.Security.Network
 
   @doc "Mint a short-lived token for the internal tool data plane."
-  def sign_token(job_id, token_owner, environment_digest)
-      when is_binary(job_id) and is_binary(token_owner) and is_binary(environment_digest) do
+  def sign_token(job_id, token_owner, admitted_environment_digest)
+      when is_binary(job_id) and is_binary(token_owner) and is_binary(admitted_environment_digest) do
     with %Omashiki.Jobs.Job{} = job <- Omashiki.Repo.get(Omashiki.Jobs.Job, job_id),
          {:ok, token} <-
            Claims.issue("tools", job, %{
              token_owner: token_owner,
-             environment_digest: environment_digest
+             admitted_environment_digest: admitted_environment_digest
            }) do
       token
     else

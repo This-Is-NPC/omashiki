@@ -1,10 +1,11 @@
 defmodule Omashiki.Harness.OpenCode do
-  @moduledoc "OpenCode implementation of the neutral harness adapter contract."
+  @moduledoc "OpenCode implementation of the neutral plugin contract."
 
   @behaviour Omashiki.Harness.Adapter
 
   alias Omashiki.Credentials.Credential
-  alias Omashiki.Harness.{Context, Invocation, LaunchPlan, Result, Spec}
+  alias Omashiki.Harness.{Context, Invocation, LaunchPlan, Result}
+  alias Omashiki.Plugin.Preset
   alias Omashiki.Jobs.Job
   alias Omashiki.Runtime.Claims
   alias Omashiki.Runtime.Capability
@@ -51,7 +52,7 @@ defmodule Omashiki.Harness.OpenCode do
   def validate_options(_), do: {:error, :options_must_be_a_map}
 
   @impl true
-  def launch_plan(%Spec{runtime: runtime, options: options}) do
+  def launch_plan(%Preset{runtime: runtime, options: options}) do
     options = Map.merge(@default_options, options)
     port = options["internal_port"]
 
@@ -75,7 +76,7 @@ defmodule Omashiki.Harness.OpenCode do
   end
 
   @impl true
-  def prepare(%Spec{} = spec, %Context{} = context) do
+  def prepare(%Preset{} = spec, %Context{} = context) do
     options = Map.merge(@default_options, spec.options)
     environment = context.environment || %{}
 

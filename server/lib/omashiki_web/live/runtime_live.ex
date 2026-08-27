@@ -94,7 +94,7 @@ defmodule OmashikiWeb.RuntimeLive do
           </p>
         </div>
         <div class="text-right">
-          <p class="font-mono text-xs text-on-surface-variant">node {@snapshot.node_id || "—"}</p>
+          <p class="font-mono text-xs text-on-surface-variant">node {@snapshot.machine_id || "—"}</p>
           <p class="font-mono text-xs text-on-surface-variant">{census_age(@snapshot)}</p>
         </div>
       </header>
@@ -211,7 +211,7 @@ defmodule OmashikiWeb.RuntimeLive do
         </p>
       </.panel>
 
-      <.panel title="Supervision" meta={"node #{@snapshot.node_id || "—"}"}>
+      <.panel title="Supervision" meta={"node #{@snapshot.machine_id || "—"}"}>
         <dl class="grid grid-cols-2 gap-x-4 gap-y-3 font-mono text-xs sm:grid-cols-4">
           <div>
             <dt class="text-on-surface-variant">AttemptSupervisor</dt>
@@ -367,8 +367,8 @@ defmodule OmashikiWeb.RuntimeLive do
   defp link_class(:process_without_container), do: "text-status-running"
   defp link_class(:remote), do: "text-on-surface-variant"
 
-  defp node_label(%{node_id: nil}), do: "node —"
-  defp node_label(%{node_id: node_id}), do: "node #{node_id}"
+  defp node_label(%{machine_id: nil}), do: "node —"
+  defp node_label(%{machine_id: machine_id}), do: "node #{machine_id}"
 
   # -- configuration rollout -------------------------------------------------
 

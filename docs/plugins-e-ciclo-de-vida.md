@@ -1,3 +1,5 @@
+> **Implementation in progress** under Omakiten plan 196 (`plugins-cut-2026h2`). Vocabulary and config shape are changing; this document describes the target design.
+
 # Plugins declarativos e ciclo de vida das tarefas
 
 > **Aviso:** `.temp/` é gitignored. Um `git clean -xdf` apaga este arquivo. O commit

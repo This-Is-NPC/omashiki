@@ -163,16 +163,15 @@ defmodule Omashiki.Runtime.AttemptTest do
   defp config do
     %{
       "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "main"}},
-      "harnesses" => %{
-        "opencode" => %{
-          "adapter" => "opencode",
-          "runtime" => "docker",
-          "image" => "agent:latest"
-        }
-      },
+      "presets" => %{
+          "opencode" => %{"plugin" => "opencode", "options" => %{}}
+        },
       "environments" => %{
         "safe" => %{
-          "harness" => "opencode",
+          "isolation" => "docker",
+          "image" => "omashiki/agent:latest",
+          "sink" => "git",
+          "preset" => "opencode",
           "executables" => ["git"],
           "timeout_ms" => 1_000,
           "caches" => [],

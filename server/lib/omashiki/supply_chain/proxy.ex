@@ -20,14 +20,14 @@ defmodule Omashiki.SupplyChain.Proxy do
   @redirect_statuses 300..399
 
   @doc "Sign a token scoped to one job, owner, environment, cache, and policy."
-  def sign_token(job_id, token_owner, environment_digest, cache_group, policy_digest)
-      when is_binary(job_id) and is_binary(token_owner) and is_binary(environment_digest) and
+  def sign_token(job_id, token_owner, admitted_environment_digest, cache_group, policy_digest)
+      when is_binary(job_id) and is_binary(token_owner) and is_binary(admitted_environment_digest) and
              is_binary(cache_group) and is_binary(policy_digest) do
     with %Omashiki.Jobs.Job{} = job <- Omashiki.Repo.get(Omashiki.Jobs.Job, job_id),
          {:ok, token} <-
            Claims.issue("supply_chain", job, %{
              token_owner: token_owner,
-             environment_digest: environment_digest,
+             admitted_environment_digest: admitted_environment_digest,
              cache_group: cache_group,
              policy_digest: policy_digest
            }) do

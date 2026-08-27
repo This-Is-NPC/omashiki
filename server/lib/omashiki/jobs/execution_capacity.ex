@@ -3,7 +3,7 @@ defmodule Omashiki.Jobs.ExecutionCapacity do
   One row per execution node: that machine's container budget and the slots it
   currently holds.
 
-  Keyed by `node_id`, which is the name from `Config.current_node/0` and the
+  Keyed by `node_id`, which is the name from `Config.current_machine/0` and the
   same value `job_attempts.node_id` records. Each row serializes its own node's
   budget and nothing else, so one machine filling up neither blocks nor inflates
   another's, and a node that never boots simply has no row.

@@ -14,7 +14,8 @@ defmodule Omashiki.Harness.CliJson do
   """
 
   alias Omashiki.Credentials.Credential
-  alias Omashiki.Harness.{Context, Invocation, LaunchPlan, Spec}
+  alias Omashiki.Harness.{Context, Invocation, LaunchPlan}
+  alias Omashiki.Plugin.Preset
   alias Omashiki.Jobs.Job
   alias Omashiki.Runtime.Capability
   alias Omashiki.Runtime.Claims
@@ -42,7 +43,7 @@ defmodule Omashiki.Harness.CliJson do
 
   @doc false
   def prepare_gateway(
-        %Spec{} = spec,
+        %Preset{} = spec,
         %Context{} = context,
         default_options,
         launch_plan,
@@ -70,7 +71,7 @@ defmodule Omashiki.Harness.CliJson do
   end
 
   @doc false
-  def launch_plan!(%Spec{} = spec, launch_plan) when is_function(launch_plan, 1) do
+  def launch_plan!(%Preset{} = spec, launch_plan) when is_function(launch_plan, 1) do
     {:ok, %LaunchPlan{} = plan} = launch_plan.(spec)
     plan
   end

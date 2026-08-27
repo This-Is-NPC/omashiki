@@ -46,15 +46,15 @@ defmodule Omashiki.Gateway do
   # Token / URL
   # ---------------------------------------------------------------------------
 
-  def sign_token(job_id, token_owner, environment_digest, credential_name)
-      when is_binary(job_id) and is_binary(token_owner) and is_binary(environment_digest) and
+  def sign_token(job_id, token_owner, admitted_environment_digest, credential_name)
+      when is_binary(job_id) and is_binary(token_owner) and is_binary(admitted_environment_digest) and
              is_binary(credential_name) do
     with %Omashiki.Jobs.Job{} = job <- Repo.get(Omashiki.Jobs.Job, job_id),
          {:ok, token} <-
            Claims.issue("gateway", job, %{
              credential: credential_name,
              token_owner: token_owner,
-             environment_digest: environment_digest
+             admitted_environment_digest: admitted_environment_digest
            }) do
       token
     else

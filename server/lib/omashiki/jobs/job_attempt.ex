@@ -13,7 +13,7 @@ defmodule Omashiki.Jobs.JobAttempt do
     field :status, :string
     field :oban_job_id, :integer
     field :runner_id, :string
-    field :node_id, :string
+    field :machine_id, :string
     field :lease_token, :string
     field :lease_expires_at, :utc_datetime_usec
     field :heartbeat_at, :utc_datetime_usec
@@ -42,7 +42,7 @@ defmodule Omashiki.Jobs.JobAttempt do
       :status,
       :oban_job_id,
       :runner_id,
-      :node_id,
+      :machine_id,
       :lease_token,
       :lease_expires_at,
       :heartbeat_at,

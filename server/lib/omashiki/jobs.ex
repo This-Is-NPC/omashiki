@@ -21,7 +21,7 @@ defmodule Omashiki.Jobs do
   @default_lease_ms 30_000
 
   # The node name the pre-node singleton capacity row was re-keyed to. It is the
-  # release target for attempts claimed before `job_attempts.node_id` existed,
+  # release target for attempts claimed before `job_attempts.machine_id` existed,
   # and nothing else: no live claim ever reserves against it unless a machine is
   # actually called `local`.
   @legacy_node "local"
@@ -320,7 +320,7 @@ defmodule Omashiki.Jobs do
 
     Repo.insert(
       %ExecutionCapacity{
-        node_id: Config.current_node().name,
+        node_id: Config.current_machine().name,
         capacity: capacity,
         active: 0,
         inserted_at: now,
@@ -361,7 +361,7 @@ defmodule Omashiki.Jobs do
   defp claim_locked(%Job{} = job, runner_id, now, lease_ms) do
     # One read of this host's identity feeds both the reservation and the stamp,
     # so the row that was decremented is always the row the attempt names.
-    node = Config.current_node().name
+    node = Config.current_machine().name
     reserve_capacity!(node)
     token = new_lease_token()
     expires_at = lease_until(now, lease_ms)
@@ -372,7 +372,7 @@ defmodule Omashiki.Jobs do
     update_attempt!(attempt, %{
       status: "provisioning",
       runner_id: runner_id,
-      node_id: node,
+      machine_id: node,
       lease_token: token,
       lease_expires_at: expires_at,
       heartbeat_at: now,
@@ -847,17 +847,17 @@ defmodule Omashiki.Jobs do
   end
 
   # Release on the row of the node that *reserved*, which is the attempt's own
-  # `node_id` — never `current_node/0`. Every caller here also runs on the node
+  # `machine_id` — never `current_machine/0`. Every caller here also runs on the node
   # that did not claim: `recover_stale/1` sweeps expired leases cluster-wide, so
   # node B routinely fails an attempt node A is holding a slot for. Releasing
   # against the sweeper would leave A one slot short forever and drive B's
   # counter below the reservations it actually holds — both rows wrong, silently.
   #
-  # A `nil` node predates `job_attempts.node_id` and therefore predates any
+  # A `nil` node predates `job_attempts.machine_id` and therefore predates any
   # cluster: those reservations were counted in the singleton this table's
   # migration re-keyed to `'local'`, so that is where they are given back.
   defp release_capacity_if_reserved!(%JobAttempt{capacity_reserved: true} = attempt) do
-    release_capacity!(attempt.node_id || @legacy_node)
+    release_capacity!(attempt.machine_id || @legacy_node)
   end
 
   defp release_capacity_if_reserved!(_), do: :ok

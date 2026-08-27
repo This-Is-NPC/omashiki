@@ -10,7 +10,7 @@ defmodule Omashiki.Config.Repository do
   defstruct [:name, :path, :base_branch, :remote]
 end
 
-defmodule Omashiki.Config.Node do
+defmodule Omashiki.Config.Machine do
   @moduledoc """
   Immutable declared execution node.
 
@@ -39,8 +39,10 @@ defmodule Omashiki.Config.Environment do
   @moduledoc "Immutable governed execution environment."
   @enforce_keys [
     :name,
-    :harness,
-    :harness_profile,
+    :preset,
+    :isolation,
+    :image,
+    :sink,
     :executables,
     :credentials,
     :host_credentials,
@@ -67,7 +69,7 @@ end
 defmodule Omashiki.Config.Registry do
   @moduledoc false
 
-  alias Omashiki.Config.{Environment, Error, Mount, Node, Repository, Step}
+  alias Omashiki.Config.{Environment, Error, Mount, Machine, Repository, Step}
   alias Omashiki.SupplyChain.Policy
 
   @name ~r/^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -85,7 +87,7 @@ defmodule Omashiki.Config.Registry do
   def build!(
         repository_section,
         environment_section,
-        harness_section,
+        preset_section,
         node_section,
         caches,
         credentials,
@@ -97,24 +99,24 @@ defmodule Omashiki.Config.Registry do
     end
 
     repositories = build_repositories!(repository_section, base_dir)
-    harnesses = Omashiki.Harnesses.build!(harness_section)
+    presets = Omashiki.Harnesses.build!(preset_section)
     nodes = build_nodes!(node_section)
 
     environments =
       build_environments!(
         environment_section,
-        harnesses,
+        presets,
         caches,
         credentials,
         host_credentials,
         base_dir
       )
 
-    digest = digest(repositories, harnesses, environments)
+    digest = digest(repositories, presets, environments)
 
     %{
       repositories: repositories,
-      harnesses: harnesses,
+      presets: presets,
       environments: environments,
       nodes: nodes,
       registry_digest: digest
@@ -136,10 +138,10 @@ defmodule Omashiki.Config.Registry do
   # divergence that does not exist. Divergence stays loud where it is actually
   # checkable: a machine absent from a declared `[nodes]` list fails config load
   # outright rather than claiming work under a node id nothing else knows about.
-  def digest(repositories, harnesses, environments) do
+  def digest(repositories, presets, environments) do
     canonical = %{
       repositories: repositories,
-      harnesses: harnesses,
+      presets: presets,
       environments: Enum.map(environments, &digest_environment/1)
     }
 
@@ -160,7 +162,7 @@ defmodule Omashiki.Config.Registry do
       validate_name!(name, where)
       attrs = require_table!(attrs, where)
       reject_unknown!(attrs, [], where)
-      %Node{name: name}
+      %Machine{name: name}
     end)
     |> Enum.sort_by(& &1.name)
   end
@@ -221,8 +223,8 @@ defmodule Omashiki.Config.Registry do
       not String.starts_with?(value, ["-", "ext::"])
   end
 
-  defp build_environments!(section, harnesses, caches, credentials, host_credentials, base_dir) do
-    harnesses_by_name = Map.new(harnesses, &{&1.name, &1})
+  defp build_environments!(section, presets, caches, credentials, host_credentials, base_dir) do
+    presets_by_name = Map.new(presets, &{&1.name, &1})
     caches_by_name = Map.new(caches, &{&1.name, &1})
     credentials_by_name = Map.new(credentials, &{&1.name, &1})
     host_credentials_by_name = Map.new(host_credentials, &{&1.name, &1})
@@ -243,14 +245,24 @@ defmodule Omashiki.Config.Registry do
       validate_name!(name, where)
       attrs = require_table!(attrs, where)
 
+      if Map.has_key?(attrs, "harness") do
+        raise Error, "#{where}: unknown field \"harness\""
+      end
+
       reject_unknown!(
         attrs,
-        ~w(harness executables credentials capabilities mcp_servers pre_steps post_steps timeout_ms caches mounts policy network resources),
+        ~w(preset isolation image sink executables credentials capabilities mcp_servers pre_steps post_steps timeout_ms caches mounts policy network resources),
         where
       )
 
       timeout_ms = positive_integer!(attrs, "timeout_ms", where, @max_timeout_ms)
-      harness = require_string!(attrs, "harness", where)
+      preset_name = require_string!(attrs, "preset", where)
+      isolation = require_string!(attrs, "isolation", where)
+      image = require_string!(attrs, "image", where)
+      sink = require_string!(attrs, "sink", where)
+
+      unless sink == "git", do: raise(Error, "#{where}.sink must be \"git\" in this wave")
+
       executables = string_list!(attrs, "executables", where)
 
       if executables == [], do: raise(Error, "#{where}.executables must not be empty")
@@ -259,11 +271,13 @@ defmodule Omashiki.Config.Registry do
         raise Error, "#{where}.executables contains an unsafe executable"
       end
 
-      harness_profile =
-        case Map.get(harnesses_by_name, harness) do
-          nil -> raise Error, "#{where}.harness references unknown profile #{inspect(harness)}"
+      base_preset =
+        case Map.get(presets_by_name, preset_name) do
+          nil -> raise Error, "#{where}.preset references unknown preset #{inspect(preset_name)}"
           profile -> profile
         end
+
+      preset = Omashiki.Harnesses.finalize_preset!(base_preset, isolation, image, where)
 
       {resolved_credentials, resolved_host_credentials} =
         attrs
@@ -296,8 +310,10 @@ defmodule Omashiki.Config.Registry do
 
       %Environment{
         name: name,
-        harness: harness,
-        harness_profile: harness_profile,
+        preset: preset,
+        isolation: isolation,
+        image: image,
+        sink: sink,
         executables: executables,
         credentials: resolved_credentials,
         host_credentials: resolved_host_credentials,

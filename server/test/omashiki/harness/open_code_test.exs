@@ -1,8 +1,10 @@
 defmodule Omashiki.Harness.OpenCodeTest do
   use ExUnit.Case, async: true
 
-  alias Omashiki.Harness.{Context, OpenCode, Spec}
-  alias Omashiki.Runtimes.Runtime
+  alias Omashiki.Plugin.Preset
+  alias Omashiki.Isolation
+
+  alias Omashiki.Harness.{Context, OpenCode}
 
   setup do
     root = Path.join(System.tmp_dir!(), "omashiki-harness-#{System.unique_integer([:positive])}")
@@ -15,12 +17,12 @@ defmodule Omashiki.Harness.OpenCodeTest do
 
     mounts = %{config => OpenCode.config_path(), auth => OpenCode.auth_path()}
 
-    profile = %Spec{
+    profile = %Preset{
       name: "opencode",
       adapter: OpenCode,
       adapter_key: "opencode",
       options: %{},
-      runtime: %Runtime{
+      runtime: %Isolation{
         key: "opencode",
         kind: "docker",
         config: %{"image" => "agent:latest"},

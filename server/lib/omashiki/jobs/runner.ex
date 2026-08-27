@@ -17,7 +17,7 @@ defmodule Omashiki.Jobs.Runner.DockerContainer do
 
   @impl true
   def provision(%Job{} = job, %JobAttempt{} = attempt, environment, opts) do
-    opts = Keyword.put_new(opts, :harness_profile, profile_for(environment))
+    opts = Keyword.put_new(opts, :preset, profile_for(environment))
 
     Omashiki.Jobs.GitArtifact.provision(job, opts, fn artifact ->
       opts = Keyword.put(opts, :worktree_path, artifact.path)
@@ -94,7 +94,7 @@ defmodule Omashiki.Jobs.Runner.Finalizer do
 
   def finalize(_container, _job, _opts), do: {:error, :worktree_unavailable}
 
-  defp base_sha(path, %Job{repository_snapshot: %{"base_branch" => branch}}),
+  defp base_sha(path, %Job{admitted_repository: %{"base_branch" => branch}}),
     do: git(path, ["rev-parse", branch])
 
   defp base_sha(_path, _job), do: {:error, :base_branch_unavailable}
@@ -161,7 +161,7 @@ defmodule Omashiki.Jobs.Runner do
 
   defp execute(%JobAttempt{} = attempt, opts) do
     job = Repo.get!(Job, attempt.job_id)
-    environment = job.environment_snapshot || %{}
+    environment = job.admitted_environment || %{}
     pre_steps = Keyword.get(opts, :pre_steps, Map.get(environment, "pre_steps", []))
     post_steps = Keyword.get(opts, :post_steps, Map.get(environment, "post_steps", []))
     plans = step_plans(pre_steps, post_steps, Map.get(environment, "timeout_ms", 60_000))
@@ -255,10 +255,10 @@ defmodule Omashiki.Jobs.Runner do
     |> run_post_steps()
   end
 
-  defp run_harness(%{outcome: :failure} = state), do: skip_step(state, "harness")
+  defp run_harness(%{outcome: :failure} = state), do: skip_step(state, "preset")
 
   defp run_harness(state) do
-    step = step(state, "harness")
+    step = step(state, "preset")
 
     {state, result} =
       invoke_step(state, step, %{"payload" => state.job.payload}, fn ->
@@ -526,7 +526,7 @@ defmodule Omashiki.Jobs.Runner do
 
     [%{sequence: 1, key: "provision", kind: "provision", input: %{}}] ++
       Enum.map(pre, &plan(&1, "pre", 2, timeout_ms)) ++
-      [%{sequence: harness_sequence, key: "harness", kind: "harness", input: %{}}] ++
+      [%{sequence: harness_sequence, key: "preset", kind: "preset", input: %{}}] ++
       Enum.map(post, &plan(&1, "post", post_start, timeout_ms)) ++
       [
         %{

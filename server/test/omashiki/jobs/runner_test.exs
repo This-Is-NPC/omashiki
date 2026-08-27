@@ -101,16 +101,15 @@ defmodule Omashiki.Jobs.RunnerTest do
     Config.load_map!(
       %{
         "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "main"}},
-        "harnesses" => %{
-          "opencode" => %{
-            "adapter" => "opencode",
-            "runtime" => "docker",
-            "image" => "agent:latest"
-          }
+        "presets" => %{
+          "opencode" => %{"plugin" => "opencode", "options" => %{}}
         },
         "environments" => %{
           "safe" => %{
-            "harness" => "opencode",
+            "isolation" => "docker",
+          "image" => "omashiki/agent:latest",
+          "sink" => "git",
+          "preset" => "opencode",
             "executables" => ["git"],
             "timeout_ms" => 1_000,
             "caches" => [],
@@ -151,7 +150,7 @@ defmodule Omashiki.Jobs.RunnerTest do
     assert Enum.map(steps, &{&1.key, &1.status}) == [
              {"provision", "succeeded"},
              {"pre-1", "succeeded"},
-             {"harness", "succeeded"},
+             {"preset", "succeeded"},
              {"post-1", "succeeded"},
              {"post-2", "skipped"},
              {"post-3", "succeeded"},
@@ -182,7 +181,7 @@ defmodule Omashiki.Jobs.RunnerTest do
 
     assert Enum.map(steps, &{&1.sequence, &1.key}) == [
              {1, "provision"},
-             {2, "harness"},
+             {2, "preset"},
              {3, "finalization"},
              {4, "cleanup"}
            ]
@@ -223,7 +222,7 @@ defmodule Omashiki.Jobs.RunnerTest do
     assert Enum.map(statuses, &{&1.key, &1.status}) == [
              {"provision", "succeeded"},
              {"pre-1", "failed"},
-             {"harness", "skipped"},
+             {"preset", "skipped"},
              {"post-1", "skipped"},
              {"post-2", "succeeded"},
              {"post-3", "succeeded"},

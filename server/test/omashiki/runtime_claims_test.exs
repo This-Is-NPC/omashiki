@@ -12,7 +12,7 @@ defmodule Omashiki.Runtime.ClaimsTest do
 
     assert claims["job_id"] == job.id
     assert claims["token_owner"] == job.user_id
-    assert claims["environment_digest"] == job.environment_digest
+    assert claims["admitted_environment_digest"] == job.admitted_environment_digest
     assert claims["credential"] == "host-openai"
     refute Map.has_key?(claims, "task_id")
     refute Map.has_key?(claims, "api_key")
@@ -31,7 +31,7 @@ defmodule Omashiki.Runtime.ClaimsTest do
              Claims.authorize("tools", Map.put(claims, "job_id", other_job.id))
 
     assert {:error, :environment_changed} =
-             Claims.authorize("tools", Map.put(claims, "environment_digest", "stale"))
+             Claims.authorize("tools", Map.put(claims, "admitted_environment_digest", "stale"))
   end
 
   test "inactive jobs cannot mint runtime claims" do
@@ -43,7 +43,7 @@ defmodule Omashiki.Runtime.ClaimsTest do
     job = job_fixture()
 
     rendered =
-      McpConfig.render(job.environment_snapshot, nil, %{
+      McpConfig.render(job.admitted_environment, nil, %{
         token: "signed-runtime-token",
         base_url: "http://proxy.test"
       })
@@ -70,16 +70,16 @@ defmodule Omashiki.Runtime.ClaimsTest do
       environment: "isolated",
       payload: %{"ok" => true},
       payload_hash: String.duplicate("a", 64),
-      repository_snapshot: %{"path" => "/tmp/repo", "base_branch" => "main"},
-      repository_digest: String.duplicate("b", 64),
-      environment_snapshot: %{
+      admitted_repository: %{"path" => "/tmp/repo", "base_branch" => "main"},
+      admitted_repository_digest: String.duplicate("b", 64),
+      admitted_environment: %{
         "credentials" => [%{"name" => "host-openai"}],
         "capabilities" => ["internal_read"],
         "mcp_servers" => %{
           "internal" => %{"url" => "https://tools.example.test/mcp", "headers" => %{}}
         }
       },
-      environment_digest: String.duplicate("c", 64),
+      admitted_environment_digest: String.duplicate("c", 64),
       registry_digest: String.duplicate("d", 64),
       queue: "default",
       priority: 0,

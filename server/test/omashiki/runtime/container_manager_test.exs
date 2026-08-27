@@ -2,8 +2,9 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
   use ExUnit.Case, async: false
 
   alias Omashiki.Runtime.ContainerManager
-  alias Omashiki.Harness.{LaunchPlan, Spec}
-  alias Omashiki.Runtimes.Runtime
+  alias Omashiki.Harness.LaunchPlan
+  alias Omashiki.Plugin.Preset
+  alias Omashiki.Isolation
 
   defmodule BlockingOperations do
     def op_provision(_job, attempt, %{owner: owner}, _opts) do
@@ -89,7 +90,7 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
   end
 
   test "container config recognizes a CLI plan with serializable string transport keys" do
-    runtime = %Runtime{
+    runtime = %Isolation{
       key: "claude-code",
       kind: "docker",
       config: %{"image" => "agent-claude"},
@@ -105,7 +106,7 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
       environment: []
     }
 
-    profile = %Spec{
+    profile = %Preset{
       name: "claude-code",
       adapter: Omashiki.Harness.ClaudeCode,
       adapter_key: "claude-code",
@@ -120,7 +121,7 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
         repo_root: "/repo",
         host_uid: 1000,
         host_gid: 1000,
-        harness_profile: profile,
+        preset: profile,
         launch_plan: plan,
         harness_env: [],
         network_mode: "none"

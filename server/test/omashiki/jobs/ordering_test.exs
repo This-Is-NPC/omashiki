@@ -18,16 +18,15 @@ defmodule Omashiki.Jobs.OrderingTest do
     Config.load_map!(
       %{
         "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "main"}},
-        "harnesses" => %{
-          "opencode" => %{
-            "adapter" => "opencode",
-            "runtime" => "docker",
-            "image" => "agent:latest"
-          }
+        "presets" => %{
+          "opencode" => %{"plugin" => "opencode", "options" => %{}}
         },
         "environments" => %{
           "safe" => %{
-            "harness" => "opencode",
+            "isolation" => "docker",
+          "image" => "omashiki/agent:latest",
+          "sink" => "git",
+          "preset" => "opencode",
             "executables" => ["git"],
             "timeout_ms" => 1_000,
             "caches" => [],
@@ -107,7 +106,7 @@ defmodule Omashiki.Jobs.OrderingTest do
            ) == 1
   end
 
-  test "failure and cancellation do not touch blocked descendants", %{token: token} do
+  test "failure and cancellation cascade-cancel blocked descendants", %{token: token} do
     assert {:ok, [root, child]} =
              Jobs.Admission.admit_batch(
                token,
@@ -116,10 +115,13 @@ defmodule Omashiki.Jobs.OrderingTest do
 
     assert {:ok, _cancelled} = Jobs.cancel(root)
 
-    assert Repo.get!(Job, child.id).status == "blocked"
+    assert Repo.get!(Job, child.id).status == "cancelled"
 
-    assert Repo.aggregate(from(e in JobEvent, where: e.job_id == ^child.id), :count, :event_id) ==
-             1
+    assert Repo.aggregate(
+             from(e in JobEvent, where: e.job_id == ^child.id and e.status == "cancelled"),
+             :count,
+             :event_id
+           ) == 1
 
     assert Repo.aggregate(Oban.Job, :count, :id) == 1
 
@@ -131,16 +133,16 @@ defmodule Omashiki.Jobs.OrderingTest do
 
     assert {:ok, _running} = Jobs.start(failed_root)
     assert {:ok, _failed} = Jobs.fail(failed_root, error_attrs("failed"))
-    assert Repo.get!(Job, failed_child.id).status == "blocked"
+    assert Repo.get!(Job, failed_child.id).status == "cancelled"
 
     assert Repo.aggregate(
-             from(e in JobEvent, where: e.job_id == ^failed_child.id),
+             from(e in JobEvent, where: e.job_id == ^failed_child.id and e.status == "cancelled"),
              :count,
              :event_id
            ) == 1
   end
 
-  test "retry success releases the same children once", %{token: token} do
+  test "retry success does not re-queue cascade-cancelled children", %{token: token} do
     assert {:ok, [root, child]} =
              Jobs.Admission.admit_batch(
                token,
@@ -155,15 +157,15 @@ defmodule Omashiki.Jobs.OrderingTest do
     assert {:ok, _succeeded} = Jobs.succeed(retried, success_attrs())
     assert {:ok, _same} = Jobs.succeed(retried, success_attrs())
 
-    assert Repo.get!(Job, child.id).status == "queued"
+    assert Repo.get!(Job, child.id).status == "cancelled"
 
     assert Repo.aggregate(
              from(e in JobEvent, where: e.job_id == ^child.id and e.status == "queued"),
              :count,
              :event_id
-           ) == 1
+           ) == 0
 
-    assert Repo.aggregate(Oban.Job, :count, :id) == 2
+    assert Repo.aggregate(Oban.Job, :count, :id) == 1
   end
 
   test "concurrent parent success has one unlock and one child dispatch", %{token: token} do

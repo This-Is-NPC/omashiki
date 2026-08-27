@@ -21,7 +21,7 @@ defmodule OmashikiWeb.JobLiveTest do
         payload: %{"branch" => "main", "checks" => ["test"]}
       })
 
-    Repo.update!(JobAttempt.changeset(attempt, %{node_id: "builder-07"}))
+    Repo.update!(JobAttempt.changeset(attempt, %{machine_id: "builder-07"}))
 
     Repo.insert!(
       JobStep.changeset(%JobStep{}, %{

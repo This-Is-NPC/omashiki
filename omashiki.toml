@@ -1,10 +1,10 @@
 # Local Omashiki configuration.
 #
-# Single source of declared repositories, harnesses, environments, caches,
+# Single source of declared repositories, presets, environments, caches,
 # credentials, and limits. The database stores what happens: jobs, queues, and
 # events.
 #
-# The execution registry below — repositories, harnesses, environments,
+# The execution registry below — repositories, presets, environments,
 # credentials, caches, limits — reloads hot from /runtime with no restart. See
 # [reload]. The infrastructure sections at the top ([app], [db], [auth]) are
 # read by the entrypoints and by config/runtime.exs before the core is up, and
@@ -162,19 +162,21 @@ base_branch = "master"
 #
 # remote = "git@github.com:example/omashiki.git"
 
-[harnesses.opencode]
-adapter = "opencode"
-runtime = "docker"
-image = "omashiki/agent:latest"
+[presets.opencode]
+
+plugin = "opencode"
 options = { auth_path = "/run/omashiki/state/auth.json", config_path = "/run/omashiki/state/opencode.json" }
 
-[harnesses.claude-code]
-adapter = "claude-code"
-runtime = "docker"
-image = "omashiki/agent-claude:latest"
+[presets.claude-code]
+
+plugin = "claude-code"
 
 [environments.opencode]
-harness = "opencode"
+
+isolation = "docker"
+image = "omashiki/agent:latest"
+sink = "git"
+preset = "opencode"
 executables = ["mise", "git"]
 credentials = ["opencode-local"]
 caches = ["global"]
@@ -183,11 +185,11 @@ network = "none"
 mounts = []
 post_steps = []
 pre_steps = [{ argv = ["mise", "install", "--yes"], condition = "always", timeout_ms = 600000 }]
-
 [environments.opencode.policy]
-mode = "off"
 
+mode = "off"
 [environments.opencode.resources]
+
 cpus = 2.0
 memory = "2GB"
 pids = 256
@@ -225,8 +227,8 @@ pids = 256
 #base_url = "${env:OMASHIKI_LOCAL_LLM_BASE_URL}"
 #api_key = "unused-by-llama-server"
 #
-#[harnesses.jcode]
-#adapter = "jcode"
+#[presets.jcode]
+#plugin = "jcode"
 #runtime = "docker"
 #image = "omashiki/agent-jcode:latest"
 #options = { timeout_ms = 1800000 }
@@ -235,7 +237,7 @@ pids = 256
 ## host-auth route — it always reaches the model through the gateway, so the
 ## network must not be "none" and the credential must be a gateway credential.
 #[environments.jcode]
-#harness = "jcode"
+#preset = "jcode"
 #executables = ["git"]
 #credentials = ["local-llm"]
 #caches = []
@@ -259,7 +261,6 @@ pids = 256
 # Read fresh at every attempt and copied into a private per-attempt directory
 # mounted at /run/omashiki/state. Changing the file contents needs no restart;
 # changing which file is the origin does.
-
 [host_credentials.opencode-local]
 kind = "opencode"
 auth = "~/.local/share/opencode/auth.json"
@@ -273,13 +274,16 @@ credentials = "~/.claude/.credentials.json"
 kind = "codex"
 credentials = "~/.codex/auth.json"
 
-[harnesses.codex]
-adapter = "codex"
-runtime = "docker"
-image = "omashiki/agent-codex:latest"
+[presets.codex]
+
+plugin = "codex"
 
 [environments.codex]
-harness = "codex"
+
+isolation = "docker"
+image = "omashiki/agent-codex:latest"
+sink = "git"
+preset = "codex"
 executables = ["mise", "git"]
 credentials = ["codex-local"]
 caches = ["global"]
@@ -288,11 +292,11 @@ network = "restricted"
 mounts = []
 post_steps = []
 pre_steps = [{ argv = ["mise", "install", "--yes"], condition = "always", timeout_ms = 600000 }]
-
 [environments.codex.policy]
-mode = "off"
 
+mode = "off"
 [environments.codex.resources]
+
 cpus = 2.0
 memory = "2GB"
 pids = 256
@@ -317,22 +321,20 @@ pids = 256
 # not "none".
 #
 # The harness is declared live and the environment is not, which is the same
-# split [harnesses.claude-code] already uses: a harness with no environment is
+# split [presets.claude-code] already uses: a harness with no environment is
 # legal and costs nothing, but [environments.pi] would have to name a
 # credential, and the only one that fits is [credentials.local-llm] above.
 # That credential resolves `${env:OMASHIKI_LOCAL_LLM_BASE_URL}` at *load*, so
 # uncommenting it with the variable unset aborts the boot of every entrypoint
 # that reads this file — `mise run dev` and the two working overture E2Es
 # included. Uncomment both together, after exporting the variable.
+[presets.pi]
 
-[harnesses.pi]
-adapter = "pi"
-runtime = "docker"
-image = "omashiki/agent-pi:latest"
+plugin = "pi"
 options = { timeout_ms = 1800000 }
 
 #[environments.pi]
-#harness = "pi"
+#preset = "pi"
 #executables = ["mise", "git"]
 #credentials = ["local-llm"]
 #caches = ["global"]

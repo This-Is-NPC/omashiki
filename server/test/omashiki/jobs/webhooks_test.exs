@@ -203,10 +203,10 @@ defmodule Omashiki.Jobs.WebhooksTest do
         environment: "safe",
         payload: %{"task" => "webhook"},
         payload_hash: String.duplicate("a", 64),
-        repository_snapshot: %{"name" => "app"},
-        repository_digest: String.duplicate("b", 64),
-        environment_snapshot: %{"name" => "safe"},
-        environment_digest: String.duplicate("c", 64),
+        admitted_repository: %{"name" => "app"},
+        admitted_repository_digest: String.duplicate("b", 64),
+        admitted_environment: %{"name" => "safe"},
+        admitted_environment_digest: String.duplicate("c", 64),
         registry_digest: String.duplicate("d", 64),
         queue: "default",
         priority: 0,
@@ -217,7 +217,7 @@ defmodule Omashiki.Jobs.WebhooksTest do
       })
       |> Repo.insert!()
 
-    node = Omashiki.Config.current_node().name
+    node = Omashiki.Config.current_machine().name
 
     Repo.update_all(
       from(c in Omashiki.Jobs.ExecutionCapacity, where: c.node_id == ^node),

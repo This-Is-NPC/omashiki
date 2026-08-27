@@ -2,8 +2,9 @@ defmodule Omashiki.Config.RegistryTest do
   use ExUnit.Case, async: false
 
   alias Omashiki.Config
-  alias Omashiki.Config.{Environment, Error, Node, Repository, ResolvedJob, Step}
+  alias Omashiki.Config.{Environment, Error, Machine, Repository, ResolvedJob, Step}
   alias Omashiki.Credentials.Credential
+  alias Omashiki.Plugin.Preset
 
   setup do
     Config.reset!()
@@ -21,6 +22,25 @@ defmodule Omashiki.Config.RegistryTest do
     %{root: root, repo: repo, mount: mount}
   end
 
+
+  test "rejects legacy harnesses section at config load", ctx do
+    invalid = Map.put(fixture(ctx), "harnesses", %{"opencode" => %{}}) |> Map.delete("presets")
+
+    assert_raise Error, ~r/unknown section "harnesses"/, fn ->
+      Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+  end
+
+  test "requires isolation, image, and sink on environments", ctx do
+    for field <- ["isolation", "image", "sink"] do
+      invalid = update_in(fixture(ctx), ["environments", "opencode"], &Map.delete(&1, field))
+
+      assert_raise Error, fn ->
+        Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+      end
+    end
+  end
+
   test "loads a complete repository and environment registry", ctx do
     assert :ok = Config.load_map!(fixture(ctx), path: Path.join(ctx.root, "omashiki.toml"))
 
@@ -32,8 +52,10 @@ defmodule Omashiki.Config.RegistryTest do
     assert [
              %Environment{
                name: "opencode",
-               harness: "opencode",
-               harness_profile: %{name: "opencode"},
+               preset: %Preset{name: "opencode"},
+               isolation: "docker",
+               image: "omashiki/agent:latest",
+               sink: "git",
                executables: ["mise", "git"],
                credentials: [%Credential{name: "provider"}],
                timeout_ms: 1_800_000,
@@ -47,14 +69,14 @@ defmodule Omashiki.Config.RegistryTest do
     assert {:ok, %ResolvedJob{} = resolved} = Config.resolve_job("app", "opencode")
     assert resolved.repository.path == ctx.repo
     assert resolved.environment.name == "opencode"
-    assert resolved.environment.harness_profile.adapter == Omashiki.Harness.OpenCode
-    assert resolved.environment.harness_profile.launch_plan.transport["kind"] == "http"
+    assert resolved.environment.preset.adapter == Omashiki.Harness.OpenCode
+    assert resolved.environment.preset.launch_plan.transport["kind"] == "http"
     assert resolved.digest == Config.current_digest()
     refute resolved.digest =~ "secret-value"
   end
 
-  test "validates harness adapter options at load and changes the registry digest", ctx do
-    invalid = put_in(fixture(ctx), ["harnesses", "opencode", "options"], %{"unknown" => true})
+  test "validates preset plugin options at load and changes the registry digest", ctx do
+    invalid = put_in(fixture(ctx), ["presets", "opencode", "options"], %{"unknown" => true})
 
     assert_raise Error, ~r/unknown_options/, fn ->
       Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
@@ -62,7 +84,7 @@ defmodule Omashiki.Config.RegistryTest do
 
     Config.load_map!(fixture(ctx), path: Path.join(ctx.root, "omashiki.toml"))
     first = Config.current_digest()
-    changed = put_in(fixture(ctx), ["harnesses", "opencode", "options", "internal_port"], 4097)
+    changed = put_in(fixture(ctx), ["presets", "opencode", "options", "internal_port"], 4097)
     Config.load_map!(changed, path: Path.join(ctx.root, "omashiki.toml"))
     refute Config.current_digest() == first
   end
@@ -267,8 +289,8 @@ defmodule Omashiki.Config.RegistryTest do
     declared = Map.put(fixture(ctx), "nodes", %{"builder-02" => %{}, "builder-01" => %{}})
     assert :ok = Config.load_map!(declared, path: Path.join(ctx.root, "omashiki.toml"))
 
-    assert [%Node{name: "builder-01"}, %Node{name: "builder-02"}] = Config.nodes()
-    assert Config.current_node() == %Node{name: "builder-01"}
+    assert [%Machine{name: "builder-01"}, %Machine{name: "builder-02"}] = Config.nodes()
+    assert Config.current_machine() == %Machine{name: "builder-01"}
   end
 
   test "rejects unknown node fields and malformed node names", ctx do
@@ -294,15 +316,15 @@ defmodule Omashiki.Config.RegistryTest do
   end
 
   # The compatibility contract. Everything below the config layer — the claim
-  # path, recovery, the operator UI — reads `current_node/0`, so an absent
+  # path, recovery, the operator UI — reads `current_machine/0`, so an absent
   # section must still answer, and must answer with exactly one node.
   test "no [nodes] section yields exactly one implicit local node", ctx do
     put_env!("OMASHIKI_NODE", "implicit-host")
     refute Map.has_key?(fixture(ctx), "nodes")
     assert :ok = Config.load_map!(fixture(ctx), path: Path.join(ctx.root, "omashiki.toml"))
 
-    assert [%Node{name: "implicit-host"}] = Config.nodes()
-    assert Config.current_node() == %Node{name: "implicit-host"}
+    assert [%Machine{name: "implicit-host"}] = Config.nodes()
+    assert Config.current_machine() == %Machine{name: "implicit-host"}
   end
 
   test "the implicit local node falls back to the hostname", ctx do
@@ -310,7 +332,7 @@ defmodule Omashiki.Config.RegistryTest do
     {:ok, host} = :inet.gethostname()
     assert :ok = Config.load_map!(fixture(ctx), path: Path.join(ctx.root, "omashiki.toml"))
 
-    assert [%Node{name: name}] = Config.nodes()
+    assert [%Machine{name: name}] = Config.nodes()
     assert name == List.to_string(host)
   end
 
@@ -322,7 +344,7 @@ defmodule Omashiki.Config.RegistryTest do
     put_env!("OMASHIKI_NODE", nil)
     declared = Map.put(fixture(ctx), "nodes", %{"solo" => %{}})
     assert :ok = Config.load_map!(declared, path: Path.join(ctx.root, "omashiki.toml"))
-    assert Config.current_node() == %Node{name: "solo"}
+    assert Config.current_machine() == %Machine{name: "solo"}
   end
 
   test "rejects a machine that is absent from the declared node list", ctx do
@@ -641,11 +663,9 @@ defmodule Omashiki.Config.RegistryTest do
       "repositories" => %{
         "app" => %{"path" => "repo", "base_branch" => "main"}
       },
-      "harnesses" => %{
+      "presets" => %{
         "opencode" => %{
-          "adapter" => "opencode",
-          "runtime" => "docker",
-          "image" => "omashiki/agent:latest",
+          "plugin" => "opencode",
           "options" => %{}
         }
       },
@@ -661,7 +681,10 @@ defmodule Omashiki.Config.RegistryTest do
       },
       "environments" => %{
         "opencode" => %{
-          "harness" => "opencode",
+          "preset" => "opencode",
+          "isolation" => "docker",
+          "image" => "omashiki/agent:latest",
+          "sink" => "git",
           "executables" => ["mise", "git"],
           "credentials" => ["provider"],
           "timeout_ms" => 1_800_000,
