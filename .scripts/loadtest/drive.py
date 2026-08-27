@@ -261,6 +261,10 @@ def run_job(index: int, args, client: Client, correlation_id: str) -> Outcome:
         "priority": args.priority,
         "payload": {
             "instruction": args.instruction,
+            # Git-sink environments require payload.branch or payload.title so
+            # admission can name the task branch. Unique per job: a shared
+            # title would collide on the same branch.
+            "title": f"loadtest-{correlation_id}-{index:05d}",
             "context": {"loadtest": correlation_id, "index": str(index)},
         },
     }
