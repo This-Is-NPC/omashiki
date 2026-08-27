@@ -41,6 +41,8 @@ defmodule Omashiki.Jobs.GitArtifact do
   """
 
   alias Omashiki.Jobs.{Job, JobAttempt}
+  alias Omashiki.Repo
+  import Ecto.Query
 
   @max_bytes 100 * 1024 * 1024
   @retention_seconds 30 * 24 * 60 * 60
@@ -49,6 +51,36 @@ defmodule Omashiki.Jobs.GitArtifact do
   # A remote operation that stops to ask for credentials would hold the attempt
   # until its lease expires. Absent credentials must fail it instead.
   @non_interactive [{"GIT_TERMINAL_PROMPT", "0"}]
+
+
+  defp resolve_base_sha(repo_path, snapshot, base_branch, opts) do
+    case Map.get(snapshot, "base") do
+      "dependency:" <> dep_id ->
+        with %Job{} = dep <- Repo.get(Job, dep_id),
+             %JobAttempt{} = attempt <- succeeded_attempt(dep) do
+          if is_binary(attempt.head_sha) do
+            git(repo_path, ["rev-parse", "--verify", "#{attempt.head_sha}^{commit}"], opts)
+          else
+            {:error, :missing_dependency_head_sha}
+          end
+        else
+          _ -> {:error, :missing_dependency_head_sha}
+        end
+
+      _ ->
+        git(repo_path, ["rev-parse", "--verify", "#{base_branch}^{commit}"], opts)
+    end
+  end
+
+  defp succeeded_attempt(%Job{id: job_id, current_attempt: number, status: "succeeded"}) do
+    Repo.one(
+      from(a in JobAttempt,
+        where: a.job_id == ^job_id and a.number == ^number and a.status == "succeeded"
+      )
+    )
+  end
+
+  defp succeeded_attempt(_), do: nil
 
   @type artifact :: %{
           repo_path: String.t(),
@@ -75,8 +107,7 @@ defmodule Omashiki.Jobs.GitArtifact do
          {:ok, base_branch} <- snapshot_string(snapshot, "base_branch"),
          :ok <- validate_repo(repo_path),
          :ok <- not_cancelled(opts),
-         {:ok, base_sha} <-
-           git(repo_path, ["rev-parse", "--verify", "#{base_branch}^{commit}"], opts),
+         {:ok, base_sha} <- resolve_base_sha(repo_path, snapshot, base_branch, opts),
          run_branch <- run_branch_name(task_branch, attempt_number),
          artifact <-
            artifact(

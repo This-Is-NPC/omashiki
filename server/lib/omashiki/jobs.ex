@@ -42,8 +42,8 @@ defmodule Omashiki.Jobs do
   @orphan_batch_size 100
 
   @event_data_keys %{
-    "blocked" => ~w(parent_job_id),
-    "queued" => ~w(parent_job_id unlock_event_id retry),
+    "blocked" => ~w(depends_on),
+    "queued" => ~w(depends_on unlock_event_id retry),
     "provisioning" => ~w(runner_id),
     "running" => [],
     "succeeded" => ~w(branch base_sha head_sha),
@@ -446,7 +446,7 @@ defmodule Omashiki.Jobs do
           completed_attempt
         )
 
-      unlock_children!(updated, event.event_id)
+      Omashiki.Jobs.Dependencies.notify_dependents!(updated, event.event_id)
       updated
     else
       Repo.rollback(:invalid_success_result)
@@ -476,7 +476,7 @@ defmodule Omashiki.Jobs do
 
     release_capacity_if_reserved!(attempt)
     record_event!(updated, status, %{"error_code" => error_code(error)}, completed_attempt)
-    cancel_blocked_children!(updated, status)
+    Omashiki.Jobs.Dependencies.notify_dependents!(updated, nil)
     updated
   end
 
@@ -631,80 +631,6 @@ defmodule Omashiki.Jobs do
     else
       Repo.rollback({:invalid_transition, job.status, "queued"})
     end
-  end
-
-  defp unlock_children!(%Job{} = parent, unlock_event_id) do
-    children =
-      from(j in Job,
-        where: j.parent_job_id == ^parent.id and j.status == "blocked",
-        order_by: [asc: j.priority, asc: j.inserted_at, asc: j.id],
-        lock: "FOR UPDATE"
-      )
-      |> Repo.all()
-
-    now = now()
-
-    Enum.each(children, fn child ->
-      updated = update_job!(child, %{status: "queued", queued_at: now})
-      attempt = current_attempt!(updated)
-      update_attempt!(attempt, %{status: "queued"})
-
-      record_event!(updated, "queued", %{
-        "parent_job_id" => parent.id,
-        "unlock_event_id" => unlock_event_id
-      })
-
-      enqueue!(updated)
-    end)
-
-    :ok
-  end
-  defp cancel_blocked_children!(%Job{} = parent, parent_status)
-       when parent_status in ~w(failed cancelled) do
-    children =
-      from(j in Job,
-        where: j.parent_job_id == ^parent.id and j.status == "blocked",
-        order_by: [asc: j.priority, asc: j.inserted_at, asc: j.id],
-        lock: "FOR UPDATE"
-      )
-      |> Repo.all()
-
-    now = now()
-    error = parent_terminal_child_error(parent, parent_status)
-
-    Enum.each(children, fn child ->
-      updated =
-        update_job!(child, %{
-          status: "cancelled",
-          finished_at: now,
-          terminal_result: nil,
-          terminal_error: error
-        })
-
-      attempt = current_attempt!(updated)
-
-      completed_attempt =
-        update_attempt!(attempt, %{
-          status: "cancelled",
-          finished_at: now,
-          error: error,
-          capacity_reserved: false,
-          lease_token: nil,
-          lease_expires_at: nil
-        })
-
-      record_event!(updated, "cancelled", %{"error_code" => error_code(error)}, completed_attempt)
-    end)
-
-    :ok
-  end
-
-  defp parent_terminal_child_error(%Job{} = parent, parent_status) do
-    %{
-      "code" => "parent_#{parent_status}",
-      "message" => "parent job #{parent.id} reached #{parent_status}",
-      "details" => %{"parent_job_id" => parent.id, "parent_status" => parent_status}
-    }
   end
 
   defp recover_stale_locked(at) do
@@ -1118,18 +1044,24 @@ defmodule Omashiki.Jobs do
     Enum.reduce(data, %{}, fn {key, value}, acc ->
       key = to_string(key)
 
-      if key in allowed and safe_event_value?(value),
+      if key in allowed and safe_event_value?(key, value),
         do: Map.put(acc, key, value),
         else: acc
     end)
   end
 
-  defp safe_event_value?(value) when is_boolean(value), do: true
+  defp safe_event_value?("depends_on", value) when is_list(value),
+    do: value != [] and Enum.all?(value, &dependency_id_value?/1)
 
-  defp safe_event_value?(value) when is_binary(value),
+  defp safe_event_value?(_key, value) when is_boolean(value), do: true
+
+  defp safe_event_value?(_key, value) when is_binary(value),
     do: String.valid?(value) and byte_size(value) <= 255
 
-  defp safe_event_value?(_), do: false
+  defp safe_event_value?(_, _), do: false
+
+  defp dependency_id_value?(value) when is_binary(value),
+    do: match?({:ok, _}, Ecto.UUID.cast(value))
 
   defp lease_until(now, lease_ms), do: DateTime.add(now, lease_ms, :millisecond)
   defp new_lease_token, do: :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)

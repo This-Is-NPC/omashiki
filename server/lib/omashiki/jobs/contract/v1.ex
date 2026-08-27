@@ -20,12 +20,12 @@ defmodule Omashiki.Jobs.Contract.V1 do
   @statuses ~w(blocked queued running succeeded failed cancelled)
   @terminal_statuses ~w(succeeded failed cancelled)
 
-  @single_keys ~w(schema_version idempotency_key correlation_id repo environment payload priority)
+  @single_keys ~w(schema_version idempotency_key correlation_id repo environment payload priority depends_on base)
   @batch_keys ~w(schema_version correlation_id jobs)
-  @batch_job_keys ~w(ref idempotency_key repo environment payload priority parent_ref)
-  @admission_keys ~w(schema_version job_id idempotency_key correlation_id repo environment priority status attempt parent_job_id submitted_at)
+  @batch_job_keys ~w(ref idempotency_key repo environment payload priority depends_on base)
+  @admission_keys ~w(schema_version job_id idempotency_key correlation_id repo environment priority status attempt depends_on submitted_at)
   @batch_admission_keys ~w(schema_version correlation_id jobs)
-  @transition_keys ~w(schema_version job_id operation from_status to_status from_attempt to_attempt parent_job_id parent_status unlock_event_id)
+  @transition_keys ~w(schema_version job_id operation from_status to_status from_attempt to_attempt depends_on unlock_event_id)
   @result_keys ~w(schema_version job_id attempt status branch base_sha head_sha worktree_clean result error finished_at)
   @event_keys ~w(schema_version event_id job_id attempt sequence type status occurred_at data)
   @error_keys ~w(code message details)
@@ -40,8 +40,8 @@ defmodule Omashiki.Jobs.Contract.V1 do
   )
 
   @observable_data_keys %{
-    "job.blocked" => ~w(parent_job_id),
-    "job.queued" => ~w(parent_job_id unlock_event_id retry),
+    "job.blocked" => ~w(depends_on),
+    "job.queued" => ~w(depends_on unlock_event_id retry),
     "job.running" => ~w(environment),
     "job.succeeded" => ~w(branch base_sha head_sha),
     "job.failed" => ~w(error_code),
@@ -61,9 +61,9 @@ defmodule Omashiki.Jobs.Contract.V1 do
       batch_admission: :atomic,
       execution: :independent,
       payload_limit_scope: :per_job_json_encoded,
-      parent_scope: :same_batch,
-      parent_failure_effect: :none,
-      parent_success_effect: :unlock_once,
+      dependency_scope: :same_batch,
+      dependency_failure_effect: :edge_policy,
+      dependency_success_effect: :unlock_when_all_succeeded,
       retry_identity: :same_job_new_attempt,
       timeout_outcome: :failed,
       webhook_delivery: :at_least_once,
@@ -121,8 +121,7 @@ defmodule Omashiki.Jobs.Contract.V1 do
       |> validate_priority(attrs)
       |> validate_inclusion(attrs, "status", ~w(blocked queued))
       |> validate_exact_integer(attrs, "attempt", 1)
-      |> validate_optional_uuid(attrs, "parent_job_id")
-      |> validate_parent_status_shape(attrs)
+      |> validate_blocked_status_shape(attrs)
       |> validate_timestamp(attrs, "submitted_at")
 
     result(errors, attrs)
@@ -153,7 +152,7 @@ defmodule Omashiki.Jobs.Contract.V1 do
       |> validate_inclusion(
         attrs,
         "operation",
-        ~w(advance cancel timeout retry parent_succeeded)
+        ~w(advance cancel timeout retry dependency_satisfied)
       )
       |> validate_inclusion(attrs, "from_status", @statuses)
       |> validate_inclusion(attrs, "to_status", @statuses)
@@ -179,7 +178,7 @@ defmodule Omashiki.Jobs.Contract.V1 do
 
     replay_errors =
       if transition_errors == [] do
-        unlocks = Enum.filter(transitions, &(Map.get(&1, "operation") == "parent_succeeded"))
+        unlocks = Enum.filter(transitions, &(Map.get(&1, "operation") == "dependency_satisfied"))
 
         duplicate_errors(
           Enum.map(unlocks, &Map.fetch!(&1, "unlock_event_id")),
@@ -190,7 +189,7 @@ defmodule Omashiki.Jobs.Contract.V1 do
               unlocks,
               &"#{Map.fetch!(&1, "job_id")}:#{Map.fetch!(&1, "from_attempt")}"
             ),
-            "transitions.parent_unlock"
+            "transitions.dependency_unlock"
           )
       else
         []
@@ -407,34 +406,36 @@ defmodule Omashiki.Jobs.Contract.V1 do
     job_ids = Enum.map(valid_jobs, &Map.get(&1, "job_id"))
     job_id_set = job_ids |> Enum.filter(&is_binary/1) |> MapSet.new()
 
-    parent_errors =
+    depends_on_errors =
       Enum.flat_map(valid_jobs, fn job ->
         job_id = Map.get(job, "job_id")
-        parent_job_id = Map.get(job, "parent_job_id")
+        depends_on = Map.get(job, "depends_on", [])
 
-        cond do
-          not is_binary(parent_job_id) ->
-            []
-
-          parent_job_id == job_id ->
-            [error("jobs.parent_job_id", "self_parent")]
-
-          not MapSet.member?(job_id_set, parent_job_id) ->
-            [error("jobs.parent_job_id", "unknown_job_id")]
-
-          true ->
-            []
+        if depends_on == [] do
+          []
+        else
+          Enum.flat_map(depends_on, fn dep_id ->
+            cond do
+              not is_binary(dep_id) -> [error("jobs.depends_on", "uuid_required")]
+              dep_id == job_id -> [error("jobs.depends_on", "self_dependency")]
+              not MapSet.member?(job_id_set, dep_id) -> [error("jobs.depends_on", "unknown_job_id")]
+              true -> []
+            end
+          end)
         end
       end)
 
-    parents = Map.new(valid_jobs, &{Map.get(&1, "job_id"), Map.get(&1, "parent_job_id")})
+    graph =
+      Map.new(valid_jobs, fn job ->
+        {Map.get(job, "job_id"), Map.get(job, "depends_on", [])}
+      end)
 
     cycle_errors =
-      if Enum.any?(Map.keys(parents), &cycle_from?(&1, parents, MapSet.new())),
-        do: [error("jobs.parent_job_id", "cycle")],
+      if Enum.any?(Map.keys(graph), &dependency_cycle_from?(&1, graph, MapSet.new())),
+        do: [error("jobs.depends_on", "cycle")],
         else: []
 
-    duplicate_errors(job_ids, "jobs.job_id") ++ parent_errors ++ cycle_errors
+    duplicate_errors(job_ids, "jobs.job_id") ++ depends_on_errors ++ cycle_errors
   end
 
   defp validate_batch_job(job, index) when is_map(job) do
@@ -447,7 +448,7 @@ defmodule Omashiki.Jobs.Contract.V1 do
     )
     |> validate_nonempty(job, ~w(ref idempotency_key environment))
     |> validate_optional_nonempty(job, "repo")
-    |> validate_optional_nonempty(job, "parent_ref")
+    |> validate_depends_on(job)
     |> validate_priority(job)
     |> validate_payload(job, "payload")
     |> prefix_errors(prefix)
@@ -463,8 +464,8 @@ defmodule Omashiki.Jobs.Contract.V1 do
 
     duplicate_errors(refs, "jobs.ref") ++
       duplicate_errors(idempotency_keys, "jobs.idempotency_key") ++
-      parent_errors(valid_jobs, ref_set) ++
-      cycle_errors(valid_jobs)
+      depends_on_errors(valid_jobs, ref_set) ++
+      batch_cycle_errors(valid_jobs)
   end
 
   defp duplicate_errors(values, field) do
@@ -475,40 +476,99 @@ defmodule Omashiki.Jobs.Contract.V1 do
     |> Enum.map(fn _ -> error(field, "duplicate") end)
   end
 
-  defp parent_errors(jobs, ref_set) do
+  defp depends_on_errors(jobs, ref_set) do
     Enum.flat_map(jobs, fn job ->
       ref = Map.get(job, "ref")
-      parent = Map.get(job, "parent_ref")
 
-      cond do
-        not is_binary(parent) -> []
-        parent == ref -> [error("jobs.parent_ref", "self_parent")]
-        not MapSet.member?(ref_set, parent) -> [error("jobs.parent_ref", "unknown_ref")]
-        true -> []
-      end
+      Map.get(job, "depends_on", [])
+      |> Enum.flat_map(fn dep ->
+        base_errors =
+          cond do
+            not is_map(dep) ->
+              [error("jobs.depends_on", "object_required")]
+
+            is_binary(Map.get(dep, "ref")) and Map.get(dep, "ref") == ref ->
+              [error("jobs.depends_on", "self_dependency")]
+
+            is_binary(Map.get(dep, "ref")) and not MapSet.member?(ref_set, dep["ref"]) ->
+              [error("jobs.depends_on", "unknown_ref")]
+
+            is_binary(Map.get(dep, "id")) and is_binary(Map.get(dep, "ref")) ->
+              [error("jobs.depends_on", "id_or_ref_required")]
+
+            not (is_binary(Map.get(dep, "id")) or is_binary(Map.get(dep, "ref"))) ->
+              [error("jobs.depends_on", "id_or_ref_required")]
+
+            true ->
+              []
+          end
+
+        on_failure_errors =
+          case Map.get(dep, "on_failure") do
+            nil -> []
+            value when value in ~w(cancel block proceed) -> []
+            _ -> [error("jobs.depends_on.on_failure", "unsupported")]
+          end
+
+        base_errors ++ on_failure_errors
+      end)
     end)
   end
 
-  defp cycle_errors(jobs) do
-    parents =
+  defp batch_cycle_errors(jobs) do
+    graph =
       Map.new(jobs, fn job ->
-        {Map.get(job, "ref"), Map.get(job, "parent_ref")}
+        deps =
+          Map.get(job, "depends_on", [])
+          |> Enum.map(fn
+            %{"ref" => ref} -> ref
+            _ -> nil
+          end)
+          |> Enum.reject(&is_nil/1)
+
+        {Map.get(job, "ref"), deps}
       end)
 
-    if Enum.any?(Map.keys(parents), &cycle_from?(&1, parents, MapSet.new())) do
-      [error("jobs.parent_ref", "cycle")]
+    if Enum.any?(Map.keys(graph), &batch_cycle_from?(&1, graph, MapSet.new())) do
+      [error("jobs.depends_on", "cycle")]
     else
       []
     end
   end
 
-  defp cycle_from?(nil, _parents, _path), do: false
-
-  defp cycle_from?(ref, parents, path) do
+  defp batch_cycle_from?(ref, graph, path) do
     if MapSet.member?(path, ref) do
       true
     else
-      cycle_from?(Map.get(parents, ref), parents, MapSet.put(path, ref))
+      graph
+      |> Map.get(ref, [])
+      |> Enum.any?(&batch_cycle_from?(&1, graph, MapSet.put(path, ref)))
+    end
+  end
+
+  defp dependency_cycle_from?(job_id, graph, path) do
+    if MapSet.member?(path, job_id) do
+      true
+    else
+      graph
+      |> Map.get(job_id, [])
+      |> Enum.any?(&dependency_cycle_from?(&1, graph, MapSet.put(path, job_id)))
+    end
+  end
+
+
+  defp validate_depends_on(errors, job) do
+    case Map.fetch(job, "depends_on") do
+      :error ->
+        errors
+
+      {:ok, deps} when is_list(deps) ->
+        Enum.reduce(deps, errors, fn dep, acc ->
+          if is_map(dep), do: acc, else: [error("depends_on", "object_required") | acc]
+        end)
+
+      {:ok, _} ->
+        [error("depends_on", "array_required") | errors]
     end
   end
 
@@ -575,10 +635,10 @@ defmodule Omashiki.Jobs.Contract.V1 do
     end
   end
 
-  defp validate_parent_status_shape(errors, attrs) do
-    case {Map.get(attrs, "status"), Map.has_key?(attrs, "parent_job_id")} do
-      {"blocked", false} -> [error("parent_job_id", "required_when_blocked") | errors]
-      {"queued", true} -> [error("parent_job_id", "not_allowed_when_queued") | errors]
+  defp validate_blocked_status_shape(errors, attrs) do
+    case {Map.get(attrs, "status"), Map.get(attrs, "depends_on") || []} do
+      {"blocked", []} -> [error("depends_on", "required_when_blocked") | errors]
+      {"queued", deps} when deps != [] -> [error("depends_on", "not_allowed_when_queued") | errors]
       _ -> errors
     end
   end
@@ -606,10 +666,10 @@ defmodule Omashiki.Jobs.Contract.V1 do
           is_integer(from_attempt) and retry_allowed?(from) and to == "queued" and
             to_attempt == from_attempt + 1
 
-        "parent_succeeded" ->
+        "dependency_satisfied" ->
           from == "blocked" and to == "queued" and to_attempt == from_attempt and
-            Map.get(attrs, "parent_status") == "succeeded" and
-            Map.get(attrs, "parent_job_id") != Map.get(attrs, "job_id")
+            is_list(Map.get(attrs, "depends_on")) and Map.get(attrs, "depends_on") != [] and
+            not Enum.member?(Map.get(attrs, "depends_on") || [], Map.get(attrs, "job_id"))
 
         _ ->
           false
@@ -617,14 +677,13 @@ defmodule Omashiki.Jobs.Contract.V1 do
 
     errors = if valid?, do: errors, else: [error("$", "invalid_transition") | errors]
 
-    if operation == "parent_succeeded" do
+    if operation == "dependency_satisfied" do
       errors
-      |> require_present(attrs, ~w(parent_job_id parent_status unlock_event_id))
-      |> validate_uuid(attrs, "parent_job_id")
-      |> validate_inclusion(attrs, "parent_status", ["succeeded"])
+      |> require_present(attrs, ~w(depends_on unlock_event_id))
       |> validate_uuid(attrs, "unlock_event_id")
+      |> validate_depends_on_ids(attrs, "depends_on")
     else
-      forbid_present(errors, attrs, ~w(parent_job_id parent_status unlock_event_id))
+      forbid_present(errors, attrs, ~w(depends_on unlock_event_id))
     end
   end
 
@@ -750,6 +809,25 @@ defmodule Omashiki.Jobs.Contract.V1 do
     end
   end
 
+
+  defp validate_depends_on_ids(errors, attrs, key) do
+    case Map.fetch(attrs, key) do
+      {:ok, ids} when is_list(ids) ->
+        Enum.reduce(ids, errors, fn id, acc ->
+          case Ecto.UUID.cast(id) do
+            {:ok, _} -> acc
+            :error -> [error("#{key}", "uuid_required") | acc]
+          end
+        end)
+
+      {:ok, _} ->
+        [error(key, "array_required") | errors]
+
+      :error ->
+        errors
+    end
+  end
+
   defp validate_observation_data(errors, attrs) do
     case {Map.get(attrs, "type"), Map.fetch(attrs, "data")} do
       {type, {:ok, data}} when is_map(data) and type in @event_types ->
@@ -762,6 +840,14 @@ defmodule Omashiki.Jobs.Contract.V1 do
 
             key == "retry" and not is_boolean(value) ->
               [error("data.retry", "boolean_required") | acc]
+
+            key == "depends_on" and not is_list(value) ->
+              [error("data.depends_on", "array_required") | acc]
+
+            key == "depends_on" ->
+              if Enum.all?(value, &match?({:ok, _}, Ecto.UUID.cast(&1))),
+                do: acc,
+                else: [error("data.depends_on", "uuid_required") | acc]
 
             key != "retry" and not is_binary(value) ->
               [error("data.#{key}", "string_required") | acc]
@@ -789,17 +875,17 @@ defmodule Omashiki.Jobs.Contract.V1 do
 
       type == "job.blocked" ->
         errors
-        |> require_present(data, ["parent_job_id"])
-        |> validate_uuid(data, "parent_job_id")
+        |> require_present(data, ["depends_on"])
+        |> validate_depends_on_ids(data, "depends_on")
 
-      type == "job.queued" and Map.has_key?(data, "parent_job_id") ->
+      type == "job.queued" and Map.has_key?(data, "depends_on") ->
         errors
         |> require_present(data, ["unlock_event_id"])
-        |> validate_uuid(data, "parent_job_id")
+        |> validate_depends_on_ids(data, "depends_on")
         |> validate_uuid(data, "unlock_event_id")
 
       type == "job.queued" and Map.has_key?(data, "unlock_event_id") ->
-        [error("data.parent_job_id", "required") | errors]
+        [error("data.depends_on", "required") | errors]
 
       true ->
         errors
@@ -877,7 +963,7 @@ defmodule Omashiki.Jobs.Contract.V1 do
     blocked_data = Map.fetch!(blocked_event, "data")
     queued_data = Map.fetch!(queued_event, "data")
 
-    Map.get(blocked_data, "parent_job_id") == Map.get(queued_data, "parent_job_id") and
+    Map.get(blocked_data, "depends_on") == Map.get(queued_data, "depends_on") and
       match?({:ok, _}, Ecto.UUID.cast(Map.get(queued_data, "unlock_event_id")))
   end
 
@@ -888,13 +974,18 @@ defmodule Omashiki.Jobs.Contract.V1 do
     |> Enum.filter(&(Map.fetch!(&1, "status") == "queued"))
     |> Enum.flat_map(fn event ->
       data = Map.fetch!(event, "data")
-      parent_job_id = Map.get(data, "parent_job_id")
+      depends_on = Map.get(data, "depends_on", [])
       unlock_event_id = Map.get(data, "unlock_event_id")
 
-      if is_binary(parent_job_id) do
+      if depends_on != [] do
         case Map.get(events_by_id, unlock_event_id) do
-          %{"job_id" => ^parent_job_id, "status" => "succeeded"} -> []
-          _ -> [error("events.data.unlock_event_id", "parent_success_event_required")]
+          %{"job_id" => dep_id, "status" => "succeeded"} ->
+            if Enum.member?(depends_on, dep_id),
+              do: [],
+              else: [error("events.data.unlock_event_id", "dependency_success_event_required")]
+
+          _ ->
+            [error("events.data.unlock_event_id", "dependency_success_event_required")]
         end
       else
         []

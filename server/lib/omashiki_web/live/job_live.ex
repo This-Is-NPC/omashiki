@@ -152,8 +152,8 @@ defmodule OmashikiWeb.JobLive do
             <dt class="text-on-surface-variant">environment</dt><dd class="truncate text-right text-on-surface">
               {@detail.job.environment}
             </dd>
-            <dt class="text-on-surface-variant">parent</dt><dd class="truncate text-right text-on-surface">
-              {if @detail.parent, do: @detail.parent.id, else: "none"}
+            <dt class="text-on-surface-variant">depends on</dt><dd class="truncate text-right text-on-surface">
+              {dependency_summary(@detail.dependencies)}
             </dd>
             <dt class="text-on-surface-variant">attempt</dt><dd class="text-right text-on-surface">
               {@detail.job.current_attempt}
@@ -306,4 +306,12 @@ defmodule OmashikiWeb.JobLive do
 
   defp format_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp format_reason(reason), do: inspect(reason)
+
+  defp dependency_summary([]), do: "none"
+
+  defp dependency_summary(deps) do
+    deps
+    |> Enum.map(& &1.depends_on_job_id)
+    |> Enum.join(", ")
+  end
 end

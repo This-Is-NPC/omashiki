@@ -162,7 +162,7 @@ defmodule OmashikiWeb.Api.JobsController do
       priority: job.priority,
       status: job.status,
       attempt: job.current_attempt,
-      parent_job_id: job.parent_job_id,
+      depends_on: depends_on_ids(job),
       submitted_at: iso(job.inserted_at),
       queued_at: iso(job.queued_at),
       started_at: iso(job.started_at),
@@ -183,6 +183,15 @@ defmodule OmashikiWeb.Api.JobsController do
       error: attempt.error || job.terminal_error,
       finished_at: iso(job.finished_at)
     }
+  end
+
+  defp depends_on_ids(%Job{id: job_id}) do
+    alias Omashiki.Jobs.JobDependency
+    alias Omashiki.Repo
+    import Ecto.Query
+
+    from(d in JobDependency, where: d.job_id == ^job_id, select: d.depends_on_job_id)
+    |> Omashiki.Repo.all()
   end
 
   defp iso(nil), do: nil

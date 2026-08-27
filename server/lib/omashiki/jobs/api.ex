@@ -5,7 +5,7 @@ defmodule Omashiki.Jobs.Api do
 
   alias Omashiki.Accounts.User
   alias Omashiki.ApiTokens.Token
-  alias Omashiki.Jobs.{Job, JobAttempt, JobEvent, JobStep, WebhookDelivery}
+  alias Omashiki.Jobs.{Job, JobAttempt, JobDependency, JobEvent, JobStep, WebhookDelivery}
   alias Omashiki.Repo
   alias Omashiki.UsageLedger.Entry
 
@@ -116,7 +116,7 @@ defmodule Omashiki.Jobs.Api do
       {:ok,
        %{
          job: job,
-         parent: parent(job, user),
+         dependencies: dependencies(job),
          attempts: attempts,
          steps: steps,
          events: events,
@@ -164,13 +164,12 @@ defmodule Omashiki.Jobs.Api do
     |> Repo.all()
   end
 
-  defp parent(%Job{parent_job_id: nil}, _user), do: nil
-
-  defp parent(%Job{parent_job_id: parent_id}, %User{} = user) do
-    case Repo.get_by(Job, id: parent_id, user_id: user.id) do
-      %Job{} = job -> job
-      nil -> nil
-    end
+  defp dependencies(%Job{id: job_id}) do
+    from(d in JobDependency,
+      where: d.job_id == ^job_id,
+      select: %{depends_on_job_id: d.depends_on_job_id, on_failure: d.on_failure}
+    )
+    |> Repo.all()
   end
 
   def authorize(%Job{} = job, %Token{id: token_id, user_id: user_id}) do

@@ -9,7 +9,7 @@ defmodule Omashiki.Jobs.Admission do
   alias Omashiki.ApiTokens.Token
   alias Omashiki.Config
   alias Omashiki.Config.Rollout
-  alias Omashiki.Jobs.{DispatchWorker, Job, JobAttempt, JobEvent}
+  alias Omashiki.Jobs.{DispatchWorker, Job, JobAttempt, JobDependency, JobEvent}
   alias Omashiki.Jobs.Contract.V1
   alias Omashiki.Repo
 
@@ -164,17 +164,24 @@ defmodule Omashiki.Jobs.Admission do
   defp insert_single(user_id, token_id, request, resolved) do
     result =
       Repo.transaction(fn ->
-        attrs = job_attrs(user_id, token_id, request, resolved, nil)
+        case resolve_depends_on(user_id, request, %{}, nil) do
+          {:ok, edges} ->
+            attrs = job_attrs(user_id, token_id, request, resolved, edges)
 
-        case insert_job(attrs) do
-          {:ok, job} ->
-            persist_effects(job)
-            job
+            case insert_job(attrs) do
+              {:ok, job} ->
+                insert_dependencies!(job, edges)
+                persist_effects(job, edges)
+                job
 
-          {:error, changeset} ->
-            if unique_idempotency_error?(changeset),
-              do: Repo.rollback(:duplicate_idempotency),
-              else: Repo.rollback({:persistence, changeset})
+              {:error, changeset} ->
+                if unique_idempotency_error?(changeset),
+                  do: Repo.rollback(:duplicate_idempotency),
+                  else: Repo.rollback({:persistence, changeset})
+            end
+
+          {:error, reason} ->
+            Repo.rollback(reason)
         end
       end)
 
@@ -279,48 +286,113 @@ defmodule Omashiki.Jobs.Admission do
             )
 
           nil ->
-            parent_id = parent_id(item.request, jobs_by_ref)
             request = Map.put(item.request, "correlation_id", correlation_id)
-            attrs = job_attrs(user_id, token_id, request, item.resolved, parent_id)
 
-            case insert_job(attrs) do
-              {:ok, job} ->
-                persist_effects(job)
+            case resolve_depends_on(user_id, request, jobs_by_ref, item.request["ref"]) do
+              {:ok, edges} ->
+                attrs = job_attrs(user_id, token_id, request, item.resolved, edges)
 
-                insert_batch_items(
-                  user_id,
-                  token_id,
-                  correlation_id,
-                  remaining,
-                  Map.put(jobs_by_ref, item.request["ref"], job)
-                )
+                case insert_job(attrs) do
+                  {:ok, job} ->
+                    insert_dependencies!(job, edges)
+                    persist_effects(job, edges)
 
-              {:error, changeset} ->
-                if unique_idempotency_error?(changeset),
-                  do: Repo.rollback(:duplicate_idempotency),
-                  else: Repo.rollback({:persistence, changeset})
+                    insert_batch_items(
+                      user_id,
+                      token_id,
+                      correlation_id,
+                      remaining,
+                      Map.put(jobs_by_ref, item.request["ref"], job)
+                    )
+
+                  {:error, changeset} ->
+                    if unique_idempotency_error?(changeset),
+                      do: Repo.rollback(:duplicate_idempotency),
+                      else: Repo.rollback({:persistence, changeset})
+                end
+
+              {:error, reason} ->
+                Repo.rollback(reason)
             end
         end
     end
   end
 
-  defp ready_for_insert?(%{request: %{"parent_ref" => parent_ref}}, jobs_by_ref),
-    do: Map.has_key?(jobs_by_ref, parent_ref)
+  defp ready_for_insert?(%{request: request}, jobs_by_ref) do
+    depends_on = Map.get(request, "depends_on", [])
 
-  defp ready_for_insert?(%{request: request}, _jobs_by_ref),
-    do: not Map.has_key?(request, "parent_ref")
+    Enum.all?(depends_on, fn dep ->
+      cond do
+        is_map(dep) and is_binary(Map.get(dep, "ref")) ->
+          Map.has_key?(jobs_by_ref, dep["ref"])
 
-  defp parent_id(%{"parent_ref" => parent_ref}, jobs_by_ref), do: jobs_by_ref[parent_ref].id
-  defp parent_id(_, _), do: nil
+        is_map(dep) and is_binary(Map.get(dep, "id")) ->
+          true
 
-  defp job_attrs(user_id, token_id, request, resolved, parent_id) do
-    status = if is_nil(parent_id), do: "queued", else: "blocked"
+        true ->
+          false
+      end
+    end)
+  end
+
+  defp resolve_depends_on(user_id, request, jobs_by_ref, self_ref \\ nil) do
+    depends_on = Map.get(request, "depends_on", [])
+
+    edges =
+      Enum.map(depends_on, fn dep ->
+        dep_id =
+          cond do
+            is_binary(Map.get(dep, "ref")) -> jobs_by_ref[dep["ref"]].id
+            is_binary(Map.get(dep, "id")) -> dep["id"]
+          end
+
+        {dep_id, Map.get(dep, "on_failure", "cancel")}
+      end)
+
+    dep_jobs =
+      if edges == [] do
+        %{}
+      else
+        ids = Enum.map(edges, fn {id, _} -> id end)
+
+        from(j in Job, where: j.id in ^ids and j.user_id == ^user_id)
+        |> Repo.all()
+        |> Map.new(&{&1.id, &1})
+      end
+
+    cond do
+      Enum.any?(edges, fn {id, _} -> not Map.has_key?(dep_jobs, id) end) ->
+        {:error, :unknown_dependency}
+
+      not is_nil(self_ref) and
+          Enum.any?(depends_on, fn dep -> Map.get(dep, "ref") == self_ref end) ->
+        {:error, :self_dependency}
+
+      true ->
+        {:ok, edges}
+    end
+  end
+
+  defp initial_status([]), do: "queued"
+
+  defp initial_status(edges) do
+    ids = Enum.map(edges, fn {id, _} -> id end)
+
+    deps =
+      from(j in Job, where: j.id in ^ids)
+      |> Repo.all()
+
+    if Enum.all?(deps, &(&1.status == "succeeded")), do: "queued", else: "blocked"
+  end
+
+  defp job_attrs(user_id, token_id, request, resolved, edges) do
+    status = initial_status(edges)
     now = DateTime.utc_now(:microsecond)
+    repository = maybe_put_git_base(resolved.repository, request)
 
     %{
       user_id: user_id,
       api_token_id: token_id,
-      parent_job_id: parent_id,
       schema_version: 1,
       idempotency_key: request["idempotency_key"],
       correlation_id: request["correlation_id"],
@@ -328,7 +400,7 @@ defmodule Omashiki.Jobs.Admission do
       environment: request["environment"],
       payload: request["payload"],
       payload_hash: digest_payload(request["payload"]),
-      admitted_repository: resolved.repository,
+      admitted_repository: repository,
       admitted_repository_digest: resolved.admitted_repository_digest,
       admitted_environment: resolved.environment,
       admitted_environment_digest: resolved.admitted_environment_digest,
@@ -341,6 +413,37 @@ defmodule Omashiki.Jobs.Admission do
       current_attempt: 1,
       queued_at: if(status == "queued", do: now)
     }
+  end
+
+  defp maybe_put_git_base(nil, _request), do: nil
+
+  defp maybe_put_git_base(repository, request) when is_map(repository) do
+    case Map.get(request, "base") do
+      base when is_binary(base) -> Map.put(repository, "base", base)
+      _ -> repository
+    end
+  end
+
+  defp insert_dependencies!(%Job{} = job, edges) do
+    Enum.each(edges, fn {depends_on_job_id, on_failure} ->
+      case %JobDependency{}
+           |> JobDependency.changeset(%{
+             job_id: job.id,
+             depends_on_job_id: depends_on_job_id,
+             user_id: job.user_id,
+             on_failure: on_failure
+           })
+           |> Repo.insert() do
+        {:ok, _} -> :ok
+        {:error, changeset} -> Repo.rollback({:persistence, changeset})
+      end
+    end)
+  end
+
+  defp blocked_event_data([]), do: %{}
+
+  defp blocked_event_data(edges) do
+    %{"depends_on" => Enum.map(edges, fn {id, _} -> id end)}
   end
 
   defp digest_payload(payload) do
@@ -356,12 +459,12 @@ defmodule Omashiki.Jobs.Admission do
     |> Repo.insert()
   end
 
-  defp persist_effects(%Job{} = job) do
+  defp persist_effects(%Job{} = job, edges) do
     status = job.status
     now = DateTime.utc_now(:microsecond)
 
     insert_attempt!(job, status)
-    insert_event!(job, status, now)
+    insert_event!(job, status, now, edges)
 
     if status == "queued" do
       case Oban.insert(
@@ -386,8 +489,8 @@ defmodule Omashiki.Jobs.Admission do
     end
   end
 
-  defp insert_event!(job, status, now) do
-    data = if status == "blocked", do: %{"parent_job_id" => job.parent_job_id}, else: %{}
+  defp insert_event!(job, status, now, edges) do
+    data = if status == "blocked", do: blocked_event_data(edges), else: %{}
 
     case %JobEvent{}
          |> JobEvent.changeset(%{
