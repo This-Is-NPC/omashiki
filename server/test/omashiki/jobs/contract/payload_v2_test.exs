@@ -22,4 +22,23 @@ defmodule Omashiki.Jobs.Contract.Payload.V2Test do
     assert {:error, errors} = V2.validate(%{"instruction" => "run", "context" => [1, 2]})
     assert %{field: "payload.context", code: "object_required"} in errors
   end
+
+  test "accepts optional branch and title fields" do
+    assert {:ok, payload} =
+             V2.validate(%{
+               "instruction" => "run",
+               "branch" => "feat/foo",
+               "title" => "ignored when branch present"
+             })
+
+    assert payload["branch"] == "feat/foo"
+  end
+
+  test "rejects invalid branch and title shapes" do
+    assert {:error, errors} = V2.validate(%{"instruction" => "run", "branch" => "../bad"})
+    assert %{field: "payload.branch", code: "invalid_branch"} in errors
+
+    assert {:error, errors} = V2.validate(%{"instruction" => "run", "title" => "bad/slash"})
+    assert %{field: "payload.title", code: "invalid_title"} in errors
+  end
 end

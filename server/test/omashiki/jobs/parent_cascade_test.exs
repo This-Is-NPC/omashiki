@@ -9,7 +9,12 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
   alias Omashiki.Repo
 
   setup do
-    root = Path.join(System.tmp_dir!(), "omashiki-parent-cascade-#{System.unique_integer([:positive])}")
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "omashiki-parent-cascade-#{System.unique_integer([:positive])}"
+      )
+
     repo_path = Path.join(root, "repo")
     File.mkdir_p!(repo_path)
     {_, 0} = System.cmd("git", ["-C", repo_path, "init", "-q"])
@@ -85,10 +90,10 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
         "environments" => %{
           "safe" => %{
             "isolation" => "docker",
-          "image" => "omashiki/agent:latest",
-          "sink" => "git",
-          "packages" => [],
-          "preset" => "opencode",
+            "image" => "omashiki/agent:latest",
+            "sink" => "git",
+            "packages" => [],
+            "preset" => "opencode",
             "executables" => ["git"],
             "timeout_ms" => 1_000,
             "caches" => [],
@@ -119,7 +124,11 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
       "idempotency_key" => "cascade-#{ref}",
       "repo" => "app",
       "environment" => "safe",
-      "payload" => %{"instruction" => "run", "context" => %{"ref" => ref}},
+      "payload" => %{
+        "instruction" => "run",
+        "context" => %{"ref" => ref},
+        "branch" => "feat-batch-#{ref}"
+      },
       "priority" => 0
     }
 

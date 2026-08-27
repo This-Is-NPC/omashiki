@@ -17,13 +17,17 @@ defmodule Omashiki.JobFixtures do
           correlation_id: "corr-#{id}",
           repository: "omashiki",
           environment: "opencode",
-          payload: %{"instruction" => "test"},
+          payload: %{"instruction" => "test", "branch" => "feat-fixture"},
           payload_hash: String.duplicate("a", 64),
-          admitted_repository: %{"name" => "omashiki"},
+          admitted_repository: %{"name" => "omashiki", "task_branch" => "feat-fixture"},
           admitted_repository_digest: String.duplicate("b", 64),
           admitted_environment: %{"name" => "opencode", "sink" => "git"},
           admitted_environment_digest: String.duplicate("c", 64),
-          admitted_plugin: %{"path" => "plugins/opencode.toml", "contents" => "", "digest" => String.duplicate("e", 64)},
+          admitted_plugin: %{
+            "path" => "plugins/opencode.toml",
+            "contents" => "",
+            "digest" => String.duplicate("e", 64)
+          },
           admitted_plugin_digest: String.duplicate("e", 64),
           registry_digest: String.duplicate("d", 64),
           queue: "default",
@@ -53,7 +57,7 @@ defmodule Omashiki.JobFixtures do
       lease_expires_at:
         if(status in ~w(provisioning running), do: DateTime.add(now, 60, :second)),
       capacity_reserved: status in ~w(provisioning running),
-      branch: if(status == "succeeded", do: "omashiki/job-#{String.slice(job.id, 0, 8)}"),
+      branch: if(status == "succeeded", do: "feat-fixture-run-001"),
       base_sha: if(status == "succeeded", do: String.duplicate("1", 40)),
       head_sha: if(status == "succeeded", do: String.duplicate("2", 40)),
       worktree_clean: if(status == "succeeded", do: true)

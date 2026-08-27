@@ -701,10 +701,10 @@ defmodule Omashiki.Jobs.ClaimsTest do
         "environments" => %{
           "safe" => %{
             "isolation" => "docker",
-          "image" => "omashiki/agent:latest",
-          "sink" => "git",
-          "packages" => [],
-          "preset" => "opencode",
+            "image" => "omashiki/agent:latest",
+            "sink" => "git",
+            "packages" => [],
+            "preset" => "opencode",
             "executables" => ["git"],
             "timeout_ms" => 1_000,
             "caches" => [],
@@ -729,7 +729,11 @@ defmodule Omashiki.Jobs.ClaimsTest do
       "correlation_id" => "correlation-#{key}",
       "repo" => "app",
       "environment" => "safe",
-      "payload" => %{"instruction" => "run", "context" => %{"key" => key}},
+      "payload" => %{
+        "instruction" => "run",
+        "context" => %{"key" => key},
+        "branch" => "feat-#{key}"
+      },
       "priority" => 0
     }
   end
@@ -748,7 +752,11 @@ defmodule Omashiki.Jobs.ClaimsTest do
       "idempotency_key" => "batch-#{ref}",
       "repo" => "app",
       "environment" => "safe",
-      "payload" => %{"instruction" => "run", "context" => %{"ref" => ref}},
+      "payload" => %{
+        "instruction" => "run",
+        "context" => %{"ref" => ref},
+        "branch" => "feat-batch-#{ref}"
+      },
       "priority" => 0
     }
 

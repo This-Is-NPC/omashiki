@@ -113,6 +113,7 @@ defmodule Omashiki.Jobs.SinkTest do
 
   test "validate still fails files sink on secret in blob" do
     job = %Job{id: Ecto.UUID.generate(), current_attempt: 1}
+
     {:ok, %{artifact: artifact}} =
       WorkArtifact.provision(job, "files", [], fn _artifact -> {:ok, %{}} end)
 
@@ -189,7 +190,7 @@ defmodule Omashiki.Jobs.SinkTest do
       "idempotency_key" => "sink-#{System.unique_integer([:positive])}",
       "correlation_id" => "sink-workflow",
       "environment" => environment,
-      "payload" => %{"instruction" => "run"},
+      "payload" => %{"instruction" => "run", "branch" => "feat-test"},
       "priority" => 1
     }
     |> maybe_put("repo", repo)

@@ -33,10 +33,10 @@ defmodule Omashiki.Integration.QueueLoadTest do
         "environments" => %{
           "none" => %{
             "isolation" => "docker",
-          "image" => "omashiki/agent:latest",
-          "sink" => "git",
-          "packages" => [],
-          "preset" => "opencode",
+            "image" => "omashiki/agent:latest",
+            "sink" => "git",
+            "packages" => [],
+            "preset" => "opencode",
             "executables" => ["git"],
             "pre_steps" => [],
             "post_steps" => [],
@@ -129,7 +129,11 @@ defmodule Omashiki.Integration.QueueLoadTest do
       "idempotency_key" => "load-#{number}",
       "repo" => "app",
       "environment" => "none",
-      "payload" => %{"instruction" => "load #{number}", "context" => %{"number" => number}},
+      "payload" => %{
+        "instruction" => "load #{number}",
+        "context" => %{"number" => number},
+        "branch" => "feat-load-#{number}"
+      },
       "priority" => rem(number, 4)
     }
   end

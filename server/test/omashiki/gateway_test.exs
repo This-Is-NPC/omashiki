@@ -356,7 +356,8 @@ defmodule Omashiki.GatewayTest do
     end
 
     test "a stale environment digest gets 403", %{job: job, credential_name: name} do
-      claims = claims(job, name) |> Map.put("admitted_environment_digest", String.duplicate("f", 64))
+      claims =
+        claims(job, name) |> Map.put("admitted_environment_digest", String.duplicate("f", 64))
 
       assert {:error, %{status: 403, error: %{message: "environment_changed"}}} =
                Gateway.chat_completions(%{"messages" => []}, claims)
@@ -857,7 +858,11 @@ defmodule Omashiki.GatewayTest do
         "credentials" => entries
       },
       admitted_environment_digest: String.duplicate("c", 64),
-      admitted_plugin: %{"path" => "plugins/opencode.toml", "contents" => "", "digest" => String.duplicate("e", 64)},
+      admitted_plugin: %{
+        "path" => "plugins/opencode.toml",
+        "contents" => "",
+        "digest" => String.duplicate("e", 64)
+      },
       admitted_plugin_digest: String.duplicate("e", 64),
       registry_digest: String.duplicate("d", 64),
       queue: "default",
@@ -931,7 +936,11 @@ defmodule Omashiki.GatewayTest do
         "credentials" => Enum.map(credential_names, &%{"name" => &1})
       },
       admitted_environment_digest: String.duplicate("c", 64),
-      admitted_plugin: %{"path" => "plugins/opencode.toml", "contents" => "", "digest" => String.duplicate("e", 64)},
+      admitted_plugin: %{
+        "path" => "plugins/opencode.toml",
+        "contents" => "",
+        "digest" => String.duplicate("e", 64)
+      },
       admitted_plugin_digest: String.duplicate("e", 64),
       registry_digest: String.duplicate("d", 64),
       queue: "default",

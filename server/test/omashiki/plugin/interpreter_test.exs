@@ -22,7 +22,11 @@ defmodule Omashiki.Plugin.InterpreterTest do
 
   test "rejects unknown template variables at parse time" do
     path = Path.join(System.tmp_dir!(), "bad-plugin-#{System.unique_integer([:positive])}.toml")
-    File.write!(path, "transport = \"cli\"\n[[option_argv]]\nappend = [\"{{not_allowed}}\"]\n[output]\nshape = \"object\"\ntext = \"text\"\n")
+
+    File.write!(
+      path,
+      "transport = \"cli\"\n[[option_argv]]\nappend = [\"{{not_allowed}}\"]\n[output]\nshape = \"object\"\ntext = \"text\"\n"
+    )
 
     try do
       assert_raise Omashiki.Config.Error, ~r/unknown template variable/, fn ->
@@ -37,7 +41,9 @@ defmodule Omashiki.Plugin.InterpreterTest do
     preset = preset(manifest, %{})
     context = cli_context(preset, %{exit_code: 0, stdout: jcode_object_stdout()})
 
-    assert {:ok, result} = Interpreter.invoke(%Invocation{instruction: "say hi", context: nil}, context)
+    assert {:ok, result} =
+             Interpreter.invoke(%Invocation{instruction: "say hi", context: nil}, context)
+
     assert result.assistant_text == "HELLO"
     assert result.input_tokens == 12_331
     assert result.output_tokens == 16
@@ -50,7 +56,9 @@ defmodule Omashiki.Plugin.InterpreterTest do
     preset = preset(manifest, %{})
     context = cli_context(preset, %{exit_code: 0, stdout: pi_agent_end_stream()})
 
-    assert {:ok, result} = Interpreter.invoke(%Invocation{instruction: "say hi", context: nil}, context)
+    assert {:ok, result} =
+             Interpreter.invoke(%Invocation{instruction: "say hi", context: nil}, context)
+
     assert result.assistant_text == "HELLO"
     assert result.input_tokens == 900
     assert result.output_tokens == 60
@@ -94,7 +102,9 @@ defmodule Omashiki.Plugin.InterpreterTest do
 
     context = cli_context(preset, %{exit_code: 0, stdout: stdout})
 
-    assert {:ok, result} = Interpreter.invoke(%Invocation{instruction: "run", context: nil}, context)
+    assert {:ok, result} =
+             Interpreter.invoke(%Invocation{instruction: "run", context: nil}, context)
+
     assert result.assistant_text == "created"
     assert result.input_tokens == 11
     assert result.output_tokens == 7
@@ -126,7 +136,9 @@ defmodule Omashiki.Plugin.InterpreterTest do
 
     context = cli_context(preset, %{exit_code: 0, stdout: stdout})
 
-    assert {:ok, result} = Interpreter.invoke(%Invocation{instruction: "run", context: nil}, context)
+    assert {:ok, result} =
+             Interpreter.invoke(%Invocation{instruction: "run", context: nil}, context)
+
     assert result.assistant_text == "created"
     assert result.input_tokens == 14_486
     assert result.output_tokens == 6
@@ -138,7 +150,9 @@ defmodule Omashiki.Plugin.InterpreterTest do
 
   test "validate_options callback enforces manifest option schema", %{manifest: manifest} do
     assert :ok = Interpreter.validate_options(manifest, %{})
-    assert {:error, {:unknown_options, ["bogus"]}} = Interpreter.validate_options(manifest, %{"bogus" => true})
+
+    assert {:error, {:unknown_options, ["bogus"]}} =
+             Interpreter.validate_options(manifest, %{"bogus" => true})
   end
 
   test "expands list option_argv with {{item}} for claude-code", %{plugins: plugins} do

@@ -169,7 +169,9 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     assert Jobs.cluster_capacity() == %{capacity: 20, active: 0}
   end
 
-  test "sync_capacity retains a phantom row while it still holds active reservations", %{root: root} do
+  test "sync_capacity retains a phantom row while it still holds active reservations", %{
+    root: root
+  } do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     Repo.insert!(%ExecutionCapacity{
@@ -185,7 +187,6 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     assert row("local").active == 3
     assert Jobs.cluster_capacity() == %{capacity: 24, active: 3}
   end
-
 
   # DONE WHEN, parts two and three. This is the assertion the whole node-identity
   # phase was ordered for: `recover_stale/1` runs on *every* node, so the machine
@@ -359,10 +360,10 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
         "environments" => %{
           "safe" => %{
             "isolation" => "docker",
-          "image" => "omashiki/agent:latest",
-          "sink" => "git",
-          "packages" => [],
-          "preset" => "opencode",
+            "image" => "omashiki/agent:latest",
+            "sink" => "git",
+            "packages" => [],
+            "preset" => "opencode",
             "executables" => ["git"],
             "timeout_ms" => 1_000,
             "caches" => [],
@@ -387,7 +388,11 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
       "correlation_id" => "correlation-#{key}",
       "repo" => "app",
       "environment" => "safe",
-      "payload" => %{"instruction" => "run", "context" => %{"key" => key}},
+      "payload" => %{
+        "instruction" => "run",
+        "context" => %{"key" => key},
+        "branch" => "feat-#{key}"
+      },
       "priority" => 0
     }
   end

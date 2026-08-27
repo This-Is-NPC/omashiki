@@ -25,7 +25,6 @@ defmodule Omashiki.Config.RegistryTest do
     %{root: root, repo: repo, mount: mount}
   end
 
-
   test "rejects legacy harnesses section at config load", ctx do
     invalid = Map.put(fixture(ctx), "harnesses", %{"opencode" => %{}}) |> Map.delete("presets")
 

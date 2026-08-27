@@ -83,10 +83,12 @@ defmodule Omashiki.Jobs.DispatchWorkerTest do
   setup do
     user = user_fixture()
     {token, _plaintext} = api_token_fixture(user)
+
     on_exit(fn ->
       Application.delete_env(:omashiki, :dispatch_attempt_runner)
       Application.delete_env(:omashiki, :jobs_runner)
     end)
+
     {:ok, user: user, token: token}
   end
 

@@ -1,7 +1,7 @@
 defmodule Omashiki.Jobs.GitArtifactTest do
   use ExUnit.Case, async: false
 
-  alias Omashiki.Jobs.{GitArtifact, Job}
+  alias Omashiki.Jobs.{GitArtifact, Job, JobAttempt}
 
   setup do
     root =
@@ -12,19 +12,32 @@ defmodule Omashiki.Jobs.GitArtifactTest do
     git!(repo, ["init", "-q", "-b", "main"])
     git!(repo, ["commit", "--allow-empty", "-q", "-m", "init"], identity_env())
 
+    task_branch = "feat-fix"
+    job_id = "job-#{System.unique_integer([:positive])}"
+
     job = %Job{
-      id: "job-#{System.unique_integer([:positive])}",
+      id: job_id,
       current_attempt: 2,
-      admitted_repository: %{"path" => repo, "base_branch" => "main"}
+      admitted_repository: %{
+        "path" => repo,
+        "base_branch" => "main",
+        "task_branch" => task_branch
+      }
     }
 
+    attempt = %JobAttempt{number: 2}
+
     on_exit(fn -> File.rm_rf!(root) end)
-    {:ok, root: root, job: job, repo: repo}
+    {:ok, root: root, job: job, attempt: attempt, repo: repo, task_branch: task_branch}
   end
 
-  test "captures base SHA and creates an isolated job worktree", %{job: job, repo: repo} do
-    assert {:ok, artifact} = GitArtifact.provision_worktree(job)
-    assert artifact.branch == "omashiki/job-#{job.id}"
+  test "captures base SHA and creates an isolated job worktree", %{
+    job: job,
+    repo: repo,
+    attempt: attempt
+  } do
+    assert {:ok, artifact} = GitArtifact.provision_worktree(job, attempt)
+    assert artifact.run_branch == "feat-fix-run-002"
     assert artifact.base_sha == git!(repo, ["rev-parse", "main"])
     assert File.dir?(artifact.path)
 
@@ -32,10 +45,14 @@ defmodule Omashiki.Jobs.GitArtifactTest do
     refute branch?(repo, artifact.branch)
   end
 
-  test "no-change output returns a clean reachable branch", %{job: job, repo: repo} do
-    {:ok, artifact} = GitArtifact.provision_worktree(job)
+  test "no-change output returns a clean reachable branch", %{
+    job: job,
+    repo: repo,
+    attempt: attempt
+  } do
+    {:ok, artifact} = GitArtifact.provision_worktree(job, attempt)
 
-    assert {:ok, result} = GitArtifact.finalize(artifact, job)
+    assert {:ok, result} = GitArtifact.finalize(artifact, job, update_task_branch: true)
     assert result.head_sha == artifact.base_sha
     assert result.worktree_clean
     assert branch?(repo, artifact.branch)
@@ -44,11 +61,15 @@ defmodule Omashiki.Jobs.GitArtifactTest do
     assert :ok = GitArtifact.cleanup(artifact)
   end
 
-  test "automatically commits safe dirty output with job metadata", %{job: job, repo: repo} do
-    {:ok, artifact} = GitArtifact.provision_worktree(job)
+  test "automatically commits safe dirty output with job metadata", %{
+    job: job,
+    repo: repo,
+    attempt: attempt
+  } do
+    {:ok, artifact} = GitArtifact.provision_worktree(job, attempt)
     File.write!(Path.join(artifact.path, "README.md"), "generated\n")
 
-    assert {:ok, result} = GitArtifact.finalize(artifact, job)
+    assert {:ok, result} = GitArtifact.finalize(artifact, job, update_task_branch: true)
     assert result.head_sha != artifact.base_sha
 
     assert git!(repo, ["show", "-s", "--format=%s", artifact.branch]) ==
@@ -58,33 +79,49 @@ defmodule Omashiki.Jobs.GitArtifactTest do
     assert :ok = GitArtifact.cleanup(artifact)
   end
 
-  test "preserves an agent-created commit", %{job: job, repo: repo} do
-    {:ok, artifact} = GitArtifact.provision_worktree(job)
+  test "preserves an agent-created commit", %{job: job, repo: repo, attempt: attempt} do
+    {:ok, artifact} = GitArtifact.provision_worktree(job, attempt)
     File.write!(Path.join(artifact.path, "agent.txt"), "agent\n")
     git!(artifact.path, ["add", "agent.txt"])
     git!(artifact.path, ["commit", "-q", "-m", "agent commit"], identity_env())
     agent_head = git!(artifact.path, ["rev-parse", "HEAD"])
 
-    assert {:ok, %{head_sha: ^agent_head}} = GitArtifact.finalize(artifact, job)
+    assert {:ok, %{head_sha: ^agent_head}} =
+             GitArtifact.finalize(artifact, job, update_task_branch: true)
+
     assert git!(repo, ["rev-parse", artifact.branch]) == agent_head
     assert :ok = GitArtifact.cleanup(artifact)
   end
 
-  test "rejects protected paths and likely secrets without committing", %{job: job} do
-    {:ok, protected} = GitArtifact.provision_worktree(job)
+  test "rejects protected paths and likely secrets without committing", %{
+    job: job,
+    attempt: attempt
+  } do
+    {:ok, protected} = GitArtifact.provision_worktree(job, attempt)
     File.write!(Path.join(protected.path, ".env"), "SAFE=not-a-secret\n")
-    assert {:error, {:protected_path, ".env"}} = GitArtifact.finalize(protected, job)
+
+    assert {:error, {:protected_path, ".env"}} =
+             GitArtifact.finalize(protected, job, update_task_branch: true)
+
     assert :ok = GitArtifact.cleanup(protected)
 
-    secret_job = %{job | id: job.id <> "-secret"}
-    {:ok, secret} = GitArtifact.provision_worktree(secret_job)
+    secret_job = %{
+      job
+      | id: job.id <> "-secret",
+        admitted_repository: Map.put(job.admitted_repository, "task_branch", "feat-secret")
+    }
+
+    {:ok, secret} = GitArtifact.provision_worktree(secret_job, attempt)
     File.write!(Path.join(secret.path, "notes.txt"), "api_key=sk-live-1234567890\n")
-    assert {:error, {:likely_secret, "notes.txt"}} = GitArtifact.finalize(secret, secret_job)
+
+    assert {:error, {:likely_secret, "notes.txt"}} =
+             GitArtifact.finalize(secret, secret_job, update_task_branch: true)
+
     assert :ok = GitArtifact.cleanup(secret)
   end
 
-  test "rejects output over the automatic commit bound", %{job: job} do
-    {:ok, artifact} = GitArtifact.provision_worktree(job)
+  test "rejects output over the automatic commit bound", %{job: job, attempt: attempt} do
+    {:ok, artifact} = GitArtifact.provision_worktree(job, attempt)
     File.write!(Path.join(artifact.path, "large.bin"), String.duplicate("x", 32))
 
     assert {:error, {:oversized_output, 32, 16}} =
@@ -93,87 +130,110 @@ defmodule Omashiki.Jobs.GitArtifactTest do
     assert :ok = GitArtifact.cleanup(artifact)
   end
 
-  test "does not commit when a pre-commit hook fails", %{job: job} do
-    {:ok, artifact} = GitArtifact.provision_worktree(job)
+  test "does not commit when a pre-commit hook fails", %{job: job, attempt: attempt} do
+    {:ok, artifact} = GitArtifact.provision_worktree(job, attempt)
     File.write!(Path.join(artifact.path, "README.md"), "generated\n")
     install_hook!(artifact.repo_path, "#!/bin/sh\nexit 42\n")
 
-    assert {:error, {:commit_failed, _status, _output}} = GitArtifact.finalize(artifact, job)
+    assert {:error, {:commit_failed, _status, _output}} =
+             GitArtifact.finalize(artifact, job, update_task_branch: true)
+
     assert git!(artifact.path, ["rev-parse", "HEAD"]) == artifact.base_sha
     assert :ok = GitArtifact.cleanup(artifact)
   end
 
-  test "rejects output that remains dirty after the hook", %{job: job} do
-    {:ok, artifact} = GitArtifact.provision_worktree(job)
+  test "rejects output that remains dirty after the hook", %{job: job, attempt: attempt} do
+    {:ok, artifact} = GitArtifact.provision_worktree(job, attempt)
     File.write!(Path.join(artifact.path, "README.md"), "generated\n")
     install_hook!(artifact.repo_path, "#!/bin/sh\nprintf dirty > hook-dirty.txt\nexit 0\n")
 
-    assert {:error, :artifact_verification_failed} = GitArtifact.finalize(artifact, job)
+    assert {:error, :artifact_verification_failed} =
+             GitArtifact.finalize(artifact, job, update_task_branch: true)
+
     assert git!(artifact.path, ["rev-parse", "HEAD"]) == artifact.base_sha
     assert :ok = GitArtifact.cleanup(artifact)
   end
 
-  test "accepts output exactly at the 100 MiB automatic commit boundary", %{job: job} do
-    {:ok, artifact} = GitArtifact.provision_worktree(job)
+  test "accepts output exactly at the 100 MiB automatic commit boundary", %{
+    job: job,
+    attempt: attempt
+  } do
+    {:ok, artifact} = GitArtifact.provision_worktree(job, attempt)
     path = Path.join(artifact.path, "boundary.bin")
     {:ok, file} = File.open(path, [:write, :binary])
     {:ok, _position} = :file.position(file, {:bof, GitArtifact.max_bytes() - 1})
     :ok = IO.binwrite(file, "x")
     :ok = File.close(file)
 
-    assert {:ok, result} = GitArtifact.finalize(artifact, job)
+    assert {:ok, result} = GitArtifact.finalize(artifact, job, update_task_branch: true)
     assert result.head_sha != artifact.base_sha
     assert :ok = GitArtifact.cleanup(artifact)
   end
 
-  test "rejects symlink output before it can be committed", %{job: job} do
-    {:ok, artifact} = GitArtifact.provision_worktree(job)
+  test "rejects symlink output before it can be committed", %{job: job, attempt: attempt} do
+    {:ok, artifact} = GitArtifact.provision_worktree(job, attempt)
     outside = Path.join(System.tmp_dir!(), "omashiki-artifact-outside-#{System.unique_integer()}")
     File.write!(outside, "outside")
     File.ln_s!(outside, Path.join(artifact.path, "link"))
 
-    assert {:error, {:symlink_path, "link"}} = GitArtifact.finalize(artifact, job)
+    assert {:error, {:symlink_path, "link"}} =
+             GitArtifact.finalize(artifact, job, update_task_branch: true)
+
     assert :ok = GitArtifact.cleanup(artifact)
     File.rm!(outside)
   end
 
-  test "collision, cancellation, and callback failures clean up safely", %{job: job} do
-    {:ok, artifact} = GitArtifact.provision_worktree(job)
-    assert {:error, {:collision, _, _}} = GitArtifact.provision_worktree(job)
+  test "collision, cancellation, and callback failures clean up safely", %{
+    job: job,
+    attempt: attempt
+  } do
+    {:ok, artifact} = GitArtifact.provision_worktree(job, attempt)
+    assert {:error, {:collision, _, _}} = GitArtifact.provision_worktree(job, attempt)
     assert {:error, :cancelled} = GitArtifact.finalize(artifact, job, cancelled?: fn -> true end)
     assert :ok = GitArtifact.cleanup(artifact)
 
     cancelled_job = %{job | id: job.id <> "-cancelled"}
 
     assert {:error, :cancelled} =
-             GitArtifact.provision_worktree(cancelled_job, cancelled?: fn -> true end)
+             GitArtifact.provision_worktree(cancelled_job, attempt, cancelled?: fn -> true end)
 
     failed_job = %{job | id: job.id <> "-callback"}
 
     assert {:error, :container_failed} =
-             GitArtifact.provision(failed_job, [], fn _artifact -> {:error, :container_failed} end)
+             GitArtifact.provision(failed_job, attempt, [], fn _artifact ->
+               {:error, :container_failed}
+             end)
 
-    refute branch?(failed_job.admitted_repository["path"], "omashiki/job-#{failed_job.id}")
+    refute branch?(failed_job.admitted_repository["path"], "feat-fix-run-002")
   end
 
-  test "prunes expired successful branches but retains recent branches", %{job: job, repo: repo} do
-    {:ok, old} = GitArtifact.provision_worktree(job)
+  test "prunes expired successful branches but retains recent branches", %{
+    job: job,
+    repo: repo,
+    attempt: attempt
+  } do
+    {:ok, old} = GitArtifact.provision_worktree(job, attempt)
     old_date = "2000-01-01T00:00:00Z"
     git!(old.path, ["commit", "--allow-empty", "-q", "-m", "old"], identity_env(old_date))
-    assert {:ok, _} = GitArtifact.finalize(old, job)
+    assert {:ok, _} = GitArtifact.finalize(old, job, update_task_branch: true)
 
-    recent_job = %{job | id: job.id <> "-recent"}
-    {:ok, recent} = GitArtifact.provision_worktree(recent_job)
-    assert {:ok, _} = GitArtifact.finalize(recent, recent_job)
+    recent_job = %{
+      job
+      | id: job.id <> "-recent",
+        admitted_repository: Map.put(job.admitted_repository, "task_branch", "feat-recent")
+    }
+
+    {:ok, recent} = GitArtifact.provision_worktree(recent_job, attempt)
+    assert {:ok, _} = GitArtifact.finalize(recent, recent_job, update_task_branch: true)
     assert :ok = GitArtifact.cleanup(old, preserve_branch: true)
     assert :ok = GitArtifact.cleanup(recent, preserve_branch: true)
 
     assert {:ok, pruned} =
              GitArtifact.prune_expired(repo, cutoff: System.system_time(:second) - 1)
 
-    assert old.branch in pruned
-    refute recent.branch in pruned
-    assert branch?(repo, recent.branch)
+    assert old.run_branch in pruned
+    refute recent.run_branch in pruned
+    assert branch?(repo, recent.run_branch)
     assert :ok = GitArtifact.cleanup(recent)
   end
 
@@ -186,10 +246,10 @@ defmodule Omashiki.Jobs.GitArtifactTest do
       canonical = canonical_remote!(ctx)
       job = at_node(ctx.job, ctx.repo, canonical)
 
-      {:ok, artifact} = GitArtifact.provision_worktree(job)
+      {:ok, artifact} = GitArtifact.provision_worktree(job, ctx.attempt)
       File.write!(Path.join(artifact.path, "delivered.txt"), "artifact\n")
 
-      assert {:ok, result} = GitArtifact.finalize(artifact, job)
+      assert {:ok, result} = GitArtifact.finalize(artifact, job, update_task_branch: true)
       assert result.remote == canonical
       assert result.result["remote"] == canonical
 
@@ -209,19 +269,21 @@ defmodule Omashiki.Jobs.GitArtifactTest do
       first_job = at_node(ctx.job, ctx.repo, canonical)
       second_job = at_node(ctx.job, second_node, canonical)
 
-      {:ok, first} = GitArtifact.provision_worktree(first_job)
-      {:ok, second} = GitArtifact.provision_worktree(second_job)
-      assert first.branch == second.branch
+      attempt = ctx.attempt
+
+      {:ok, first} = GitArtifact.provision_worktree(first_job, attempt)
+      {:ok, second} = GitArtifact.provision_worktree(second_job, attempt)
+      assert first.run_branch == second.run_branch
 
       File.write!(Path.join(first.path, "out.txt"), "first node\n")
       File.write!(Path.join(second.path, "out.txt"), "second node\n")
 
-      assert {:ok, published} = GitArtifact.finalize(first, first_job)
+      assert {:ok, published} = GitArtifact.finalize(first, first_job, update_task_branch: true)
 
       assert {:error, {:collision, :remote, branch}} =
-               GitArtifact.finalize(second, second_job)
+               GitArtifact.finalize(second, second_job, update_task_branch: true)
 
-      assert branch == first.branch
+      assert branch == first.run_branch
       assert git!(canonical, ["rev-parse", "refs/heads/#{branch}"]) == published.head_sha
 
       assert :ok = GitArtifact.cleanup(first)
@@ -230,10 +292,20 @@ defmodule Omashiki.Jobs.GitArtifactTest do
 
     test "prunes an expired remote branch from a node that never held it locally", ctx do
       canonical = canonical_remote!(ctx)
+      attempt = ctx.attempt
       old_job = at_node(ctx.job, ctx.repo, canonical)
-      recent_job = at_node(%{ctx.job | id: ctx.job.id <> "-recent"}, ctx.repo, canonical)
 
-      {:ok, old} = GitArtifact.provision_worktree(old_job)
+      recent_job =
+        at_node(%{ctx.job | id: ctx.job.id <> "-recent"}, ctx.repo, canonical)
+        |> then(fn job ->
+          %{
+            job
+            | admitted_repository:
+                Map.put(job.admitted_repository, "task_branch", "feat-recent-remote")
+          }
+        end)
+
+      {:ok, old} = GitArtifact.provision_worktree(old_job, attempt)
 
       git!(
         old.path,
@@ -241,15 +313,15 @@ defmodule Omashiki.Jobs.GitArtifactTest do
         identity_env("2000-01-01T00:00:00Z")
       )
 
-      assert {:ok, _} = GitArtifact.finalize(old, old_job)
+      assert {:ok, _} = GitArtifact.finalize(old, old_job, update_task_branch: true)
       assert :ok = GitArtifact.cleanup(old)
 
-      {:ok, recent} = GitArtifact.provision_worktree(recent_job)
-      assert {:ok, _} = GitArtifact.finalize(recent, recent_job)
+      {:ok, recent} = GitArtifact.provision_worktree(recent_job, attempt)
+      assert {:ok, _} = GitArtifact.finalize(recent, recent_job, update_task_branch: true)
       assert :ok = GitArtifact.cleanup(recent)
 
       sweeper = clone!(ctx, canonical, "sweeper")
-      refute branch?(sweeper, old.branch)
+      refute branch?(sweeper, old.run_branch)
 
       assert {:ok, pruned} =
                GitArtifact.prune_expired(sweeper,
@@ -257,10 +329,67 @@ defmodule Omashiki.Jobs.GitArtifactTest do
                  cutoff: System.system_time(:second) - 1
                )
 
-      assert old.branch in pruned
-      refute recent.branch in pruned
-      refute branch?(canonical, old.branch)
-      assert branch?(canonical, recent.branch)
+      assert old.run_branch in pruned
+      refute recent.run_branch in pruned
+      refute branch?(canonical, old.run_branch)
+      assert branch?(canonical, recent.run_branch)
+    end
+  end
+
+  describe "task branch and run-NNN" do
+    test "two attempts create two run branches; task branch follows the succeeded head", %{
+      repo: repo,
+      task_branch: task_branch
+    } do
+      job = %Job{
+        id: "job-#{System.unique_integer([:positive])}",
+        current_attempt: 1,
+        admitted_repository: %{
+          "path" => repo,
+          "base_branch" => "main",
+          "task_branch" => task_branch
+        }
+      }
+
+      attempt1 = %JobAttempt{number: 1}
+      attempt2 = %JobAttempt{number: 2}
+
+      {:ok, first} = GitArtifact.provision_worktree(job, attempt1)
+      File.write!(Path.join(first.path, "run1.txt"), "one\n")
+      assert {:ok, _} = GitArtifact.finalize(first, job, update_task_branch: true)
+      first_head = git!(repo, ["rev-parse", task_branch])
+      assert :ok = GitArtifact.cleanup(first, preserve_branch: true)
+
+      job2 = %{job | current_attempt: 2}
+      {:ok, second} = GitArtifact.provision_worktree(job2, attempt2)
+      File.write!(Path.join(second.path, "run2.txt"), "two\n")
+      assert {:ok, _} = GitArtifact.finalize(second, job2, update_task_branch: true)
+      second_head = git!(repo, ["rev-parse", task_branch])
+      assert second_head != first_head
+      assert branch?(repo, "#{task_branch}-run-001")
+      assert branch?(repo, "#{task_branch}-run-002")
+      assert :ok = GitArtifact.cleanup(first, preserve_branch: true)
+      assert :ok = GitArtifact.cleanup(second, preserve_branch: true)
+    end
+
+    test "failed dirty attempt keeps the run branch but does not advance the task branch", %{
+      repo: repo,
+      task_branch: task_branch,
+      job: job,
+      attempt: attempt
+    } do
+      {:ok, artifact} = GitArtifact.provision_worktree(job, attempt)
+      File.write!(Path.join(artifact.path, "dirty.txt"), "dirty\n")
+      assert {:ok, _} = GitArtifact.finalize(artifact, job)
+      assert branch?(repo, artifact.run_branch)
+      refute branch?(repo, task_branch)
+      assert :ok = GitArtifact.cleanup(artifact, preserve_branch: true)
+    end
+
+    test "re-provisioning the same run branch collides", %{job: job, attempt: attempt} do
+      {:ok, artifact} = GitArtifact.provision_worktree(job, attempt)
+      assert {:error, {:collision, _, _}} = GitArtifact.provision_worktree(job, attempt)
+      assert :ok = GitArtifact.cleanup(artifact)
     end
   end
 
@@ -280,7 +409,12 @@ defmodule Omashiki.Jobs.GitArtifactTest do
   defp at_node(%Job{} = job, path, remote) do
     %{
       job
-      | admitted_repository: %{"path" => path, "base_branch" => "main", "remote" => remote}
+      | admitted_repository: %{
+          "path" => path,
+          "base_branch" => "main",
+          "remote" => remote,
+          "task_branch" => "feat-deliver"
+        }
     }
   end
 

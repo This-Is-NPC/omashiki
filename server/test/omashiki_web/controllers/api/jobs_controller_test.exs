@@ -20,10 +20,10 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
         "environments" => %{
           "safe" => %{
             "isolation" => "docker",
-          "image" => "omashiki/agent:latest",
-          "sink" => "git",
-          "packages" => [],
-          "preset" => "opencode",
+            "image" => "omashiki/agent:latest",
+            "sink" => "git",
+            "packages" => [],
+            "preset" => "opencode",
             "executables" => ["git"],
             "credentials" => [],
             "capabilities" => [],
@@ -152,7 +152,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
         "correlation_id" => "correlation-1",
         "repo" => "app",
         "environment" => "safe",
-        "payload" => %{"instruction" => "run"},
+        "payload" => %{"instruction" => "run", "branch" => "feat-test"},
         "priority" => 1
       },
       overrides
@@ -165,7 +165,11 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
       "idempotency_key" => "batch-#{ref}",
       "repo" => "app",
       "environment" => "safe",
-      "payload" => %{"instruction" => "run", "context" => %{"ref" => ref}},
+      "payload" => %{
+        "instruction" => "run",
+        "context" => %{"ref" => ref},
+        "branch" => "feat-batch-#{ref}"
+      },
       "priority" => 0
     }
   end

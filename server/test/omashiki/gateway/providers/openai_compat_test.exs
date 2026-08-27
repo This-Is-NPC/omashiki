@@ -336,6 +336,7 @@ defmodule Omashiki.Gateway.Providers.OpenaiCompatTest do
 
         spawn(fn ->
           _ = :gen_tcp.recv(client, 0, 60_000)
+
           receive do
           end
         end)

@@ -154,7 +154,7 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
       "correlation_id" => "provision-corr",
       "repo" => "app",
       "environment" => "safe",
-      "payload" => %{"instruction" => "run"},
+      "payload" => %{"instruction" => "run", "branch" => "feat-test"},
       "priority" => 1
     }
   end
@@ -163,8 +163,8 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
     %{
       "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "main"}},
       "presets" => %{
-          "opencode" => %{"plugin" => "opencode", "options" => %{}}
-        },
+        "opencode" => %{"plugin" => "opencode", "options" => %{}}
+      },
       "credentials" => %{
         "secret" => %{
           "provider" => "anthropic",

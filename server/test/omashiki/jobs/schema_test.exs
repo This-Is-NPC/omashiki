@@ -279,7 +279,7 @@ defmodule Omashiki.Jobs.SchemaTest do
         status: "succeeded",
         started_at: now,
         finished_at: now,
-        branch: "omashiki/job-test",
+        branch: "feat-test",
         result: %{"ok" => true}
       })
 
@@ -376,7 +376,11 @@ defmodule Omashiki.Jobs.SchemaTest do
       admitted_repository_digest: @digest,
       admitted_environment: %{"name" => "opencode"},
       admitted_environment_digest: @digest,
-      admitted_plugin: %{"path" => "plugins/opencode.toml", "contents" => "", "digest" => String.duplicate("e", 64)},
+      admitted_plugin: %{
+        "path" => "plugins/opencode.toml",
+        "contents" => "",
+        "digest" => String.duplicate("e", 64)
+      },
       admitted_plugin_digest: String.duplicate("e", 64),
       registry_digest: @digest,
       queue: "default",

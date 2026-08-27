@@ -44,8 +44,8 @@ defmodule Omashiki.Jobs.AdmissionTest do
         }
       },
       "presets" => %{
-          "opencode" => %{"plugin" => "opencode", "options" => %{}}
-        },
+        "opencode" => %{"plugin" => "opencode", "options" => %{}}
+      },
       "credentials" => %{
         "secret" => %{
           "provider" => "anthropic",
@@ -82,22 +82,33 @@ defmodule Omashiki.Jobs.AdmissionTest do
     }
   end
 
+  test "rejects git sink jobs without branch or title", %{token: token} do
+    assert {:error, :task_branch_required} =
+             Admission.admit(
+               token,
+               Map.put(single_request(), "payload", %{"instruction" => "run"})
+             )
+  end
+
   test "admits a root job with an immutable redacted snapshot", %{token: token} do
     assert {:ok, job} = Admission.admit(token, single_request())
     assert job.status == "queued"
-    assert job.payload == %{"instruction" => "run"}
+    assert job.payload == %{"instruction" => "run", "branch" => "feat-test"}
     assert job.payload_hash == sha256(Jason.encode!(job.payload))
     assert job.admitted_repository["name"] == "app"
 
     # The key GitArtifact reads to find the canonical remote. Losing it here
     # silently downgrades every job to a local-only, unreachable artifact.
     assert job.admitted_repository["remote"] == "/srv/canonical/app.git"
+    assert job.admitted_repository["task_branch"] == "feat-test"
 
     assert job.admitted_environment["name"] == "safe"
     assert [%{"read_only" => false}] = job.admitted_environment["mounts"]
     refute inspect(job.admitted_environment) =~ "do-not-persist"
 
-    assert %{"path" => path, "contents" => contents, "digest" => plugin_digest} = job.admitted_plugin
+    assert %{"path" => path, "contents" => contents, "digest" => plugin_digest} =
+             job.admitted_plugin
+
     assert is_binary(path) and path != ""
     assert is_binary(contents) and contents != ""
     assert byte_size(plugin_digest) == 64
@@ -217,7 +228,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
   end
 
   test "accepts exactly 1 MiB of encoded payload and rejects the next byte", %{token: token} do
-    exact = %{"instruction" => String.duplicate("x", 128)}
+    exact = %{"instruction" => String.duplicate("x", 128), "branch" => "feat-exact"}
     assert {:ok, job} = Admission.admit(token, Map.put(single_request(), "payload", exact))
     assert job.payload == exact
 
@@ -318,7 +329,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
         "correlation_id" => "correlation-1",
         "repo" => "app",
         "environment" => "safe",
-        "payload" => %{"instruction" => "run"},
+        "payload" => %{"instruction" => "run", "branch" => "feat-test"},
         "priority" => 1
       },
       overrides
@@ -339,7 +350,11 @@ defmodule Omashiki.Jobs.AdmissionTest do
       "idempotency_key" => "batch-#{ref}",
       "repo" => "app",
       "environment" => "safe",
-      "payload" => %{"instruction" => "run", "context" => %{"ref" => ref}},
+      "payload" => %{
+        "instruction" => "run",
+        "context" => %{"ref" => ref},
+        "branch" => "feat-batch-#{ref}"
+      },
       "priority" => 0
     }
     |> then(fn job -> if parent_ref, do: Map.put(job, "parent_ref", parent_ref), else: job end)

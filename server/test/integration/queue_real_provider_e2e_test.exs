@@ -79,7 +79,7 @@ defmodule Omashiki.Integration.QueueRealProviderE2ETest do
       "correlation_id" => "overture-real-provider-e2e-#{harness}",
       "repo" => "overture",
       "environment" => environment,
-      "payload" => %{"instruction" => @instructions},
+      "payload" => %{"instruction" => @instructions, "title" => "e2e-hello-world"},
       "priority" => 0
     }
 
@@ -87,7 +87,8 @@ defmodule Omashiki.Integration.QueueRealProviderE2ETest do
     assert admitted.status == 202
     job_id = json_response(admitted, 202)["data"]["id"]
 
-    expected_worktree = Path.join(repo, ".omashiki-worktrees/job-#{job_id}")
+    task_branch = "e2e-hello-world"
+    expected_worktree = Path.join(repo, ".omashiki-worktrees/#{task_branch}-run-001")
     assert expected_worktree == Path.expand(expected_worktree)
 
     drained = Oban.drain_queue(queue: :scheduler, with_recursion: true, with_scheduled: true)
@@ -117,8 +118,8 @@ defmodule Omashiki.Integration.QueueRealProviderE2ETest do
 
     assert result["worktree_clean"] == true
     assert result["base_sha"] != result["head_sha"]
-    assert result["branch"] == "omashiki/job-#{job_id}"
-    branch = result["branch"]
+    assert result["branch"] == task_branch
+    branch = task_branch
 
     assert git!(repo, ["rev-parse", branch]) == result["head_sha"]
     assert git!(repo, ["show", "#{branch}:hello.py"]) =~ "Hello, World!"

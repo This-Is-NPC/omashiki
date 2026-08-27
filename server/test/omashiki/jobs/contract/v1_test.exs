@@ -491,7 +491,7 @@ defmodule Omashiki.Jobs.Contract.V1Test do
       "job_id" => @job_id,
       "attempt" => 1,
       "status" => "succeeded",
-      "branch" => "omashiki/job-#{@job_id}",
+      "branch" => "feat-contract",
       "base_sha" => @sha,
       "head_sha" => @sha,
       "worktree_clean" => true,
@@ -510,7 +510,7 @@ defmodule Omashiki.Jobs.Contract.V1Test do
       "type" => "job.succeeded",
       "status" => "succeeded",
       "occurred_at" => "2026-08-24T03:00:00Z",
-      "data" => %{"branch" => "omashiki/job-#{@job_id}", "head_sha" => @sha}
+      "data" => %{"branch" => "feat-contract", "head_sha" => @sha}
     }
   end
 

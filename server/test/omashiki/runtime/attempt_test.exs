@@ -164,8 +164,8 @@ defmodule Omashiki.Runtime.AttemptTest do
     %{
       "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "main"}},
       "presets" => %{
-          "opencode" => %{"plugin" => "opencode", "options" => %{}}
-        },
+        "opencode" => %{"plugin" => "opencode", "options" => %{}}
+      },
       "environments" => %{
         "safe" => %{
           "isolation" => "docker",
@@ -195,7 +195,7 @@ defmodule Omashiki.Runtime.AttemptTest do
       "correlation_id" => "correlation-#{key}",
       "repo" => "app",
       "environment" => "safe",
-      "payload" => %{"instruction" => "hello"},
+      "payload" => %{"instruction" => "hello", "branch" => "feat-runner"},
       "priority" => 0
     }
   end

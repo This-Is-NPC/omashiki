@@ -24,10 +24,10 @@ defmodule Omashiki.Jobs.OrderingTest do
         "environments" => %{
           "safe" => %{
             "isolation" => "docker",
-          "image" => "omashiki/agent:latest",
-          "sink" => "git",
-          "packages" => [],
-          "preset" => "opencode",
+            "image" => "omashiki/agent:latest",
+            "sink" => "git",
+            "packages" => [],
+            "preset" => "opencode",
             "executables" => ["git"],
             "timeout_ms" => 1_000,
             "caches" => [],
@@ -217,7 +217,11 @@ defmodule Omashiki.Jobs.OrderingTest do
             "idempotency_key" => "#{ref}-#{System.unique_integer([:positive])}",
             "repo" => "app",
             "environment" => "safe",
-            "payload" => %{"instruction" => "run", "context" => %{"ref" => ref}},
+            "payload" => %{
+              "instruction" => "run",
+              "context" => %{"ref" => ref},
+              "branch" => "feat-batch-#{ref}"
+            },
             "priority" => priority
           }
 
@@ -233,7 +237,7 @@ defmodule Omashiki.Jobs.OrderingTest do
       "correlation_id" => "restart-correlation",
       "repo" => "app",
       "environment" => "safe",
-      "payload" => %{"instruction" => "run"},
+      "payload" => %{"instruction" => "run", "branch" => "feat-test"},
       "priority" => 0
     }
   end

@@ -14,6 +14,7 @@ defmodule Omashiki.Fixtures do
       "limits" => %{}
     })
   end
+
   @plugins_source Path.expand("../../../plugins", __DIR__)
 
   def copy_plugins!(root) when is_binary(root) do
