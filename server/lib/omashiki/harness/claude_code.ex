@@ -3,8 +3,7 @@ defmodule Omashiki.Harness.ClaudeCode do
 
   @behaviour Omashiki.Harness.Adapter
 
-  alias Omashiki.Harness.{Context, Invocation, LaunchPlan, Result, Spec}
-  alias Omashiki.Jobs.Job
+  alias Omashiki.Harness.{CliJson, Context, Invocation, LaunchPlan, Result, Spec}
   alias Omashiki.Runtime.Capability
 
   @credentials_path "/run/omashiki/state/claude-credentials.json"
@@ -36,19 +35,19 @@ defmodule Omashiki.Harness.ClaudeCode do
       unknown != [] ->
         {:error, {:unknown_options, Enum.sort(unknown)}}
 
-      not valid_path?(options["credentials_path"], "/run/omashiki/state/") ->
+      not CliJson.valid_path?(options["credentials_path"], "/run/omashiki/state/") ->
         {:error, :invalid_credentials_path}
 
-      not valid_path?(options["invocation_path"], "/tmp/") ->
+      not CliJson.valid_path?(options["invocation_path"], "/tmp/") ->
         {:error, :invalid_invocation_path}
 
-      not valid_absolute_path?(options["runner_path"]) ->
+      not CliJson.valid_absolute_path?(options["runner_path"]) ->
         {:error, :invalid_runner_path}
 
-      not positive_timeout?(options["timeout_ms"]) ->
+      not CliJson.positive_timeout?(options["timeout_ms"]) ->
         {:error, :invalid_timeout}
 
-      not valid_model?(options["model"]) ->
+      not CliJson.valid_model?(options["model"]) ->
         {:error, :invalid_model}
 
       not valid_tools?(options["allowed_tools"]) ->
@@ -59,7 +58,7 @@ defmodule Omashiki.Harness.ClaudeCode do
     end
   end
 
-  def validate_options(_), do: {:error, :options_must_be_a_map}
+  def validate_options(_), do: CliJson.validate_options_map(nil)
 
   @impl true
   def launch_plan(%Spec{runtime: runtime, options: raw_options}) do
@@ -94,8 +93,8 @@ defmodule Omashiki.Harness.ClaudeCode do
     options = Map.merge(@default_options, spec.options)
 
     with :ok <- require_mount(context.runtime_mounts, options["credentials_path"]),
-         {:ok, payload} <- invocation_payload(context.job) do
-      plan = launch_plan!(spec)
+         {:ok, payload} <- CliJson.invocation_payload(context.job) do
+      plan = CliJson.launch_plan!(spec, &launch_plan/1)
 
       {:ok,
        %{
@@ -109,18 +108,15 @@ defmodule Omashiki.Harness.ClaudeCode do
   end
 
   @impl true
-  def invoke(
-        %Invocation{} = invocation,
-        %Context{capability: %Capability{} = capability} = context
-      ) do
-    options = Map.merge(@default_options, context.profile.options)
-
-    with :ok <- validate_invocation(invocation),
-         {:ok, output} <- Capability.exec(capability, cli_argv(options), options["timeout_ms"]),
-         {:ok, decoded} <- decode_output(output),
-         {:ok, result} <- normalize_result(decoded) do
-      {:ok, result}
-    end
+  def invoke(%Invocation{} = invocation, %Context{capability: %Capability{}} = context) do
+    CliJson.invoke(
+      invocation,
+      context,
+      @default_options,
+      &cli_argv/1,
+      &decode_output/1,
+      &normalize_result/1
+    )
   end
 
   def invoke(%Invocation{}, %Context{}), do: {:error, :runtime_capability_unavailable}
@@ -131,43 +127,14 @@ defmodule Omashiki.Harness.ClaudeCode do
       if(options["model"], do: ["--model", options["model"]], else: [])
   end
 
-  defp decode_output(%{exit_code: 0, stdout: stdout}) when is_binary(stdout) do
-    case decode_json_result(stdout) do
-      {:ok, decoded} when is_map(decoded) -> {:ok, decoded}
-      {:ok, _} -> {:error, :claude_json_object_required}
-      {:error, _} -> {:error, {:claude_non_json_output, summarize(stdout)}}
-    end
-  end
-
-  defp decode_output(%{"exit_code" => 0, "stdout" => stdout}),
-    do: decode_output(%{exit_code: 0, stdout: stdout})
-
-  defp decode_output(%{exit_code: code, stdout: stdout}),
-    do: {:error, {:claude_exit, code, summarize(stdout)}}
-
-  defp decode_output(%{"exit_code" => code, "stdout" => stdout}),
-    do: decode_output(%{exit_code: code, stdout: stdout})
-
-  defp decode_output(other), do: {:error, {:claude_invalid_exec_result, inspect(other)}}
-
-  defp decode_json_result(output) do
-    trimmed = String.trim(output)
-
-    case Jason.decode(trimmed) do
-      {:ok, decoded} ->
-        {:ok, decoded}
-
-      {:error, original_error} ->
-        trimmed
-        |> String.split("\n", trim: true)
-        |> Enum.reverse()
-        |> Enum.find_value({:error, original_error}, fn line ->
-          case Jason.decode(line) do
-            {:ok, decoded} -> {:ok, decoded}
-            {:error, _} -> nil
-          end
-        end)
-    end
+  defp decode_output(output) do
+    CliJson.decode_exec_output(output, :claude, fn stdout ->
+      case CliJson.decode_trimmed_json(stdout) do
+        {:ok, decoded} when is_map(decoded) -> {:ok, decoded}
+        {:ok, _} -> {:error, :claude_json_object_required}
+        {:error, _} -> {:error, {:claude_non_json_output, CliJson.summarize(stdout)}}
+      end
+    end)
   end
 
   defp normalize_result(%{"type" => "result", "is_error" => false} = decoded) do
@@ -178,12 +145,12 @@ defmodule Omashiki.Harness.ClaudeCode do
     {:ok,
      %Result{
        assistant_text: Map.get(decoded, "result", ""),
-       input_tokens: integer_or_nil(usage["input_tokens"] || usage["inputTokens"]),
-       output_tokens: integer_or_nil(usage["output_tokens"] || usage["outputTokens"]),
+       input_tokens: CliJson.integer_or_nil(usage["input_tokens"] || usage["inputTokens"]),
+       output_tokens: CliJson.integer_or_nil(usage["output_tokens"] || usage["outputTokens"]),
        cached_input_tokens:
-         integer_or_nil(usage["cache_read_input_tokens"] || usage["cacheReadInputTokens"]),
+         CliJson.integer_or_nil(usage["cache_read_input_tokens"] || usage["cacheReadInputTokens"]),
        cache_write_tokens:
-         integer_or_nil(usage["cache_creation_input_tokens"] || usage["cacheCreationInputTokens"]),
+         CliJson.integer_or_nil(usage["cache_creation_input_tokens"] || usage["cacheCreationInputTokens"]),
        model_resolved: Map.get(decoded, "model") || first_model(model_usage),
        provider: "anthropic",
        raw: decoded
@@ -191,9 +158,10 @@ defmodule Omashiki.Harness.ClaudeCode do
   end
 
   defp normalize_result(%{"type" => "result", "is_error" => true} = decoded),
-    do: {:error, {:claude_result_error, summarize(Map.get(decoded, "result", decoded))}}
+    do: {:error, {:claude_result_error, CliJson.summarize(Map.get(decoded, "result", decoded))}}
 
-  defp normalize_result(decoded), do: {:error, {:claude_unexpected_json, summarize(decoded)}}
+  defp normalize_result(decoded),
+    do: {:error, {:claude_unexpected_json, CliJson.summarize(decoded)}}
 
   defp first_model(model_usage) when is_map(model_usage),
     do: model_usage |> Map.keys() |> Enum.sort() |> List.first()
@@ -209,22 +177,8 @@ defmodule Omashiki.Harness.ClaudeCode do
 
   defp first_model_usage(_), do: nil
 
-  defp launch_plan!(spec) do
-    {:ok, plan} = launch_plan(spec)
-    plan
-  end
-
-  defp invocation_payload(%Job{payload: payload}) when is_map(payload), do: {:ok, payload}
-  defp invocation_payload(%{payload: payload}) when is_map(payload), do: {:ok, payload}
-  defp invocation_payload(%{"payload" => payload}) when is_map(payload), do: {:ok, payload}
-  defp invocation_payload(_), do: {:error, :runtime_job_payload_required}
-
-  defp validate_invocation(%Invocation{instruction: instruction})
-       when is_binary(instruction) and instruction != "",
-       do: :ok
-
-  defp validate_invocation(_), do: {:error, :invalid_invocation}
-
+  # Host-side File.regular?, mount-writability, and ~ expansion — security
+  # decisions, not string templating. Stay in this adapter per task 2826.
   defp require_mount(mounts, target) do
     case Enum.find(mounts || %{}, fn
            {_source, destination, _read_only} -> destination == target
@@ -251,34 +205,10 @@ defmodule Omashiki.Harness.ClaudeCode do
   defp expand_host_path("~"), do: System.user_home!()
   defp expand_host_path(path), do: path
 
-  defp valid_path?(value, prefix),
-    do: valid_absolute_path?(value) and String.starts_with?(Path.expand(value), prefix)
-
-  defp valid_absolute_path?(value),
-    do: is_binary(value) and Path.type(value) == :absolute and not String.contains?(value, <<0>>)
-
-  defp positive_timeout?(value),
-    do: is_integer(value) and value > 0 and value <= 24 * 60 * 60 * 1_000
-
-  defp valid_model?(nil), do: true
-
-  defp valid_model?(value),
-    do:
-      is_binary(value) and value != "" and not String.starts_with?(value, "-") and
-        valid_arg?(value)
-
   defp valid_tools?(tools) when is_list(tools) do
     tools != [] and length(tools) == length(Enum.uniq(tools)) and
       Enum.all?(tools, &(&1 in @required_tools)) and Enum.all?(@required_tools, &(&1 in tools))
   end
 
   defp valid_tools?(_), do: false
-
-  defp valid_arg?(value),
-    do: is_binary(value) and String.valid?(value) and not String.contains?(value, <<0>>)
-
-  defp integer_or_nil(value) when is_integer(value) and value >= 0, do: value
-  defp integer_or_nil(_), do: nil
-  defp summarize(value) when is_binary(value), do: String.slice(value, 0, 4_096)
-  defp summarize(value), do: value |> inspect() |> String.slice(0, 4_096)
 end

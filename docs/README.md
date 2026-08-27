@@ -29,6 +29,8 @@ documents above is aspirational, not current.
   results and optional repositories, without weakening the caller boundary.
 - [Plugins and task lifecycle](plugins-e-ciclo-de-vida.md): declarative plugin
   manifests, harness cost model, and Wave 2 gate criteria.
+- [Harness next-cost measurement](harness-next-cost.md): post-CliJson re-measurement
+  and Wave 2 gate verdict (task 2826).
 
 ## Engineering Records
 

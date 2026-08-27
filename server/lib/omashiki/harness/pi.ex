@@ -30,11 +30,8 @@ defmodule Omashiki.Harness.Pi do
 
   @behaviour Omashiki.Harness.Adapter
 
-  alias Omashiki.Credentials.Credential
-  alias Omashiki.Harness.{Context, Invocation, LaunchPlan, Result, Spec}
-  alias Omashiki.Jobs.Job
+  alias Omashiki.Harness.{CliJson, Context, Invocation, LaunchPlan, Result, Spec}
   alias Omashiki.Runtime.Capability
-  alias Omashiki.Runtime.Claims
 
   @invocation_path "/tmp/omashiki-pi-invocation.txt"
   @runner_path "/usr/local/bin/omashiki-pi-runner"
@@ -61,15 +58,15 @@ defmodule Omashiki.Harness.Pi do
 
     cond do
       unknown != [] -> {:error, {:unknown_options, Enum.sort(unknown)}}
-      not valid_path?(options["invocation_path"], "/tmp/") -> {:error, :invalid_invocation_path}
-      not valid_absolute_path?(options["runner_path"]) -> {:error, :invalid_runner_path}
-      not positive_timeout?(options["timeout_ms"]) -> {:error, :invalid_timeout}
-      not valid_model?(options["model"]) -> {:error, :invalid_model}
+      not CliJson.valid_path?(options["invocation_path"], "/tmp/") -> {:error, :invalid_invocation_path}
+      not CliJson.valid_absolute_path?(options["runner_path"]) -> {:error, :invalid_runner_path}
+      not CliJson.positive_timeout?(options["timeout_ms"]) -> {:error, :invalid_timeout}
+      not CliJson.valid_model?(options["model"]) -> {:error, :invalid_model}
       true -> :ok
     end
   end
 
-  def validate_options(_), do: {:error, :options_must_be_a_map}
+  def validate_options(_), do: CliJson.validate_options_map(nil)
 
   @impl true
   def launch_plan(%Spec{runtime: runtime, options: raw_options}) do
@@ -102,79 +99,29 @@ defmodule Omashiki.Harness.Pi do
 
   @impl true
   def prepare(%Spec{} = spec, %Context{} = context) do
-    options = Map.merge(@default_options, spec.options)
-
-    with %Credential{} = credential <- credential(context),
-         %Job{} = job <- context.job,
-         {:ok, gateway_token} <- Claims.issue("gateway", job, %{credential: credential.name}),
-         {:ok, prompt} <- prompt_for(job) do
-      plan = launch_plan!(spec)
-
-      {:ok,
-       %{
-         plan
-         | secret: %{"target" => options["invocation_path"], "contents" => prompt},
-           environment:
-             plan.environment ++
-               [
-                 "PI_GATEWAY_BASE_URL=#{gateway_base_url(context)}",
-                 "PI_GATEWAY_MODEL=#{credential.model}",
-                 "PI_GATEWAY_TOKEN=#{gateway_token}"
-               ]
-       }}
-    else
-      nil -> {:error, :runtime_job_required}
-      {:error, reason} -> {:error, reason}
-    end
+    CliJson.prepare_gateway(spec, context, @default_options, &launch_plan/1, fn
+      credential, gateway_token, ctx ->
+        [
+          "PI_GATEWAY_BASE_URL=#{CliJson.gateway_base_url(ctx)}",
+          "PI_GATEWAY_MODEL=#{credential.model}",
+          "PI_GATEWAY_TOKEN=#{gateway_token}"
+        ]
+    end)
   end
 
   @impl true
-  def invoke(
-        %Invocation{} = invocation,
-        %Context{capability: %Capability{} = capability} = context
-      ) do
-    options = Map.merge(@default_options, context.profile.options)
-
-    with :ok <- validate_invocation(invocation),
-         {:ok, output} <- Capability.exec(capability, cli_argv(options), options["timeout_ms"]),
-         {:ok, events} <- decode_output(output),
-         {:ok, result} <- normalize_result(events) do
-      {:ok, result}
-    end
+  def invoke(%Invocation{} = invocation, %Context{capability: %Capability{}} = context) do
+    CliJson.invoke(
+      invocation,
+      context,
+      @default_options,
+      &cli_argv/1,
+      &decode_output/1,
+      &normalize_result/1
+    )
   end
 
   def invoke(%Invocation{}, %Context{}), do: {:error, :runtime_capability_unavailable}
-
-  defp credential(%Context{credential: %Credential{} = credential}), do: credential
-  defp credential(_), do: nil
-
-  defp gateway_base_url(%Context{host_base_url: base}) when is_binary(base),
-    do: String.trim_trailing(base, "/") <> "/api/v1/gateway/v1"
-
-  defp gateway_base_url(_), do: Omashiki.Gateway.openai_base_url()
-
-  # The context is folded in here rather than in the container so the image can
-  # stay free of a JSON parser: the runner only ever reads a text file.
-  defp prompt_for(%Job{payload: payload}) when is_map(payload), do: compose(payload)
-  defp prompt_for(%{payload: payload}) when is_map(payload), do: compose(payload)
-  defp prompt_for(%{"payload" => payload}) when is_map(payload), do: compose(payload)
-  defp prompt_for(_), do: {:error, :runtime_job_payload_required}
-
-  defp compose(payload) do
-    case Map.get(payload, "instruction", Map.get(payload, :instruction)) do
-      instruction when is_binary(instruction) and instruction != "" ->
-        case Map.get(payload, "context", Map.get(payload, :context)) do
-          context when is_map(context) ->
-            {:ok, instruction <> "\n\nContext:\n" <> Jason.encode!(context)}
-
-          _ ->
-            {:ok, instruction}
-        end
-
-      _ ->
-        {:error, :runtime_job_payload_required}
-    end
-  end
 
   defp cli_argv(options) do
     [options["runner_path"], options["invocation_path"]] ++
@@ -184,33 +131,24 @@ defmodule Omashiki.Harness.Pi do
   # pi writes one JSON event per line and interleaves nothing else on stdout,
   # but a non-JSON line is tolerated rather than fatal: a stray warning must
   # not discard a run that otherwise completed.
-  defp decode_output(%{exit_code: 0, stdout: stdout}) when is_binary(stdout) do
-    events =
-      stdout
-      |> String.split("\n", trim: true)
-      |> Enum.flat_map(fn line ->
-        case Jason.decode(line) do
-          {:ok, event} when is_map(event) -> [event]
-          _ -> []
-        end
-      end)
+  defp decode_output(output) do
+    CliJson.decode_exec_output(output, :pi, fn stdout ->
+      events =
+        stdout
+        |> String.split("\n", trim: true)
+        |> Enum.flat_map(fn line ->
+          case Jason.decode(line) do
+            {:ok, event} when is_map(event) -> [event]
+            _ -> []
+          end
+        end)
 
-    case events do
-      [] -> {:error, {:pi_non_json_output, summarize(stdout)}}
-      events -> {:ok, events}
-    end
+      case events do
+        [] -> {:error, {:pi_non_json_output, CliJson.summarize(stdout)}}
+        events -> {:ok, events}
+      end
+    end)
   end
-
-  defp decode_output(%{"exit_code" => 0, "stdout" => stdout}),
-    do: decode_output(%{exit_code: 0, stdout: stdout})
-
-  defp decode_output(%{exit_code: code, stdout: stdout}),
-    do: {:error, {:pi_exit, code, summarize(stdout)}}
-
-  defp decode_output(%{"exit_code" => code, "stdout" => stdout}),
-    do: decode_output(%{exit_code: code, stdout: stdout})
-
-  defp decode_output(other), do: {:error, {:pi_invalid_exec_result, inspect(other)}}
 
   # `agent_end` is the single event carrying the whole conversation, so the
   # result is read from there rather than reassembled from the deltas.
@@ -228,13 +166,13 @@ defmodule Omashiki.Harness.Pi do
            output_tokens: Map.get(usage, :output),
            cached_input_tokens: Map.get(usage, :cache_read),
            cache_write_tokens: Map.get(usage, :cache_write),
-           model_resolved: string_or_nil(last && last["model"]),
-           provider: string_or_nil(last && last["provider"]),
+           model_resolved: CliJson.string_or_nil(last && last["model"]),
+           provider: CliJson.string_or_nil(last && last["provider"]),
            raw: %{"messages" => messages}
          }}
 
       _ ->
-        {:error, {:pi_unexpected_json, summarize(events)}}
+        {:error, {:pi_unexpected_json, CliJson.summarize(events)}}
     end
   end
 
@@ -263,36 +201,4 @@ defmodule Omashiki.Harness.Pi do
   end
 
   defp assistant_text(_), do: ""
-
-  defp launch_plan!(spec) do
-    {:ok, plan} = launch_plan(spec)
-    plan
-  end
-
-  defp validate_invocation(%Invocation{instruction: instruction})
-       when is_binary(instruction) and instruction != "",
-       do: :ok
-
-  defp validate_invocation(_), do: {:error, :invalid_invocation}
-
-  defp valid_path?(value, prefix),
-    do: valid_absolute_path?(value) and String.starts_with?(Path.expand(value), prefix)
-
-  defp valid_absolute_path?(value),
-    do: is_binary(value) and Path.type(value) == :absolute and not String.contains?(value, <<0>>)
-
-  defp positive_timeout?(value),
-    do: is_integer(value) and value > 0 and value <= 24 * 60 * 60 * 1_000
-
-  defp valid_model?(nil), do: true
-
-  defp valid_model?(value),
-    do:
-      is_binary(value) and value != "" and not String.starts_with?(value, "-") and
-        String.valid?(value) and not String.contains?(value, <<0>>)
-
-  defp string_or_nil(value) when is_binary(value) and value != "", do: value
-  defp string_or_nil(_), do: nil
-  defp summarize(value) when is_binary(value), do: String.slice(value, 0, 4_096)
-  defp summarize(value), do: value |> inspect() |> String.slice(0, 4_096)
 end
