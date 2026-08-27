@@ -55,7 +55,8 @@ defmodule Omashiki.Config.Environment do
     :mounts,
     :policy,
     :network,
-    :resources
+    :resources,
+    :packages
   ]
   defstruct @enforce_keys
 end
@@ -92,14 +93,15 @@ defmodule Omashiki.Config.Registry do
         caches,
         credentials,
         host_credentials,
-        base_dir
+        base_dir,
+        plugins
       ) do
     if symlink_in_absolute_path?(base_dir) do
       raise Error, "configuration root must not contain symlink components"
     end
 
     repositories = build_repositories!(repository_section, base_dir)
-    presets = Omashiki.Harnesses.build!(preset_section)
+    presets = Omashiki.Harnesses.build!(preset_section, plugins)
     nodes = build_nodes!(node_section)
 
     environments =
@@ -251,7 +253,7 @@ defmodule Omashiki.Config.Registry do
 
       reject_unknown!(
         attrs,
-        ~w(preset isolation image sink executables credentials capabilities mcp_servers pre_steps post_steps timeout_ms caches mounts policy network resources),
+        ~w(preset isolation image sink packages executables credentials capabilities mcp_servers pre_steps post_steps timeout_ms caches mounts policy network resources),
         where
       )
 
@@ -260,6 +262,11 @@ defmodule Omashiki.Config.Registry do
       isolation = require_string!(attrs, "isolation", where)
       image = require_string!(attrs, "image", where)
       sink = require_string!(attrs, "sink", where)
+      packages = packages_list!(attrs, "packages", where)
+
+      if packages == nil do
+        raise Error, "#{where}.packages is required (use an empty list to declare none)"
+      end
 
       unless sink == "git", do: raise(Error, "#{where}.sink must be \"git\" in this wave")
 
@@ -278,6 +285,9 @@ defmodule Omashiki.Config.Registry do
         end
 
       preset = Omashiki.Harnesses.finalize_preset!(base_preset, isolation, image, where)
+
+      validate_requires!(preset.manifest, executables, packages, where)
+
 
       {resolved_credentials, resolved_host_credentials} =
         attrs
@@ -314,6 +324,7 @@ defmodule Omashiki.Config.Registry do
         isolation: isolation,
         image: image,
         sink: sink,
+        packages: packages,
         executables: executables,
         credentials: resolved_credentials,
         host_credentials: resolved_host_credentials,
@@ -554,6 +565,23 @@ defmodule Omashiki.Config.Registry do
     end
   end
 
+
+  defp validate_requires!(%Omashiki.Plugin.Manifest{requires: %{"binaries" => required}}, executables, packages, where) do
+    provided = MapSet.new(executables ++ packages)
+
+    missing =
+      required
+      |> Enum.reject(&MapSet.member?(provided, &1))
+
+    if missing != [] do
+      raise Error, "#{where}: plugin requires.binaries #{inspect(missing)} not covered by executables ∪ packages"
+    end
+  end
+
+  defp validate_requires!(_manifest, _executables, _packages, where) do
+    raise Error, "#{where}: preset plugin manifest missing for requires check"
+  end
+
   defp digest_environment(environment) do
     environment
     |> Map.from_struct()
@@ -647,6 +675,27 @@ defmodule Omashiki.Config.Registry do
         raise Error, "#{where}.#{key} must be an array"
     end
   end
+  defp packages_list!(attrs, key, where) do
+    case Map.get(attrs, key) do
+      [] ->
+        []
+
+      values when is_list(values) ->
+        if Enum.all?(values, &(is_binary(&1) and &1 != "")) and
+             length(values) == length(Enum.uniq(values)) do
+          values
+        else
+          raise Error, "#{where}.#{key} must be a unique array of non-empty strings"
+        end
+
+      nil ->
+        nil
+
+      _ ->
+        raise Error, "#{where}.#{key} must be an array"
+    end
+  end
+
 
   defp optional_string_list!(attrs, key, where) do
     case Map.get(attrs, key, []) do

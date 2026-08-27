@@ -163,5 +163,32 @@ defmodule Omashiki.Runtime.HostCredentials do
 
   defp declared(_environment), do: []
 
+
+  @doc "Validate a writable mount exists for a container credential path."
+  def validate_mount(mounts, target) when is_binary(target) do
+    case Enum.find(normalize_mounts(mounts), fn
+           {_source, destination, _read_only} -> destination == target
+           {_source, destination} -> destination == target
+           _ -> false
+         end) do
+      {source, ^target, false} when is_binary(source) ->
+        if File.regular?(expand_host_path(source)), do: :ok, else: {:error, {:credentials_unavailable, source}}
+
+      {source, ^target, _} when is_binary(source) ->
+        {:error, {:credentials_mount_must_be_writable, source}}
+
+      nil ->
+        {:error, {:credentials_mount_missing, target}}
+    end
+  end
+
+  defp normalize_mounts(mounts) when is_map(mounts), do: Enum.to_list(mounts)
+  defp normalize_mounts(mounts) when is_list(mounts), do: mounts
+  defp normalize_mounts(_), do: []
+
+  defp expand_host_path("~/" <> rest), do: Path.join(System.user_home!(), rest)
+  defp expand_host_path("~"), do: System.user_home!()
+  defp expand_host_path(path), do: path
+
   defp default_base, do: if(File.dir?("/dev/shm"), do: "/dev/shm", else: System.tmp_dir!())
 end

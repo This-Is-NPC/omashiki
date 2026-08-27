@@ -377,6 +377,8 @@ defmodule Omashiki.Config do
     host_credentials = HostCredential.build!(section(map, "host_credentials"))
 
     base_dir = if is_binary(path), do: Path.dirname(Path.expand(path)), else: File.cwd!()
+    plugins_dir = plugins_dir_for(base_dir)
+    plugins = Omashiki.Plugin.Loader.load!(plugins_dir)
 
     registry =
       Registry.build!(
@@ -387,7 +389,8 @@ defmodule Omashiki.Config do
         caches,
         credentials,
         host_credentials,
-        base_dir
+        base_dir,
+        plugins
       )
 
     limits = build_limits(section_map(map, "limits"))
@@ -873,6 +876,12 @@ defmodule Omashiki.Config do
   end
 
   defp memory_to_bytes(_), do: nil
+  defp plugins_dir_for(base_dir) do
+    direct = Path.join(base_dir, "plugins")
+    if File.dir?(direct), do: direct, else: repo_plugins_dir()
+  end
+
+  defp repo_plugins_dir, do: Path.expand("../../../plugins", __DIR__)
 
   defp expand_path("~/" <> rest), do: Path.join(System.user_home!(), rest)
   defp expand_path(path) when is_binary(path), do: path

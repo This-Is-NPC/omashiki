@@ -165,7 +165,7 @@ base_branch = "master"
 [presets.opencode]
 
 plugin = "opencode"
-options = { auth_path = "/run/omashiki/state/auth.json", config_path = "/run/omashiki/state/opencode.json" }
+options = { model = "openai/gpt-4.1", auth_path = "/run/omashiki/state/auth.json", config_path = "/run/omashiki/state/opencode.json" }
 
 [presets.claude-code]
 
@@ -176,6 +176,7 @@ plugin = "claude-code"
 isolation = "docker"
 image = "omashiki/agent:latest"
 sink = "git"
+packages = []
 preset = "opencode"
 executables = ["mise", "git"]
 credentials = ["opencode-local"]
@@ -283,6 +284,7 @@ plugin = "codex"
 isolation = "docker"
 image = "omashiki/agent-codex:latest"
 sink = "git"
+packages = []
 preset = "codex"
 executables = ["mise", "git"]
 credentials = ["codex-local"]
