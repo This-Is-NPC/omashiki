@@ -1,6 +1,7 @@
 defmodule Omashiki.Plugin.InterpreterTest do
   use ExUnit.Case, async: true
 
+  alias Omashiki.Credentials.Credential
   alias Omashiki.Harness.{Context, Invocation}
   alias Omashiki.Plugin.{Interpreter, Loader, Manifest, Preset}
   alias Omashiki.Isolation
@@ -182,6 +183,42 @@ defmodule Omashiki.Plugin.InterpreterTest do
              |> Enum.chunk_every(2)
              |> Enum.filter(&match?(["--allowed-tool", _], &1))
              |> List.flatten()
+  end
+
+  test "substitutes Codex reasoning_effort into option_argv", %{plugins: plugins} do
+    manifest = Map.fetch!(plugins, "codex")
+    preset = preset(manifest, %{"model" => "gpt-5.6-luna", "reasoning_effort" => "low"})
+    argv = preset.launch_plan.transport["argv"]
+
+    assert ["--reasoning-effort", "low"] ==
+             argv |> Enum.drop_while(&(&1 != "--reasoning-effort")) |> Enum.take(2)
+
+    assert ["--model", "gpt-5.6-luna"] ==
+             argv |> Enum.drop_while(&(&1 != "--model")) |> Enum.take(2)
+  end
+
+  test "opencode prepare uses the gateway path when a gateway credential is present", %{
+    plugins: plugins
+  } do
+    manifest = Map.fetch!(plugins, "opencode")
+    spec = preset(manifest, %{"model" => "z-ai/glm-5.3-flash"})
+
+    context = %Context{
+      job: nil,
+      profile: spec,
+      credential: %Credential{
+        name: "openrouter",
+        provider: "openrouter",
+        model: "z-ai/glm-5.3-flash",
+        base_url: "https://openrouter.ai/api/v1",
+        api_key: "sk-test",
+        fallback_chain: [],
+        model_aliases: %{}
+      },
+      runtime_mounts: []
+    }
+
+    assert {:error, :runtime_job_required} = Interpreter.prepare(spec, context)
   end
 
   test "opencode host prepare writes the preset model into OPENCODE_CONFIG_CONTENT", %{

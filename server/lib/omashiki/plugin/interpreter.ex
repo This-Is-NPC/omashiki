@@ -64,7 +64,7 @@ defmodule Omashiki.Plugin.Interpreter do
   def prepare(%Preset{manifest: %Manifest{} = manifest} = spec, %Context{} = context) do
     options = merged_options(manifest, spec.options)
 
-    case manifest.prepare do
+    case resolved_prepare(manifest.prepare, context) do
       "gateway_prompt" -> prepare_gateway_prompt(spec, context, manifest, options)
       "invocation_json" -> prepare_invocation_json(spec, context, manifest, options)
       "opencode_gateway" -> prepare_opencode_gateway(spec, context, manifest, options)
@@ -75,6 +75,15 @@ defmodule Omashiki.Plugin.Interpreter do
   end
 
   def prepare(_, _), do: {:error, :manifest_required}
+
+  defp resolved_prepare("opencode_host", context) do
+    case CliJson.credential(context) do
+      %Credential{} -> "opencode_gateway"
+      _ -> "opencode_host"
+    end
+  end
+
+  defp resolved_prepare(kind, _context), do: kind
 
   @impl true
   def invoke(%Invocation{} = invocation, %Context{capability: %Capability{}} = context) do
@@ -192,7 +201,7 @@ defmodule Omashiki.Plugin.Interpreter do
          %Job{} = job <- context.job,
          {:ok, gateway_token} <- Claims.issue("gateway", job, %{credential: credential.name}),
          {:ok, tools_token} <- Claims.issue("tools", job, %{}) do
-      model = Map.get(spec.options, "model") || credential.model
+      model = profile_option(spec, "model") || credential.model
       config = opencode_gateway_config(model, gateway_token, tools_token, context, spec)
       http = manifest.http || %{}
       plan = launch_plan!(spec)
@@ -329,20 +338,17 @@ defmodule Omashiki.Plugin.Interpreter do
   end
 
   defp bindings(options, extra) do
-    Map.merge(
-      %{
-        "runner_path" => options["runner_path"],
-        "invocation_path" => options["invocation_path"],
-        "model" => options["model"],
-        "timeout_ms" => options["timeout_ms"],
-        "credentials_path" => options["credentials_path"],
-        "config_path" => options["config_path"],
-        "auth_path" => options["auth_path"],
-        "gateway_auth_path" => options["gateway_auth_path"],
-        "instruction" => nil
-      },
-      extra
-    )
+    options
+    |> stringify_option_keys()
+    |> Map.merge(%{"instruction" => nil})
+    |> Map.merge(extra)
+  end
+
+  defp stringify_option_keys(options) when is_map(options) do
+    Map.new(options, fn
+      {key, value} when is_atom(key) -> {Atom.to_string(key), value}
+      {key, value} -> {key, value}
+    end)
   end
 
   defp substitute(template, bindings) when is_binary(template) do
@@ -391,8 +397,15 @@ defmodule Omashiki.Plugin.Interpreter do
   defp message_payload(%Invocation{instruction: i, context: nil}), do: %{parts: [%{type: "text", text: i}]}
   defp message_payload(%Invocation{instruction: i, context: c}), do: %{parts: [%{type: "text", text: i <> "\n\nContext:\n" <> Jason.encode!(c)}]}
 
-  defp put_model(payload, %Credential{} = c, :gateway, _m, _ctx),
-    do: Map.put(payload, :model, %{providerID: "gateway", modelID: c.model})
+  defp put_model(payload, credential, :gateway, _manifest, ctx) do
+    case gateway_model(credential, ctx) do
+      model when is_binary(model) and model != "" ->
+        Map.put(payload, :model, %{providerID: "gateway", modelID: model})
+
+      _ ->
+        payload
+    end
+  end
 
   defp put_model(payload, credential, _, _manifest, ctx) do
     preset_model = profile_option(ctx.profile, "model")
@@ -409,9 +422,31 @@ defmodule Omashiki.Plugin.Interpreter do
     end
   end
 
-  defp profile_option(%{options: options}, key) when is_map(options), do: Map.get(options, key)
-  defp profile_option(%{"options" => options}, key) when is_map(options), do: Map.get(options, key)
-  defp profile_option(_, _), do: nil
+  defp gateway_model(%Credential{model: model}, _ctx)
+       when is_binary(model) and model != "",
+       do: model
+
+  defp gateway_model(_credential, ctx), do: profile_option(ctx.profile, "model")
+
+  defp profile_option(profile, key) when is_binary(key) do
+    case options_map(profile) do
+      options when is_map(options) ->
+        Map.get(options, key) || Map.get(options, existing_atom(key))
+
+      _ ->
+        nil
+    end
+  end
+
+  defp options_map(%{options: options}), do: options
+  defp options_map(%{"options" => options}), do: options
+  defp options_map(_), do: nil
+
+  defp existing_atom(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> nil
+  end
 
   defp split_provider_model(model, fallback) when is_binary(model) do
     case String.split(model, "/", parts: 2) do
@@ -424,10 +459,13 @@ defmodule Omashiki.Plugin.Interpreter do
   defp normalize_http_result({:ok, map}) when is_map(map), do: {:ok, Result.from_map(map)}
   defp normalize_http_result(other), do: other
 
-  defp credential_from_environment(%{"credentials" => [c | _]}), do: credential_from_map(c)
-  defp credential_from_environment(_), do: nil
+  defp credential_from_environment(environment) when is_map(environment) do
+    environment
+    |> Map.get(:credentials, Map.get(environment, "credentials", []))
+    |> List.wrap()
+    |> List.first()
+    |> Omashiki.Credentials.pin()
+  end
 
-  defp credential_from_map(%Credential{} = c), do: c
-  defp credential_from_map(%{} = c), do: struct(Credential, Map.take(c, [:name, :provider, :model, :base_url]))
-  defp credential_from_map(_), do: nil
+  defp credential_from_environment(_), do: nil
 end

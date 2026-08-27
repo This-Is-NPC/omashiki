@@ -677,12 +677,21 @@ defmodule Omashiki.Jobs.Runner do
 
     %Omashiki.Harness.Context{
       job: state.job,
+      credential: invoke_credential(state.environment),
       environment: state.environment,
       profile: profile,
       capability: capability,
       llm_egress: Map.get(container, :llm_egress),
       runtime_mounts: %{}
     }
+  end
+
+  defp invoke_credential(environment) do
+    environment
+    |> Map.get(:credentials, Map.get(environment, "credentials", []))
+    |> List.wrap()
+    |> List.first()
+    |> Omashiki.Credentials.pin()
   end
 
   defp lease_token(state), do: Keyword.get(state.opts, :lease_token, state.attempt.lease_token)
