@@ -3,9 +3,9 @@
 #
 # Unlike the OpenCode and Codex images this one does not build on the omaterm
 # base: jcode is a single static binary with no runtime to install, so the whole
-# reason that base exists (mise, node, a language toolchain) does not apply. The
-# result is ~484MB instead of ~7.2GB, and — the number that actually bounds
-# concurrency — ~15MiB resident per container instead of ~675MiB.
+# reason that base exists (mise, node, a language toolchain) does not apply.
+# python3 is the exception — agents asked to write and run .py files need it
+# inside the sandbox. The result is still hundreds of MB, not ~7.2GB.
 FROM debian:13-slim
 
 ARG JCODE_VERSION=v0.81.1
@@ -13,7 +13,7 @@ ARG JCODE_VERSION=v0.81.1
 # The release tarball is a shell wrapper plus a sibling `.bin`; the wrapper
 # execs the binary from its own directory, so both have to land together.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git \
+    && apt-get install -y --no-install-recommends ca-certificates curl git python3 \
     && curl -fsSL "https://github.com/1jehuang/jcode/releases/download/${JCODE_VERSION}/jcode-linux-x86_64.tar.gz" \
          -o /tmp/jcode.tar.gz \
     && mkdir -p /opt/jcode \

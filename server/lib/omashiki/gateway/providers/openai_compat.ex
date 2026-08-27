@@ -31,7 +31,10 @@ defmodule Omashiki.Gateway.Providers.OpenaiCompat do
   @anthropic_oai_base "https://api.anthropic.com/v1"
   @openai_base "https://api.openai.com/v1"
   @default_request_timeout_ms 120_000
-  @recv_chunk_timeout_ms 30_000
+  # Recv wait is the remaining request deadline, not a short stall window.
+  # The gateway buffers a single JSON body (`stream: false`), so llama.cpp /
+  # reasoning models send the first byte only after the full completion. A
+  # 30s chunk timeout killed local Qwen 3.5 9b turns that take ~24s+ to think.
 
   @impl true
   def chat_completions(%Credential{} = cred, body, model) do
@@ -212,7 +215,7 @@ defmodule Omashiki.Gateway.Providers.OpenaiCompat do
       Mint.HTTP.close(conn)
       {:error, :timeout}
     else
-      recv_timeout = min(remaining, @recv_chunk_timeout_ms)
+      recv_timeout = remaining
 
       case Mint.HTTP.recv(conn, 0, recv_timeout) do
         {:ok, conn, responses} ->

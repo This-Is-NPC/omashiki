@@ -155,7 +155,7 @@ docker build -t omashiki/agent-codex:ci-check -f agent/Dockerfile.codex agent/
 description = "Build pinned jcode agent Docker image (dry-run, no push)"
 run         = """
 docker build -t omashiki/agent-jcode:ci-check -f agent/Dockerfile.jcode agent/
-.scripts/agent_image_check.sh omashiki/agent-jcode:ci-check 1024 bash git jcode
+.scripts/agent_image_check.sh omashiki/agent-jcode:ci-check 1024 bash git jcode python3
 """
 
 # pi is a coding harness, so its environment manages dependencies through mise
@@ -315,6 +315,10 @@ mix test test/integration/queue_real_provider_e2e_test.exs --include real_claude
 
 # `agent:jcode:build` and not `agent:build`: omashiki/agent:latest is the
 # OpenCode image and overwriting it here would silently retag it.
+#
+# Host networking, not bridge: jcode's only model path is the host LLM
+# gateway. Docker bridge on this machine cannot hairpin to Phoenix, while
+# host mode uses 127.0.0.1 which jcode also accepts as a local base URL.
 [tasks."e2e:overture:jcode"]
 description = "Run the real queue-only Docker/jcode E2E against overture and the local model server"
 run         = """
@@ -322,7 +326,7 @@ mise run e2e:prepare:jcode
 mise run agent:jcode:build
 cd server
 OMASHIKI_REAL_PROVIDER_E2E=1 \
-OMASHIKI_AGENT_NETWORK_MODE=bridge \
+OMASHIKI_AGENT_NETWORK_MODE=host \
 MIX_ENV=test \
 mix test test/integration/queue_real_provider_e2e_test.exs --include real_jcode --exclude real_opencode --exclude real_claude
 """

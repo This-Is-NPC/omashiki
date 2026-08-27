@@ -19,7 +19,7 @@ git config --global --add safe.directory "$REPO_ROOT"
 git config --global --add safe.directory "$REPO_ROOT/.git"
 
 # The container never holds a provider key. The orchestrator writes a
-# job-bound gateway token here and points jcode at the loopback gateway, so the
+# job-bound gateway token here and points jcode at the host LLM gateway, so the
 # profile below can only reach Omashiki, and only for this job.
 if [ -z "${JCODE_GATEWAY_TOKEN:-}" ]; then
   printf '%s\n' "jcode gateway token is unavailable" >&2
@@ -30,6 +30,21 @@ if [ -z "${JCODE_GATEWAY_BASE_URL:-}" ] || [ -z "${JCODE_GATEWAY_MODEL:-}" ]; th
   printf '%s\n' "jcode requires JCODE_GATEWAY_BASE_URL and JCODE_GATEWAY_MODEL" >&2
   exit 78
 fi
+
+# jcode rejects host.docker.internal as a "local" base URL (https, loopback, or
+# RFC1918 only). ExtraHosts maps that name to the host-gateway IP; rewrite so
+# `provider add` stores an address jcode will actually call.
+case "${JCODE_GATEWAY_BASE_URL}" in
+  *host.docker.internal*)
+    host_ip="$(awk '$1 !~ /^#/ { for (i = 2; i <= NF; i++) if ($i == "host.docker.internal") { print $1; exit } }' /etc/hosts)"
+    if [ -z "${host_ip}" ]; then
+      printf '%s\n' "host.docker.internal is not in /etc/hosts" >&2
+      exit 78
+    fi
+    JCODE_GATEWAY_BASE_URL="${JCODE_GATEWAY_BASE_URL//host.docker.internal/${host_ip}}"
+    export JCODE_GATEWAY_BASE_URL
+    ;;
+esac
 
 # --api-key-env stores only the variable *name*, so the token never lands on
 # disk and every `docker exec` turn resolves it fresh from the environment.

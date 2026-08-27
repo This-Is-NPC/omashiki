@@ -44,7 +44,10 @@ if [ -z "$PROMPT" ]; then
   exit 65
 fi
 
-set -- --provider-profile omashiki run --json --quiet --no-update
+# Lite tools: the full jcode catalog inflates the system prompt past 12k
+# tokens, which local llama.cpp slots with n_ctx=8192 reject (n_keep >= n_ctx).
+# write/bash/read are enough for a sandboxed one-shot coding job.
+set -- --provider-profile omashiki run --json --quiet --no-update --tool-profile lite
 if [ -n "$MODEL" ]; then
   set -- "$@" --model "$MODEL"
 fi
