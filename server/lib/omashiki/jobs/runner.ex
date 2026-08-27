@@ -12,14 +12,14 @@ defmodule Omashiki.Jobs.Runner.DockerContainer do
 
   @behaviour Omashiki.Jobs.Runner.Container
 
-  alias Omashiki.Jobs.{Job, JobAttempt}
+  alias Omashiki.Jobs.{GitArtifact, Job, JobAttempt, WorkArtifact}
   alias Omashiki.Runtime.ContainerManager
 
   @impl true
   def provision(%Job{} = job, %JobAttempt{} = attempt, environment, opts) do
     opts = Keyword.put_new(opts, :preset, profile_for(environment))
 
-    Omashiki.Jobs.GitArtifact.provision(job, opts, fn artifact ->
+    provision_fn(job, environment_sink(environment), opts, fn artifact ->
       opts = Keyword.put(opts, :worktree_path, artifact.path)
 
       case ContainerManager.provision_for_job(job, attempt, environment, opts) do
@@ -39,32 +39,55 @@ defmodule Omashiki.Jobs.Runner.DockerContainer do
     end)
   end
 
+  defp provision_fn(job, "git", opts, callback), do: GitArtifact.provision(job, opts, callback)
+
+  defp provision_fn(job, sink, opts, callback) when sink in ["files", "none"],
+    do: WorkArtifact.provision(job, sink, opts, callback)
+
+  defp provision_fn(_job, sink, _opts, _callback),
+    do: {:error, {:unsupported_sink, sink}}
+
   @impl true
   def exec(%{id: container_id}, argv, timeout_ms),
     do: ContainerManager.exec(container_id, argv, timeout_ms)
 
   @impl true
-  def finalize(%{artifact: artifact}, job, opts),
-    do: Omashiki.Jobs.GitArtifact.finalize(artifact, job, opts)
+  def finalize(%{artifact: %{branch: _}} = container, job, opts),
+    do: GitArtifact.finalize(container.artifact, job, opts)
+
+  def finalize(%{artifact: %{sink: sink}} = container, job, opts) when sink in ["files", "none"],
+    do: WorkArtifact.finalize(container.artifact, job, opts)
 
   def finalize(container, job, opts),
     do: Omashiki.Jobs.Runner.Finalizer.finalize(container, job, opts)
 
   @impl true
-  def destroy(%{id: container_id, artifact: artifact, preserve_artifact: true}) do
+  def destroy(%{id: container_id, artifact: %{branch: _} = artifact, preserve_artifact: true}) do
     _ = ContainerManager.destroy(container_id)
-    Omashiki.Jobs.GitArtifact.cleanup(artifact, preserve_branch: true)
+    GitArtifact.cleanup(artifact, preserve_branch: true)
   end
 
   @impl true
-  def destroy(%{id: container_id, artifact: artifact}) do
+  def destroy(%{id: container_id, artifact: %{branch: _} = artifact}) do
     _ = ContainerManager.destroy(container_id)
-    Omashiki.Jobs.GitArtifact.cleanup(artifact, preserve_branch: false)
+    GitArtifact.cleanup(artifact, preserve_branch: false)
+  end
+
+  @impl true
+  def destroy(%{id: container_id, artifact: %{sink: _} = artifact}) do
+    _ = ContainerManager.destroy(container_id)
+    WorkArtifact.cleanup(artifact)
   end
 
   def destroy(%{id: container_id}), do: ContainerManager.destroy(container_id)
 
   def cancel_scope(scope_id), do: ContainerManager.cancel_scope(scope_id)
+
+  defp environment_sink(environment) when is_map(environment) do
+    Map.get(environment, "sink") || Map.get(environment, :sink) || "git"
+  end
+
+  defp environment_sink(_), do: "git"
 
   defp profile_for(environment) do
     Omashiki.Harnesses.profile(environment)

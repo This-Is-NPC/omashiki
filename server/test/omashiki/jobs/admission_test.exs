@@ -196,7 +196,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
   test "rejects malformed, unknown, and oversized submissions without writes", %{token: token} do
     assert {:error, {:validation, errors}} = Admission.admit(token, %{})
-    assert %{field: "repo", code: "required"} in errors
+    assert %{field: "environment", code: "required"} in errors
 
     assert {:error, :unknown_repository} =
              Admission.admit(token, Map.put(single_request(), "repo", "missing"))

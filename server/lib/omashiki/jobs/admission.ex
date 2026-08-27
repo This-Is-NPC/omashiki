@@ -99,14 +99,18 @@ defmodule Omashiki.Jobs.Admission do
   end
 
   defp snapshot_context(%Config.ResolvedJob{} = resolved) do
-    repository = snapshot_value(resolved.repository)
+    repository =
+      if resolved.repository,
+        do: snapshot_value(resolved.repository),
+        else: nil
+
     plugin = plugin_snapshot(resolved.environment)
     environment = snapshot_value(resolved.environment)
 
     %{
       repository: repository,
       environment: environment,
-      admitted_repository_digest: digest(repository),
+      admitted_repository_digest: if(repository, do: digest(repository), else: nil),
       admitted_environment_digest: digest(environment),
       admitted_plugin: plugin,
       admitted_plugin_digest: digest(plugin),

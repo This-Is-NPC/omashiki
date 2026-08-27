@@ -63,7 +63,7 @@ end
 
 defmodule Omashiki.Config.ResolvedJob do
   @moduledoc "Repository and environment values captured at job admission."
-  @enforce_keys [:repository, :environment, :digest]
+  @enforce_keys [:environment, :digest]
   defstruct [:repository, :environment, :digest]
 end
 
@@ -77,6 +77,7 @@ defmodule Omashiki.Config.Registry do
   @branch ~r/^[A-Za-z0-9][A-Za-z0-9._\/-]*$/
   @conditions ~w(always on_success on_failure)
   @networks ~w(none restricted host)
+  @sinks ~w(git files none)
   @unsafe_executables ~w(
     sh bash dash zsh fish cmd powershell pwsh env xargs
     python python2 python3 node perl ruby php lua busybox make awk
@@ -268,7 +269,8 @@ defmodule Omashiki.Config.Registry do
         raise Error, "#{where}.packages is required (use an empty list to declare none)"
       end
 
-      unless sink == "git", do: raise(Error, "#{where}.sink must be \"git\" in this wave")
+      unless sink in @sinks,
+        do: raise(Error, "#{where}.sink must be one of #{Enum.join(@sinks, ", ")}")
 
       executables = string_list!(attrs, "executables", where)
 

@@ -73,7 +73,7 @@ defmodule Omashiki.Jobs.Contract.V1 do
       webhook_signature: :hmac_sha256_timestamp_bound,
       webhook_retry_window_seconds: 86_400,
       timeout_source: :environment,
-      success_artifact: :clean_committed_branch
+      success_artifact: :sink_dependent
     }
   end
 
@@ -84,9 +84,10 @@ defmodule Omashiki.Jobs.Contract.V1 do
       attrs
       |> base_errors(
         @single_keys,
-        ~w(schema_version idempotency_key correlation_id repo environment payload priority)
+        ~w(schema_version idempotency_key correlation_id environment payload priority)
       )
-      |> validate_nonempty(attrs, ~w(idempotency_key correlation_id repo environment))
+      |> validate_nonempty(attrs, ~w(idempotency_key correlation_id environment))
+      |> validate_optional_nonempty(attrs, "repo")
       |> validate_priority(attrs)
       |> validate_payload(attrs, "payload")
 
@@ -115,7 +116,8 @@ defmodule Omashiki.Jobs.Contract.V1 do
         ~w(schema_version job_id idempotency_key correlation_id repo environment priority status attempt submitted_at)
       )
       |> validate_uuid(attrs, "job_id")
-      |> validate_nonempty(attrs, ~w(idempotency_key correlation_id repo environment))
+      |> validate_nonempty(attrs, ~w(idempotency_key correlation_id environment))
+      |> validate_optional_nonempty(attrs, "repo")
       |> validate_priority(attrs)
       |> validate_inclusion(attrs, "status", ~w(blocked queued))
       |> validate_exact_integer(attrs, "attempt", 1)
@@ -441,9 +443,10 @@ defmodule Omashiki.Jobs.Contract.V1 do
     job
     |> base_errors(
       @batch_job_keys,
-      ~w(ref idempotency_key repo environment payload priority)
+      ~w(ref idempotency_key environment payload priority)
     )
-    |> validate_nonempty(job, ~w(ref idempotency_key repo environment))
+    |> validate_nonempty(job, ~w(ref idempotency_key environment))
+    |> validate_optional_nonempty(job, "repo")
     |> validate_optional_nonempty(job, "parent_ref")
     |> validate_priority(job)
     |> validate_payload(job, "payload")
@@ -629,13 +632,10 @@ defmodule Omashiki.Jobs.Contract.V1 do
     case Map.get(attrs, "status") do
       "succeeded" ->
         errors
-        |> require_present(attrs, ~w(branch base_sha head_sha worktree_clean result))
+        |> require_present(attrs, ["result"])
         |> forbid_present(attrs, ["error"])
-        |> validate_nonempty(attrs, ["branch"])
-        |> validate_sha(attrs, "base_sha")
-        |> validate_sha(attrs, "head_sha")
-        |> validate_true(attrs, "worktree_clean")
         |> validate_json(attrs, "result")
+        |> validate_success_shape(attrs)
 
       status when status in ~w(failed cancelled) ->
         errors
@@ -645,6 +645,34 @@ defmodule Omashiki.Jobs.Contract.V1 do
 
       _ ->
         errors
+    end
+  end
+
+  defp validate_success_shape(errors, attrs) do
+    git_fields = ~w(branch base_sha head_sha worktree_clean)
+
+    present =
+      Enum.filter(git_fields, fn key ->
+        Map.has_key?(attrs, key) and not is_nil(Map.get(attrs, key))
+      end)
+
+    cond do
+      present == [] ->
+        errors
+
+      present == git_fields ->
+        errors
+        |> validate_nonempty(attrs, ["branch"])
+        |> validate_sha(attrs, "base_sha")
+        |> validate_sha(attrs, "head_sha")
+        |> validate_true(attrs, "worktree_clean")
+
+      true ->
+        Enum.reduce(git_fields, errors, fn key, acc ->
+          if Map.has_key?(attrs, key) and not is_nil(Map.get(attrs, key)),
+            do: [error(key, "incoherent_git_shape") | acc],
+            else: [error(key, "required") | acc]
+        end)
     end
   end
 

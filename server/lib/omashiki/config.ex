@@ -227,29 +227,54 @@ defmodule Omashiki.Config do
   end
 
   @doc "Resolve names to values captured for one admitted job."
-  def resolve_job(repository_name, environment_name)
-      when is_binary(repository_name) and is_binary(environment_name) do
+  def resolve_job(repository_name, environment_name) when is_binary(environment_name) do
     snapshot = snapshot()
-    repository = Enum.find(snapshot.repositories, &(&1.name == repository_name))
-    environment = Enum.find(snapshot.environments, &(&1.name == environment_name))
 
-    with %{} = repository <- repository,
-         %{} = environment <- environment do
-      {:ok,
-       %ResolvedJob{
-         repository: repository,
-         environment: environment,
-         digest: snapshot.registry_digest
-       }}
-    else
+    case Enum.find(snapshot.environments, &(&1.name == environment_name)) do
       nil ->
-        if repository,
-          do: {:error, :unknown_environment},
-          else: {:error, :unknown_repository}
+        {:error, :unknown_environment}
+
+      %{sink: sink} = environment ->
+        resolve_for_sink(snapshot, repository_name, environment, sink)
     end
   end
 
   def resolve_job(_, _), do: {:error, :invalid_reference}
+
+  defp resolve_for_sink(snapshot, repository_name, environment, "git") do
+    if is_binary(repository_name) do
+      case Enum.find(snapshot.repositories, &(&1.name == repository_name)) do
+        nil ->
+          {:error, :unknown_repository}
+
+        repository ->
+          {:ok,
+           %ResolvedJob{
+             repository: repository,
+             environment: environment,
+             digest: snapshot.registry_digest
+           }}
+      end
+    else
+      {:error, :repository_required}
+    end
+  end
+
+  defp resolve_for_sink(snapshot, nil, environment, sink) when sink in ["files", "none"] do
+    {:ok,
+     %ResolvedJob{
+       repository: nil,
+       environment: environment,
+       digest: snapshot.registry_digest
+     }}
+  end
+
+  defp resolve_for_sink(_snapshot, _repository_name, _environment, sink)
+       when sink in ["files", "none"],
+       do: {:error, :repository_not_allowed}
+
+  defp resolve_for_sink(_snapshot, _repository_name, _environment, _sink),
+    do: {:error, :invalid_reference}
 
   def get_repository(name) when is_binary(name),
     do: Enum.find(repositories(), &(&1.name == name))

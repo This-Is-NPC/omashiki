@@ -413,8 +413,7 @@ defmodule Omashiki.Jobs do
     head_sha = get_attr(attrs, :head_sha)
     worktree_clean = get_attr(attrs, :worktree_clean)
 
-    if is_map(result) and is_binary(branch) and is_binary(base_sha) and is_binary(head_sha) and
-         worktree_clean == true do
+    if valid_success_result?(job, result, branch, base_sha, head_sha, worktree_clean) do
       updated =
         update_job!(job, %{
           status: "succeeded",
@@ -423,20 +422,19 @@ defmodule Omashiki.Jobs do
           terminal_error: nil
         })
 
-      completed_attempt =
-        update_attempt!(attempt, %{
+      attempt_attrs =
+        %{
           status: "succeeded",
           finished_at: now,
-          branch: branch,
-          base_sha: base_sha,
-          head_sha: head_sha,
-          worktree_clean: true,
           result: result,
           error: nil,
           capacity_reserved: false,
           lease_token: nil,
           lease_expires_at: nil
-        })
+        }
+        |> maybe_put_git_fields(branch, base_sha, head_sha, worktree_clean)
+
+      completed_attempt = update_attempt!(attempt, attempt_attrs)
 
       release_capacity_if_reserved!(attempt)
 
@@ -444,11 +442,7 @@ defmodule Omashiki.Jobs do
         record_event!(
           updated,
           "succeeded",
-          %{
-            "branch" => branch,
-            "base_sha" => base_sha,
-            "head_sha" => head_sha
-          },
+          success_event_data(branch, base_sha, head_sha),
           completed_attempt
         )
 
@@ -485,6 +479,41 @@ defmodule Omashiki.Jobs do
     cancel_blocked_children!(updated, status)
     updated
   end
+
+  defp valid_success_result?(_job, result, branch, base_sha, head_sha, worktree_clean)
+       when is_map(result) and is_binary(branch) and is_binary(base_sha) and
+              is_binary(head_sha) and worktree_clean == true,
+       do: true
+
+  defp valid_success_result?(_job, result, nil, nil, nil, nil) when is_map(result), do: true
+
+  defp valid_success_result?(_job, _result, _branch, _base_sha, _head_sha, _worktree_clean),
+    do: false
+
+  defp maybe_put_git_fields(attrs, branch, base_sha, head_sha, true) do
+    Map.merge(attrs, %{
+      branch: branch,
+      base_sha: base_sha,
+      head_sha: head_sha,
+      worktree_clean: true
+    })
+  end
+
+  defp maybe_put_git_fields(attrs, _branch, _base_sha, _head_sha, _worktree_clean) do
+    Map.merge(attrs, %{
+      branch: nil,
+      base_sha: nil,
+      head_sha: nil,
+      worktree_clean: nil
+    })
+  end
+
+  defp success_event_data(branch, base_sha, head_sha)
+       when is_binary(branch) and is_binary(base_sha) and is_binary(head_sha) do
+    %{"branch" => branch, "base_sha" => base_sha, "head_sha" => head_sha}
+  end
+
+  defp success_event_data(_branch, _base_sha, _head_sha), do: %{}
 
   defp fenced_terminal(job_or_id, status, attrs) do
     with {:ok, id} <- job_id(job_or_id) do

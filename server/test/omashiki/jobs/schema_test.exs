@@ -279,11 +279,22 @@ defmodule Omashiki.Jobs.SchemaTest do
         status: "succeeded",
         started_at: now,
         finished_at: now,
+        branch: "omashiki/job-test",
         result: %{"ok" => true}
       })
 
     assert {:error, terminal_changeset} = Repo.update(invalid_success)
     assert terminal_changeset.errors[:status]
+
+    non_git_success =
+      JobAttempt.changeset(attempt, %{
+        status: "succeeded",
+        started_at: now,
+        finished_at: now,
+        result: %{"ok" => true}
+      })
+
+    assert {:ok, _} = Repo.update(non_git_success)
   end
 
   test "declares queue, outbox, and retention indexes" do

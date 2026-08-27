@@ -29,13 +29,12 @@ defmodule Omashiki.Jobs.Contract.V1Test do
   test "rejects missing, unknown, and invalid single job fields" do
     assert {:error, errors} =
              single_request()
-             |> Map.delete("repo")
              |> Map.put("parent_ref", "not-allowed-on-single")
              |> Map.put("priority", 4)
              |> Map.put("schema_version", 2)
              |> V1.validate_single()
 
-    assert_error(errors, "repo", "required")
+    assert {:ok, _} = V1.validate_single(single_request() |> Map.delete("repo"))
     assert_error(errors, "parent_ref", "unknown_field")
     assert_error(errors, "priority", "must_be_between_0_and_3")
     assert_error(errors, "schema_version", "unsupported")
@@ -217,11 +216,19 @@ defmodule Omashiki.Jobs.Contract.V1Test do
              |> V1.validate_result()
 
     assert_error(errors, "head_sha", "required")
-    assert_error(errors, "worktree_clean", "must_be_true")
+    assert_error(errors, "worktree_clean", "incoherent_git_shape")
     assert_error(errors, "error", "not_allowed")
   end
 
-  test "requires structured error and forbids result artifacts on failure" do
+  test "accepts succeeded results without git fields" do
+    result =
+      successful_result()
+      |> Map.drop(["branch", "base_sha", "head_sha", "worktree_clean"])
+
+    assert {:ok, ^result} = V1.validate_result(result)
+  end
+
+    test "requires structured error and forbids result artifacts on failure" do
     failed = %{
       "schema_version" => 1,
       "job_id" => @job_id,

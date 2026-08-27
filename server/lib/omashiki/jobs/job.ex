@@ -107,22 +107,20 @@ defmodule Omashiki.Jobs.Job do
       :user_id,
       :idempotency_key,
       :correlation_id,
-      :repository,
       :environment,
       :payload,
       :payload_hash,
-      :admitted_repository,
-      :admitted_repository_digest,
       :admitted_environment,
       :admitted_environment_digest,
-    :admitted_plugin_digest,
-    :admitted_plugin,
+      :admitted_plugin_digest,
+      :admitted_plugin,
       :registry_digest,
       :queue,
       :priority,
       :status,
       :current_attempt
     ])
+    |> validate_repository_shape()
     |> validate_inclusion(:status, @statuses)
     |> validate_number(:priority, greater_than_or_equal_to: 0, less_than_or_equal_to: 3)
     |> validate_number(:current_attempt, greater_than: 0)
@@ -133,5 +131,22 @@ defmodule Omashiki.Jobs.Job do
     |> foreign_key_constraint(:parent_job_id)
     |> foreign_key_constraint(:parent_job_id, name: :jobs_parent_owner_fkey)
     |> check_constraint(:status, name: :jobs_terminal_shape)
+  end
+
+  defp validate_repository_shape(changeset) do
+    repository = get_field(changeset, :repository)
+    admitted_repository = get_field(changeset, :admitted_repository)
+    admitted_repository_digest = get_field(changeset, :admitted_repository_digest)
+
+    cond do
+      is_nil(repository) and is_nil(admitted_repository) and is_nil(admitted_repository_digest) ->
+        changeset
+
+      is_binary(repository) and is_map(admitted_repository) and is_binary(admitted_repository_digest) ->
+        changeset
+
+      true ->
+        add_error(changeset, :repository, "repository snapshot must be present or absent together")
+    end
   end
 end
