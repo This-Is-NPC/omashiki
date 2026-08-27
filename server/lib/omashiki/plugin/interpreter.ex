@@ -108,9 +108,7 @@ defmodule Omashiki.Plugin.Interpreter do
     payload = if credential, do: put_model(payload, credential, llm_egress, manifest, context), else: payload
 
     with %Capability{} = capability <- context.capability,
-         {:ok, session} <- Omashiki.Harness.OpenCode.Http.start_session(capability),
-         result <- Omashiki.Harness.OpenCode.Http.send_turn(capability, session, payload) do
-      _ = Omashiki.Harness.OpenCode.Http.finish(capability, session)
+         result <- Omashiki.Harness.OpenCode.http_turn(capability, payload) do
       normalize_http_result(result)
     else
       _ -> {:error, :harness_endpoint_unavailable}
