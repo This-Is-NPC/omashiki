@@ -27,6 +27,8 @@ documents above is aspirational, not current.
   backend giving each sandbox its own kernel.
 - [Generic task processor](generic-task-processor.md): structured non-Git
   results and optional repositories, without weakening the caller boundary.
+- [Plugins and task lifecycle](plugins-e-ciclo-de-vida.md): declarative plugin
+  manifests, harness cost model, and Wave 2 gate criteria.
 
 ## Engineering Records
 
