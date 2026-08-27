@@ -3,6 +3,8 @@ defmodule Omashiki.Jobs.Admission do
 
   import Ecto.Query
 
+  alias Omashiki.Config.Environment
+  alias Omashiki.Jobs.TaskBranch
   alias Omashiki.Accounts.User
   alias Omashiki.ApiTokens.Token
   alias Omashiki.Config
@@ -92,16 +94,21 @@ defmodule Omashiki.Jobs.Admission do
   end
 
   defp resolve(request) do
-    case Config.resolve_job(request["repo"], request["environment"]) do
-      {:ok, resolved} -> {:ok, snapshot_context(resolved)}
+    with {:ok, %Config.ResolvedJob{} = resolved} <-
+           Config.resolve_job(request["repo"], request["environment"]),
+         :ok <- validate_git_task_branch(request, resolved.environment) do
+      {:ok, snapshot_context(resolved, request)}
+    else
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp snapshot_context(%Config.ResolvedJob{} = resolved) do
+  defp snapshot_context(%Config.ResolvedJob{} = resolved, request) do
     repository =
       if resolved.repository,
-        do: snapshot_value(resolved.repository),
+        do:
+          snapshot_value(resolved.repository)
+          |> maybe_put_task_branch(request, resolved.environment),
         else: nil
 
     plugin = plugin_snapshot(resolved.environment)
@@ -117,6 +124,7 @@ defmodule Omashiki.Jobs.Admission do
       registry_digest: resolved.digest
     }
   end
+
   defp plugin_snapshot(%{preset: %{manifest: %Omashiki.Plugin.Manifest{} = manifest}}) do
     Omashiki.Plugin.Manifest.admitted_snapshot(manifest)
   end
@@ -125,7 +133,8 @@ defmodule Omashiki.Jobs.Admission do
     raise ArgumentError, "environment has no plugin manifest: #{inspect(environment)}"
   end
 
-  defp snapshot_value(%Omashiki.Plugin.Manifest{} = manifest), do: Omashiki.Plugin.Manifest.snapshot(manifest)
+  defp snapshot_value(%Omashiki.Plugin.Manifest{} = manifest),
+    do: Omashiki.Plugin.Manifest.snapshot(manifest)
 
   defp snapshot_value(%_{} = struct) do
     struct
@@ -421,6 +430,43 @@ defmodule Omashiki.Jobs.Admission do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp validate_git_task_branch(request, %Environment{sink: "git"}) do
+    case TaskBranch.resolve(request["payload"]) do
+      {:ok, _} ->
+        :ok
+
+      {:error, :task_branch_required} ->
+        {:error, :task_branch_required}
+
+      {:error, reason} ->
+        {:error, {:validation, [task_branch_validation_error(reason)]}}
+    end
+  end
+
+  defp validate_git_task_branch(_request, %Environment{sink: sink})
+       when sink in ["files", "none"],
+       do: :ok
+
+  defp maybe_put_task_branch(repository, request, %Environment{sink: "git"})
+       when is_map(repository) do
+    {:ok, task_branch} = TaskBranch.resolve(request["payload"])
+    Map.put(repository, "task_branch", task_branch)
+  end
+
+  defp maybe_put_task_branch(repository, _request, _environment), do: repository
+
+  defp task_branch_validation_error(:invalid_branch),
+    do: %{field: "payload.branch", code: "invalid_branch"}
+
+  defp task_branch_validation_error(:invalid_title),
+    do: %{field: "payload.title", code: "invalid_title"}
+
+  defp task_branch_validation_error(:invalid_title_slug),
+    do: %{field: "payload.title", code: "invalid_title_slug"}
+
+  defp task_branch_validation_error(reason),
+    do: %{field: "payload", code: Atom.to_string(reason)}
 
   defp unique_idempotency_error?(%Ecto.Changeset{errors: errors}) do
     Enum.any?(errors, fn
