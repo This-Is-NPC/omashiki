@@ -3,25 +3,19 @@ defmodule OmashikiWeb.ScreenSkeletonTest do
 
   import Phoenix.LiveViewTest
 
-  test "operator routes expose only queue operations", %{conn: conn} do
+  test "operator routes expose only Home and Config", %{conn: conn} do
     {:ok, _lv, overview} = live(conn, ~p"/")
-    {:ok, _lv, queue} = live(conn, ~p"/queue")
     {:ok, _lv, config} = live(conn, ~p"/config")
 
     assert overview =~ "Operations overview"
     assert overview =~ "Cache health"
     assert overview =~ "Webhook failures"
-    assert queue =~ "Blocked"
-    assert queue =~ "Queued"
-    assert queue =~ "Running"
     assert config =~ "Repositories"
     assert config =~ "Environments"
     assert config =~ "Caches"
+    assert config =~ "Reload configuration"
 
-    # Against the operator's own reading of the screen, not the raw document:
-    # the CSRF and LiveView session tokens are base64url and will contain any
-    # of these letter runs by chance.
-    for html <- [overview, queue, config] do
+    for html <- [overview, config] do
       text = visible_text(html)
       refute text =~ "DAG"
       refute text =~ "Review"
@@ -34,14 +28,21 @@ defmodule OmashikiWeb.ScreenSkeletonTest do
 
   test "browser routes require an authenticated operator", %{} do
     conn = build_conn() |> Plug.Test.init_test_session(%{})
-    assert {:error, {:redirect, %{to: "/login"}}} = live(conn, ~p"/queue")
+    assert {:error, {:redirect, %{to: "/login"}}} = live(conn, ~p"/")
+    assert {:error, {:redirect, %{to: "/login"}}} = live(conn, ~p"/config")
   end
 
-  test "primary navigation contains only operational routes", %{conn: conn} do
+  test "primary navigation contains only Home and Config", %{conn: conn} do
     {:ok, _lv, html} = live(conn, ~p"/")
-    assert html =~ ~s(href="/")
-    assert html =~ ~s(href="/queue")
-    assert html =~ ~s(href="/config")
+
+    nav =
+      html
+      |> Floki.parse_document!()
+      |> Floki.find("nav[aria-label=\"Primary\"]")
+
+    assert Floki.attribute(nav, "a", "href") == ["/", "/config"]
+    refute html =~ ~s(href="/queue")
+    refute html =~ ~s(href="/runtime")
     refute html =~ ~s(href="/tasks")
   end
 end

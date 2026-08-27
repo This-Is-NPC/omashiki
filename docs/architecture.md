@@ -51,8 +51,9 @@ flowchart LR
 - **HTTP and operator surfaces.** `OmashikiWeb.Router` exposes health and token
   issuance, authenticated repository/environment discovery, job admission and
   lifecycle, result/history reads, SSE, and delivery status. LiveView exposes
-  `/`, `/queue`, `/jobs/:id`, and `/config`; it reads the submitting operator's
-  jobs and refreshes from PubSub plus a two-second refresh.
+  `/` (Home) and `/config`; it reads the submitting operator's jobs and refreshes from
+  PubSub plus a two-second refresh. Queue, runtime-graph, and per-job screens were
+  removed; job lifecycle stays on the HTTP API.
 - **Admission and state.** `Omashiki.Jobs.Admission` validates the versioned
   contract, resolves declared names, captures redacted snapshots and SHA-256
   digests, and persists the job, first attempt, first event, and dispatch row in

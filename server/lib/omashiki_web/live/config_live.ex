@@ -4,6 +4,7 @@ defmodule OmashikiWeb.ConfigLive do
   use OmashikiWeb, :live_view
 
   alias Omashiki.Config
+  alias Omashiki.Config.Rollout
   alias Omashiki.HostSettings
   alias Omashiki.Runtimes.CacheMaintenance
   alias OmashikiWeb.OperationHelpers, as: Ops
@@ -12,9 +13,15 @@ defmodule OmashikiWeb.ConfigLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(:page_title, "Omashiki · Runtime config")
+     |> assign(:page_title, "Omashiki · Config")
      |> assign(:active_tab, :config)
+     |> assign(:reload_result, nil)
      |> assign_config()}
+  end
+
+  @impl true
+  def handle_event("reload_config", _params, socket) do
+    {:noreply, assign(socket, :reload_result, Rollout.reload())}
   end
 
   @impl true
@@ -79,13 +86,27 @@ defmodule OmashikiWeb.ConfigLive do
   def render(assigns) do
     ~H"""
     <div class="flex flex-col gap-8 py-2">
-      <header>
-        <h1 class="font-headline italic text-3xl text-on-surface">Runtime configuration</h1>
-        <p class="mt-1 font-mono text-sm text-on-surface-variant">
-          Read-only declarations · restart to change
-        </p>
+      <header class="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 class="font-headline italic text-3xl text-on-surface">Runtime configuration</h1>
+          <p class="mt-1 font-mono text-sm text-on-surface-variant">
+            Declarations from omashiki.toml · reload applies the execution registry
+          </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-4">
+          <button
+            type="button"
+            phx-click="reload_config"
+            phx-disable-with="Reloading…"
+            class="border border-outline-variant px-4 py-2 font-label text-label-md uppercase tracking-[0.2em] text-on-surface hover:bg-surface-container-high"
+          >
+            Reload configuration
+          </button>
+          <p :if={@reload_result} class={["font-mono text-xs", reload_class(@reload_result)]}>
+            {reload_message(@reload_result)}
+          </p>
+        </div>
       </header>
-
       <section class="border border-outline-variant bg-surface-container p-5">
         <header class="mb-5 flex flex-wrap items-baseline justify-between gap-3">
           <h2 class="font-label text-label-md tracking-[0.25em] uppercase text-on-surface-variant">
@@ -212,6 +233,29 @@ defmodule OmashikiWeb.ConfigLive do
     </div>
     """
   end
+
+  defp reload_message({:ok, :draining}),
+    do: "Drain started; admission is paused until active attempts finish."
+
+  defp reload_message({:ok, %{changed?: false, generation: generation}}),
+    do: "Reloaded as generation #{generation}; the registry digest did not change."
+
+  defp reload_message({:ok, %{changed?: true, generation: generation}}),
+    do: "Applied generation #{generation}. Newly admitted jobs use it."
+
+  defp reload_message({:error, :drain_in_progress}),
+    do: "A rollout is already draining; wait for it to finish."
+
+  defp reload_message({:error, reason}),
+    do: "Reload rejected, previous configuration still serving: #{inspect_reason(reason)}"
+
+  defp reload_message(_result), do: ""
+
+  defp inspect_reason(reason) when is_binary(reason), do: reason
+  defp inspect_reason(reason), do: inspect(reason)
+
+  defp reload_class({:error, _reason}), do: "text-status-failed"
+  defp reload_class(_result), do: "text-status-succeeded"
 
   defp format_limit(nil, _suffix), do: nil
   defp format_limit(value, suffix), do: "#{value}#{suffix}"

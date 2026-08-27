@@ -23,7 +23,8 @@ defmodule OmashikiWeb.AuthHooksTest do
 
     test "GET / with a logged-in user mounts the LiveView", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/")
-      assert html =~ "Overview"
+      assert html =~ "Home"
+      assert html =~ "Operations overview"
     end
   end
 end

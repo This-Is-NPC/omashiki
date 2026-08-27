@@ -20,8 +20,8 @@ defmodule OmashikiWeb.OverviewLive do
 
     {:ok,
      socket
-     |> assign(:page_title, "Omashiki · Overview")
-     |> assign(:active_tab, :overview)
+     |> assign(:page_title, "Omashiki · Home")
+     |> assign(:active_tab, :home)
      |> assign_snapshot()}
   end
 
@@ -140,10 +140,7 @@ defmodule OmashikiWeb.OverviewLive do
               :for={event <- @terminal_events}
               class="flex flex-wrap items-baseline justify-between gap-3 py-3"
             >
-              <.link
-                navigate={~p"/jobs/#{event.job_id}"}
-                class="font-mono text-xs text-primary-container hover:underline"
-              >{Ops.short_id(event.job_id)}</.link>
+              <span class="font-mono text-xs text-on-surface">{Ops.short_id(event.job_id)}</span>
               <span class={["font-mono text-xs uppercase", Ops.status_class(event.status)]}>{event.status}</span>
               <time class="font-mono text-xs text-on-surface-variant" datetime={event.occurred_at}>{Ops.age(
                 event.occurred_at
@@ -161,10 +158,7 @@ defmodule OmashikiWeb.OverviewLive do
               :for={delivery <- @webhook_failures}
               class="flex flex-wrap items-baseline justify-between gap-3 py-3"
             >
-              <.link
-                navigate={~p"/jobs/#{delivery.job_id}"}
-                class="font-mono text-xs text-primary-container hover:underline"
-              >{Ops.short_id(delivery.job_id)}</.link>
+              <span class="font-mono text-xs text-on-surface">{Ops.short_id(delivery.job_id)}</span>
               <span class={["font-mono text-xs uppercase", Ops.status_class(delivery.status)]}>{delivery.status}</span>
               <span class="font-mono text-xs text-on-surface-variant">attempt {delivery.attempts}</span>
             </li>

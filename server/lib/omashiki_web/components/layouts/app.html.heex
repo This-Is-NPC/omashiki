@@ -10,24 +10,10 @@
       <nav class="flex flex-wrap items-center gap-6" aria-label="Primary">
         <.link
           navigate="/"
-          class={nav_link_class(:overview, assigns)}
-          aria-current={if assigns[:active_tab] == :overview, do: "page", else: nil}
+          class={nav_link_class(:home, assigns)}
+          aria-current={if assigns[:active_tab] == :home, do: "page", else: nil}
         >
-          Overview
-        </.link>
-        <.link
-          navigate="/queue"
-          class={nav_link_class(:queue, assigns)}
-          aria-current={if assigns[:active_tab] == :queue, do: "page", else: nil}
-        >
-          Queue
-        </.link>
-        <.link
-          navigate="/runtime"
-          class={nav_link_class(:runtime, assigns)}
-          aria-current={if assigns[:active_tab] == :runtime, do: "page", else: nil}
-        >
-          Runtime
+          Home
         </.link>
         <.link
           navigate="/config"

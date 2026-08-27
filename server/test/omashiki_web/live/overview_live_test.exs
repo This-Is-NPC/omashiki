@@ -30,6 +30,34 @@ defmodule OmashikiWeb.OverviewLiveTest do
     assert visible_text(html) =~ "0 / 0"
   end
 
+  test "primary nav is only Home and Config", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, ~p"/")
+
+    nav =
+      html
+      |> Floki.parse_document!()
+      |> Floki.find("nav[aria-label=\"Primary\"]")
+
+    assert Floki.attribute(nav, "a", "href") == ["/", "/config"]
+
+    text = Floki.text(nav, sep: " ")
+    assert text =~ "Home"
+    assert text =~ "Config"
+    refute text =~ "Queue"
+    refute text =~ "Runtime"
+  end
+
+  test "home does not link into a job page", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, ~p"/")
+    refute html =~ ~s(href="/jobs/)
+  end
+
+  test "retired operator screens are gone", %{conn: conn} do
+    assert get(conn, "/queue").status == 404
+    assert get(conn, "/runtime").status == 404
+    assert get(conn, "/jobs/#{Ecto.UUID.generate()}").status == 404
+  end
+
   defp insert_node!(node, capacity) do
     now = DateTime.utc_now()
 

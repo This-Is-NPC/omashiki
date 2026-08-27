@@ -5,7 +5,7 @@
 # events.
 #
 # The execution registry below — repositories, presets, environments,
-# credentials, caches, limits — reloads hot from /runtime with no restart. See
+# credentials, caches, limits — reloads hot from /config with no restart. See
 # [reload]. The infrastructure sections at the top ([app], [db], [auth]) are
 # read by the entrypoints and by config/runtime.exs before the core is up, and
 # still need a restart.
