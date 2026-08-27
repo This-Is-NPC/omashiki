@@ -228,7 +228,7 @@ defmodule Omashiki.Jobs.Contract.V1Test do
     assert {:ok, ^result} = V1.validate_result(result)
   end
 
-    test "requires structured error and forbids result artifacts on failure" do
+  test "requires structured error and forbids result artifacts on failure" do
     failed = %{
       "schema_version" => 1,
       "job_id" => @job_id,

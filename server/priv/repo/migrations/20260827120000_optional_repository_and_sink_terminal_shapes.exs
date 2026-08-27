@@ -5,6 +5,10 @@ defmodule Omashiki.Repo.Migrations.OptionalRepositoryAndSinkTerminalShapes do
     drop constraint(:jobs, :jobs_admitted_repository_digest_sha256)
     drop constraint(:job_attempts, :job_attempts_terminal_shape)
 
+    # jobs_terminal_shape is deliberately untouched: the jobs table has no git
+    # columns and was already result-only; only job_attempts_terminal_shape gains
+    # the XOR branch/sha constraint for sink-agnostic attempt persistence.
+
     alter table(:jobs) do
       modify :repository, :text, null: true
       modify :admitted_repository, :map, null: true
