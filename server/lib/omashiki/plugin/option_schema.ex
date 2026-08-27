@@ -67,10 +67,6 @@ defmodule Omashiki.Plugin.OptionSchema do
     if CliJson.positive_timeout?(value), do: :ok, else: {:error, :invalid_timeout}
   end
 
-  defp validate_value("timeout_ms", %{"type" => "positive_int"}, value) do
-    if CliJson.positive_timeout?(value), do: :ok, else: {:error, :invalid_timeout}
-  end
-
   defp validate_value(_name, %{"type" => "positive_int", "optional" => true}, nil), do: :ok
 
   defp validate_value(_name, %{"type" => "positive_int"}, value) do
