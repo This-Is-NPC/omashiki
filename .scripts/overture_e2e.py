@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import fcntl
+import json
 import os
 from pathlib import Path
 import shutil
@@ -22,6 +23,7 @@ OPENCODE_CONFIG = Path.home() / ".config" / "opencode" / "opencode.json"
 OPENCODE_AUTH = Path.home() / ".local" / "share" / "opencode" / "auth.json"
 CLAUDE_CREDENTIALS = Path.home() / ".claude" / ".credentials.json"
 LOCAL_LLM_BASE_URL_VAR = "OMASHIKI_LOCAL_LLM_BASE_URL"
+LOCAL_LLM_MODEL = "qwen/qwen3.5-9b"
 
 
 def run(*argv: str, cwd: Path | None = None, capture: bool = False) -> str:
@@ -41,7 +43,10 @@ def assert_safe_existing_repo() -> None:
     if not OVERTURE.is_dir():
         raise SystemExit(f"refusing to wipe non-directory: {OVERTURE}")
     if not (OVERTURE / ".git").exists():
-        raise SystemExit(f"refusing to wipe a directory that is not the overture Git repo: {OVERTURE}")
+        raise SystemExit(
+            "refusing to wipe a directory that is not the overture Git repo: "
+            f"{OVERTURE}"
+        )
 
     top = Path(run("git", "rev-parse", "--show-toplevel", cwd=OVERTURE, capture=True)).resolve()
     if top != OVERTURE:
@@ -61,7 +66,7 @@ def assert_safe_existing_repo() -> None:
 @contextmanager
 def fixture_lock():
     if LOCK_PATH.parent.is_symlink():
-        raise SystemExit(f"refusing to use symlinked E2E state directory: {LOCK_PATH.parent}")
+        raise SystemExit(f"refusing to use a symlink lock path: {LOCK_PATH.parent}")
     LOCK_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with LOCK_PATH.open("a+") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
@@ -110,6 +115,49 @@ def ensure_private_snapshot(source: Path, destination: Path, provider: str) -> N
         os.chmod(destination, 0o600)
         return
     copy_private_file(source, destination, provider)
+
+
+def _toml_str(value: str) -> str:
+    return json.dumps(value)
+
+
+def _environment_stanza(
+    *,
+    name: str,
+    preset: str,
+    image: str,
+    credentials: list[str],
+    caches: list[str],
+    cpus: float,
+    memory: str,
+    pids: int,
+) -> str:
+    creds = ", ".join(_toml_str(item) for item in credentials)
+    cache_items = ", ".join(_toml_str(item) for item in caches)
+    return f"""
+[environments.{name}]
+preset = {_toml_str(preset)}
+isolation = "docker"
+image = {_toml_str(image)}
+sink = "git"
+packages = []
+executables = ["git"]
+credentials = [{creds}]
+caches = [{cache_items}]
+timeout_ms = 900000
+network = "restricted"
+mounts = []
+pre_steps = []
+post_steps = []
+
+[environments.{name}.policy]
+mode = "off"
+
+[environments.{name}.resources]
+cpus = {cpus}
+memory = {_toml_str(memory)}
+pids = {pids}
+"""
 
 
 def prepare(provider: str) -> None:
@@ -161,76 +209,68 @@ path = "overture"
 base_branch = "main"
 """
     if opencode_ready:
-        additions += """
-
-[environments.e2e-opencode]
-harness = "opencode"
-executables = ["git"]
-credentials = []
-caches = ["global"]
-timeout_ms = 900000
-network = "restricted"
-mounts = [
-  { source = ".omashiki/e2e/opencode.json", target = "/run/omashiki/harness/opencode.json", read_only = true },
-  { source = ".omashiki/e2e/auth.json", target = "/run/omashiki/harness/auth.json", read_only = true },
-]
-pre_steps = []
-post_steps = []
-
-[environments.e2e-opencode.policy]
-mode = "off"
-
-[environments.e2e-opencode.resources]
-cpus = 2.0
-memory = "2GB"
-pids = 256
+        auth = SNAPSHOT_ROOT / "auth.json"
+        config = SNAPSHOT_ROOT / "opencode.json"
+        additions += f"""
+[host_credentials.e2e-opencode]
+kind = "opencode"
+auth = {_toml_str(str(auth))}
+config = {_toml_str(str(config))}
 """
+        additions += _environment_stanza(
+            name="e2e-opencode",
+            preset="opencode",
+            image="omashiki/agent:latest",
+            credentials=["e2e-opencode"],
+            caches=["global"],
+            cpus=2.0,
+            memory="2GB",
+            pids=256,
+        )
     if claude_ready:
-        additions += """
-
-[environments.e2e-claude]
-harness = "claude-code"
-executables = ["git"]
-credentials = []
-caches = ["global"]
-timeout_ms = 900000
-network = "restricted"
-mounts = [
-  { source = ".omashiki/e2e/claude-credentials.json", target = "/run/omashiki/state/claude-credentials.json", read_only = false },
-]
-pre_steps = []
-post_steps = []
-
-[environments.e2e-claude.policy]
-mode = "off"
-
-[environments.e2e-claude.resources]
-cpus = 2.0
-memory = "2GB"
-pids = 256
+        credentials = SNAPSHOT_ROOT / "claude-credentials.json"
+        additions += f"""
+[host_credentials.e2e-claude]
+kind = "claude-code"
+credentials = {_toml_str(str(credentials))}
 """
+        additions += _environment_stanza(
+            name="e2e-claude",
+            preset="claude-code",
+            image="omashiki/agent-claude:latest",
+            credentials=["e2e-claude"],
+            caches=["global"],
+            cpus=2.0,
+            memory="2GB",
+            pids=256,
+        )
     if jcode_ready:
-        additions += """
+        # Tracked omashiki.toml keeps these commented so a missing
+        # OMASHIKI_LOCAL_LLM_BASE_URL cannot abort every other entrypoint.
+        # Bake the resolved URL into the gitignored e2e file: mix test does
+        # not inherit the prepare-time environment.
+        base_url = os.environ[LOCAL_LLM_BASE_URL_VAR]
+        additions += f"""
+[credentials.local-llm]
+provider = "llamacpp"
+model = {_toml_str(LOCAL_LLM_MODEL)}
+base_url = {_toml_str(base_url)}
+api_key = "unused-by-llama-server"
 
-[environments.e2e-jcode]
-harness = "jcode"
-executables = ["git"]
-credentials = ["local-llm"]
-caches = []
-timeout_ms = 900000
-network = "restricted"
-mounts = []
-pre_steps = []
-post_steps = []
-
-[environments.e2e-jcode.policy]
-mode = "off"
-
-[environments.e2e-jcode.resources]
-cpus = 1.0
-memory = "1GB"
-pids = 256
+[presets.jcode]
+plugin = "jcode"
+options = {{ timeout_ms = 1800000, model = {_toml_str(LOCAL_LLM_MODEL)} }}
 """
+        additions += _environment_stanza(
+            name="e2e-jcode",
+            preset="jcode",
+            image="omashiki/agent-jcode:latest",
+            credentials=["local-llm"],
+            caches=[],
+            cpus=1.0,
+            memory="1GB",
+            pids=256,
+        )
     E2E_CONFIG.write_text(base + additions, encoding="utf-8")
     print(f"snapshots ready: {SNAPSHOT_ROOT}")
     print(f"config ready: {E2E_CONFIG}")
@@ -249,7 +289,11 @@ def validate(provider: str) -> None:
 
 def validate_locked(provider: str) -> None:
     if provider == "claude":
-        copy_private_file(CLAUDE_CREDENTIALS, SNAPSHOT_ROOT / "claude-credentials.json", "Claude Code credentials")
+        copy_private_file(
+            CLAUDE_CREDENTIALS,
+            SNAPSHOT_ROOT / "claude-credentials.json",
+            "Claude Code credentials",
+        )
     elif provider == "opencode":
         copy_private_file(OPENCODE_CONFIG, SNAPSHOT_ROOT / "opencode.json", "OpenCode config")
         copy_private_file(OPENCODE_AUTH, SNAPSHOT_ROOT / "auth.json", "OpenCode auth")
