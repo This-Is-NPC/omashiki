@@ -21,8 +21,8 @@ defmodule OmashikiWeb.Api.DiscoveryController do
     %{
       name: environment.name,
       preset: environment.preset.name,
-      plugin: inspect(profile.adapter),
-      isolation: profile.runtime.kind,
+      plugin: profile.plugin,
+      isolation: profile.isolation.kind,
       timeout_ms: environment.timeout_ms,
       network: environment.network,
       capabilities: environment.capabilities,

@@ -226,7 +226,7 @@ defmodule Omashiki.Jobs.WebhooksTest do
     node = Omashiki.Config.current_machine().name
 
     Repo.update_all(
-      from(c in Omashiki.Jobs.ExecutionCapacity, where: c.node_id == ^node),
+      from(c in Omashiki.Jobs.ExecutionCapacity, where: c.machine_id == ^node),
       set: [active: 1]
     )
 
@@ -241,7 +241,7 @@ defmodule Omashiki.Jobs.WebhooksTest do
         heartbeat_at: now,
         claimed_at: now,
         capacity_reserved: true,
-        node_id: node,
+        machine_id: node,
         started_at: now
       })
       |> Repo.insert!()

@@ -15,7 +15,7 @@ defmodule Omashiki.Config.Machine do
   Immutable declared execution node.
 
   A node is one machine that runs attempts. The name is the whole declaration:
-  it is what `job_attempts.node_id` records, so "which machine ran this?" is
+  it is what `job_attempts.machine_id` records, so "which machine ran this?" is
   answerable from the database. Per-node capacity and per-node Docker endpoint
   are declared by the phases that consume them, not here.
   """
@@ -103,7 +103,7 @@ defmodule Omashiki.Config.Registry do
     end
 
     repositories = build_repositories!(repository_section, base_dir)
-    presets = Omashiki.Harnesses.build!(preset_section, plugins)
+    presets = Omashiki.Presets.build!(preset_section, plugins)
     nodes = build_nodes!(node_section)
 
     environments =
@@ -129,7 +129,7 @@ defmodule Omashiki.Config.Registry do
 
   # Nodes are deliberately not hashed here.
   #
-  # The digest pins what a job *does* — its repository, harness, and environment
+  # The digest pins what a job *does* — its repository, preset, and environment
   # — and is captured at admission so a later reload cannot move the ground under
   # an admitted job. The node list is not part of that: a job admitted while three
   # machines were declared executes identically once a fourth joins. Hashing it
@@ -287,7 +287,7 @@ defmodule Omashiki.Config.Registry do
           profile -> profile
         end
 
-      preset = Omashiki.Harnesses.finalize_preset!(base_preset, isolation, image, where)
+      preset = Omashiki.Presets.finalize_preset!(base_preset, isolation, image, where)
 
       validate_requires!(preset.manifest, image, packages, where)
 

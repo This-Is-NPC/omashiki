@@ -265,7 +265,7 @@ defmodule Omashiki.Runtime.ContainerManager do
          opts
        ) do
     worktree_path = Keyword.get(opts, :worktree_path, get_in(job.admitted_repository, ["path"]))
-    profile = Keyword.get(opts, :preset) || Omashiki.Harnesses.profile(environment)
+    profile = Keyword.get(opts, :preset) || Omashiki.Presets.profile(environment)
     credential = Keyword.get(opts, :credential) || credential_for_environment(environment)
     runtime_mount_defs = environment_mounts(environment)
     cache_groups = environment_cache_groups(environment)
@@ -473,7 +473,7 @@ defmodule Omashiki.Runtime.ContainerManager do
       host_base_url: isolated_host_base_url(supply.env)
     }
 
-    adapter = Omashiki.Harnesses.adapter(profile)
+    adapter = Omashiki.Presets.adapter(profile)
 
     with {:ok, launch} <- adapter.prepare(profile, context) do
       secret = launch.secret || %{}
@@ -858,14 +858,14 @@ defmodule Omashiki.Runtime.ContainerManager do
     end)
   end
 
-  defp runtime_of(%{runtime: %Omashiki.Isolation{} = runtime}), do: runtime
+  defp isolation_of(%{isolation: %Omashiki.Isolation{} = isolation}), do: isolation
 
-  defp runtime_of(%{runtime: %{"kind" => kind, "config" => config}}),
+  defp isolation_of(%{isolation: %{"kind" => kind, "config" => config}}),
     do: %Omashiki.Isolation{kind: kind, config: config, key: nil, status: "active"}
 
-  defp runtime_of(%{runtime: runtime}) when not is_nil(runtime), do: runtime
+  defp isolation_of(%{isolation: isolation}) when not is_nil(isolation), do: isolation
 
-  defp runtime_of(_), do: nil
+  defp isolation_of(_), do: nil
 
   defp expand_host_path("~/" <> rest), do: Path.join(System.user_home!(), rest)
   defp expand_host_path("~"), do: System.user_home!()
@@ -1086,7 +1086,7 @@ defmodule Omashiki.Runtime.ContainerManager do
     startup = launch_plan_value(launch_plan, :startup)
 
     command =
-      startup_value(startup, :argv) || Omashiki.Runtimes.bootstrap(runtime_of_launch(launch_plan))
+      startup_value(startup, :argv) || Omashiki.Runtimes.bootstrap(isolation_of_launch(launch_plan))
 
     case command do
       nil ->
@@ -1095,7 +1095,7 @@ defmodule Omashiki.Runtime.ContainerManager do
       command when is_list(command) ->
         timeout_ms =
           startup_value(startup, :timeout_ms) ||
-            Omashiki.Runtimes.bootstrap_timeout_ms(runtime_of_launch(launch_plan)) ||
+            Omashiki.Runtimes.bootstrap_timeout_ms(isolation_of_launch(launch_plan)) ||
             @default_bootstrap_timeout_ms
 
         case do_exec_stream(container_id, command, timeout_ms: timeout_ms) do
@@ -1179,9 +1179,9 @@ defmodule Omashiki.Runtime.ContainerManager do
     end
   end
 
-  defp runtime_of_launch(%{runtime: runtime}), do: runtime_of(%{runtime: runtime})
-  defp runtime_of_launch(%{"runtime" => runtime}), do: runtime_of(%{runtime: runtime})
-  defp runtime_of_launch(_), do: nil
+  defp isolation_of_launch(%{isolation: isolation}), do: isolation_of(%{isolation: isolation})
+  defp isolation_of_launch(%{"isolation" => isolation}), do: isolation_of(%{isolation: isolation})
+  defp isolation_of_launch(_), do: nil
 
   defp launch_plan_value(%{startup: value}, :startup), do: value
   defp launch_plan_value(%{"startup" => value}, :startup), do: value
@@ -1285,7 +1285,7 @@ defmodule Omashiki.Runtime.ContainerManager do
           host_base_url: host_base_url
         }
 
-        {:ok, prepared} = Omashiki.Harnesses.adapter(profile).prepare(profile, context)
+        {:ok, prepared} = Omashiki.Presets.adapter(profile).prepare(profile, context)
         prepared.environment
       end)
 
@@ -1306,7 +1306,7 @@ defmodule Omashiki.Runtime.ContainerManager do
         @container_label => "true",
         "omashiki.job_scope_id" => job_scope.id,
         "omashiki.protocol" => protocol,
-        "omashiki.runtime" => runtime_kind_of(profile)
+        "omashiki.isolation" => isolation_kind_of(profile)
       }
       |> maybe_put_cache_label(cache_groups)
       |> Map.merge(Keyword.get(opts, :supply_chain_labels, %{}))
@@ -1342,20 +1342,20 @@ defmodule Omashiki.Runtime.ContainerManager do
     end
   end
 
-  defp runtime_kind_of(%{runtime: %{kind: kind}}) when is_binary(kind), do: kind
-  defp runtime_kind_of(%{runtime: %{kind: kind}}) when is_atom(kind), do: to_string(kind)
-  defp runtime_kind_of(%{"runtime" => %{"kind" => kind}}), do: to_string(kind)
+  defp isolation_kind_of(%{isolation: %{kind: kind}}) when is_binary(kind), do: kind
+  defp isolation_kind_of(%{isolation: %{kind: kind}}) when is_atom(kind), do: to_string(kind)
+  defp isolation_kind_of(%{"isolation" => %{"kind" => kind}}), do: to_string(kind)
 
-  defp runtime_kind_of(_), do: "unknown"
+  defp isolation_kind_of(_), do: "unknown"
 
   defp image_of(profile) do
-    case runtime_image(profile) do
+    case isolation_image(profile) do
       image when is_binary(image) and image != "" ->
         image
 
       _ ->
         raise ArgumentError,
-              "preset must provide a Docker runtime image"
+              "preset must provide a Docker isolation image"
     end
   end
 
@@ -1383,11 +1383,11 @@ defmodule Omashiki.Runtime.ContainerManager do
 
   defp port_environment(_, _), do: []
 
-  defp runtime_image(%{runtime: runtime}) when not is_nil(runtime) do
-    Omashiki.Runtimes.docker_image(runtime)
+  defp isolation_image(%{isolation: isolation}) when not is_nil(isolation) do
+    Omashiki.Runtimes.docker_image(isolation)
   end
 
-  defp runtime_image(_), do: nil
+  defp isolation_image(_), do: nil
 
   defp isolated_host_base_url(env) do
     if Enum.any?(env, &String.starts_with?(&1, "OMASHIKI_HOST_SOCKET=")),

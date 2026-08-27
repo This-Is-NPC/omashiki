@@ -24,7 +24,7 @@ defmodule Omashiki.Jobs do
   # release target for attempts claimed before `job_attempts.machine_id` existed,
   # and nothing else: no live claim ever reserves against it unless a machine is
   # actually called `local`.
-  @legacy_node "local"
+  @legacy_machine "local"
 
   # Liveness of a dispatch is decided by Oban's own `:incomplete` set — the very
   # set `DispatchWorker`'s uniqueness keys on. Deriving it from
@@ -320,14 +320,14 @@ defmodule Omashiki.Jobs do
 
     Repo.insert(
       %ExecutionCapacity{
-        node_id: Config.current_machine().name,
+        machine_id: Config.current_machine().name,
         capacity: capacity,
         active: 0,
         inserted_at: now,
         updated_at: now
       },
       on_conflict: on_conflict,
-      conflict_target: :node_id,
+      conflict_target: :machine_id,
       returning: true
     )
   end
@@ -352,7 +352,7 @@ defmodule Omashiki.Jobs do
     allowed = Enum.map(Config.nodes(), & &1.name)
 
     from(c in ExecutionCapacity,
-      where: c.node_id not in ^allowed and c.active == 0
+      where: c.machine_id not in ^allowed and c.active == 0
     )
     |> Repo.delete_all()
   end
@@ -361,8 +361,8 @@ defmodule Omashiki.Jobs do
   defp claim_locked(%Job{} = job, runner_id, now, lease_ms) do
     # One read of this host's identity feeds both the reservation and the stamp,
     # so the row that was decremented is always the row the attempt names.
-    node = Config.current_machine().name
-    reserve_capacity!(node)
+    machine = Config.current_machine().name
+    reserve_capacity!(machine)
     token = new_lease_token()
     expires_at = lease_until(now, lease_ms)
     attempt = current_attempt!(job)
@@ -372,7 +372,7 @@ defmodule Omashiki.Jobs do
     update_attempt!(attempt, %{
       status: "provisioning",
       runner_id: runner_id,
-      machine_id: node,
+      machine_id: machine,
       lease_token: token,
       lease_expires_at: expires_at,
       heartbeat_at: now,
@@ -811,10 +811,10 @@ defmodule Omashiki.Jobs do
   # slot cannot both win. The predicate selects this machine's row instead of
   # the singleton, which is the whole of the change. A node with no row has no
   # budget and claims nothing; boot is what gives it one.
-  defp reserve_capacity!(node) do
+  defp reserve_capacity!(machine) do
     query =
       from(c in ExecutionCapacity,
-        where: c.node_id == ^node and c.active < c.capacity,
+        where: c.machine_id == ^machine and c.active < c.capacity,
         update: [inc: [active: 1]],
         select: c
       )
@@ -836,13 +836,13 @@ defmodule Omashiki.Jobs do
   # cluster: those reservations were counted in the singleton this table's
   # migration re-keyed to `'local'`, so that is where they are given back.
   defp release_capacity_if_reserved!(%JobAttempt{capacity_reserved: true} = attempt) do
-    release_capacity!(attempt.machine_id || @legacy_node)
+    release_capacity!(attempt.machine_id || @legacy_machine)
   end
 
   defp release_capacity_if_reserved!(_), do: :ok
 
-  defp release_capacity!(node) do
-    case Repo.update_all(from(c in ExecutionCapacity, where: c.node_id == ^node and c.active > 0),
+  defp release_capacity!(machine) do
+    case Repo.update_all(from(c in ExecutionCapacity, where: c.machine_id == ^machine and c.active > 0),
            inc: [active: -1]
          ) do
       {1, _} -> :ok

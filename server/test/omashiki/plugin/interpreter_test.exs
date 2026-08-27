@@ -281,9 +281,9 @@ defmodule Omashiki.Plugin.InterpreterTest do
     base = %Preset{
       name: manifest.name,
       adapter: Interpreter,
-      adapter_key: manifest.name,
+      plugin: manifest.name,
       options: options,
-      runtime: runtime,
+      isolation: runtime,
       launch_plan: nil,
       manifest: manifest
     }

@@ -98,7 +98,7 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
     }
 
     plan = %LaunchPlan{
-      runtime: runtime,
+      isolation: runtime,
       transport: %{"kind" => "cli"},
       startup: nil,
       readiness: nil,
@@ -109,9 +109,9 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
     profile = %Preset{
       name: "claude-code",
       adapter: Omashiki.Plugin.Interpreter,
-      adapter_key: "claude-code",
+      plugin: "claude-code",
       options: %{},
-      runtime: runtime,
+      isolation: runtime,
       launch_plan: plan,
       manifest: nil
     }

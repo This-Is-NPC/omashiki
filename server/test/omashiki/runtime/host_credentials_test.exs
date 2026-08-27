@@ -161,9 +161,9 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
     %Preset{
       name: "claude-code",
       adapter: Interpreter,
-      adapter_key: "claude-code",
+      plugin: "claude-code",
       options: %{},
-      runtime: %Isolation{
+      isolation: %Isolation{
         key: "claude-code",
         kind: "docker",
         config: %{"image" => "agent"},

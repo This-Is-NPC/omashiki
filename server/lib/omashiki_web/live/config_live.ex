@@ -141,14 +141,14 @@ defmodule OmashikiWeb.ConfigLive do
               <h3 class="font-headline italic text-xl text-on-surface">{environment.name}</h3><span class="font-mono text-xs text-status-succeeded">read-only</span>
             </div>
             <dl class="mt-4 grid gap-2 font-mono text-xs sm:grid-cols-[8rem_1fr]">
-              <dt class="text-on-surface-variant">runtime</dt><dd class="text-on-surface">
-                {environment.preset.runtime.kind}
+              <dt class="text-on-surface-variant">isolation</dt><dd class="text-on-surface">
+                {environment.isolation}
               </dd>
               <dt class="text-on-surface-variant">image</dt><dd class="break-all text-on-surface">
-                {Omashiki.Runtimes.docker_image(environment.preset.runtime)}
+                {Omashiki.Runtimes.docker_image(environment.preset.isolation)}
               </dd>
-              <dt class="text-on-surface-variant">harness</dt><dd class="text-on-surface">
-                {environment.harness}
+              <dt class="text-on-surface-variant">preset</dt><dd class="text-on-surface">
+                {environment.preset.name}
               </dd>
               <dt class="text-on-surface-variant">network</dt><dd class="text-on-surface">
                 {environment.network}

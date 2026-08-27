@@ -1,15 +1,15 @@
 defmodule Omashiki.Plugin.Preset do
   @moduledoc "Immutable, configured preset resolved from the registry."
 
-  @enforce_keys [:name, :adapter, :adapter_key, :options, :runtime, :launch_plan, :manifest]
+  @enforce_keys [:name, :adapter, :plugin, :options, :isolation, :launch_plan, :manifest]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
           name: String.t(),
           adapter: module(),
-          adapter_key: String.t(),
+          plugin: String.t(),
           options: map(),
-          runtime: Omashiki.Isolation.t(),
+          isolation: Omashiki.Isolation.t(),
           launch_plan: Omashiki.Harness.LaunchPlan.t(),
           manifest: Omashiki.Plugin.Manifest.t() | nil
         }
@@ -18,11 +18,11 @@ end
 defmodule Omashiki.Harness.LaunchPlan do
   @moduledoc "Adapter-owned runtime launch and readiness metadata."
 
-  @enforce_keys [:runtime, :transport, :startup, :readiness, :secret, :environment]
+  @enforce_keys [:isolation, :transport, :startup, :readiness, :secret, :environment]
   defstruct @enforce_keys ++ [manifest: nil] ++ [llm_egress: nil]
 
   @type t :: %__MODULE__{
-          runtime: Omashiki.Isolation.t(),
+          isolation: Omashiki.Isolation.t(),
           transport: map(),
           startup: map() | nil,
           readiness: map() | nil,

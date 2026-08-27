@@ -10,7 +10,7 @@ ExUnit.start(exclude: [:real_opencode, :real_claude, :real_jcode, :ollama, :real
 
 # Pin the node this suite runs as. `Config.current_machine/0` otherwise falls back
 # to the developer's hostname, which would make `execution_capacity` — now keyed
-# by `node_id` — belong to a different node on every machine the suite runs on.
+# by `machine_id` — belong to a different node on every machine the suite runs on.
 # `"local"` is the name the schema migration gives the row it ships, so the
 # default node and the migrated row are the same node everywhere.
 System.put_env("OMASHIKI_NODE", "local")

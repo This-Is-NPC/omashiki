@@ -52,7 +52,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     # install ran on. These tests describe a cluster that machine is not in, and
     # `cluster_capacity/0` sums whatever rows exist, so drop it rather than
     # carry an eighth node nobody declared through every total.
-    Repo.delete_all(from(c in ExecutionCapacity, where: c.node_id == "local"))
+    Repo.delete_all(from(c in ExecutionCapacity, where: c.machine_id == "local"))
 
     user = user_fixture()
     {token, _plaintext} = api_token_fixture(user)
@@ -129,7 +129,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     Repo.insert!(%ExecutionCapacity{
-      node_id: "local",
+      machine_id: "local",
       capacity: 8,
       active: 0,
       inserted_at: now,
@@ -147,7 +147,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     Repo.insert!(%ExecutionCapacity{
-      node_id: "local",
+      machine_id: "local",
       capacity: 8,
       active: 0,
       inserted_at: now,
@@ -155,7 +155,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     })
 
     Repo.insert!(%ExecutionCapacity{
-      node_id: "node-b",
+      machine_id: "node-b",
       capacity: 10,
       active: 0,
       inserted_at: now,
@@ -175,7 +175,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     Repo.insert!(%ExecutionCapacity{
-      node_id: "local",
+      machine_id: "local",
       capacity: 8,
       active: 3,
       inserted_at: now,

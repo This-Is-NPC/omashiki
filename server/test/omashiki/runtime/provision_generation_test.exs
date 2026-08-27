@@ -130,13 +130,13 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
     %Preset{
       name: "opencode",
       adapter: CapturingAdapter,
-      adapter_key: "opencode",
+      plugin: "opencode",
       options: %{},
-      runtime: runtime,
+      isolation: runtime,
       # "stdio" rather than "http" so provisioning does not reserve a host port
       # on the way to the decision under test.
       launch_plan: %LaunchPlan{
-        runtime: runtime,
+        isolation: runtime,
         transport: %{"kind" => "stdio"},
         startup: nil,
         readiness: nil,

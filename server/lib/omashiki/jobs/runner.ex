@@ -96,7 +96,7 @@ defmodule Omashiki.Jobs.Runner.DockerContainer do
   defp environment_sink(_), do: {:error, {:unsupported_sink, :missing}}
 
   defp profile_for(environment) do
-    Omashiki.Harnesses.profile(environment)
+    Omashiki.Presets.profile(environment)
   end
 end
 
@@ -667,12 +667,12 @@ defmodule Omashiki.Jobs.Runner do
     do: Keyword.get(state.opts, :container, Omashiki.Jobs.Runner.DockerContainer)
 
   defp adapter_mod(state) do
-    Keyword.get(state.opts, :adapter) || Omashiki.Harnesses.adapter(state.environment)
+    Keyword.get(state.opts, :adapter) || Omashiki.Presets.adapter(state.environment)
   end
 
   defp harness_context(state) do
     container = state.container || %{}
-    profile = Omashiki.Harnesses.profile(state.environment)
+    profile = Omashiki.Presets.profile(state.environment)
     capability = Omashiki.Runtime.Capability.from_container(container, container_mod(state))
 
     %Omashiki.Harness.Context{

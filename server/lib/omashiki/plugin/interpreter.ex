@@ -18,7 +18,7 @@ defmodule Omashiki.Plugin.Interpreter do
   def validate_options(_, _), do: {:error, :options_must_be_a_map}
 
   @impl true
-  def launch_plan(%Preset{manifest: %Manifest{} = manifest, runtime: runtime, options: raw}) do
+  def launch_plan(%Preset{manifest: %Manifest{} = manifest, isolation: isolation, options: raw}) do
     options = merged_options(manifest, raw)
 
     transport =
@@ -48,7 +48,7 @@ defmodule Omashiki.Plugin.Interpreter do
 
     {:ok,
      %LaunchPlan{
-       runtime: runtime,
+       isolation: isolation,
        transport: transport,
        startup: nil,
        readiness: readiness && Map.update!(readiness, "argv", &substitute_list(&1, bindings(options, %{}))),

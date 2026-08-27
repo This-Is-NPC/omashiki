@@ -1,4 +1,4 @@
-defmodule Omashiki.Harnesses do
+defmodule Omashiki.Presets do
   @moduledoc "Configured preset registry backed by declarative plugin manifests."
 
   alias Omashiki.Config.Error
@@ -21,7 +21,7 @@ defmodule Omashiki.Harnesses do
   def adapter(environment),
     do: raise(ArgumentError, "environment has no resolved plugin: #{inspect(environment)}")
 
-  def adapter_key(%Preset{adapter_key: key}), do: key
+  def plugin(%Preset{plugin: key}), do: key
 
   def profile(%{preset: %Preset{} = profile}), do: profile
   def profile(%{preset: profile}) when is_map(profile), do: profile_from_snapshot!(profile)
@@ -37,8 +37,8 @@ defmodule Omashiki.Harnesses do
   def build!(_, _), do: raise(Error, "presets must be a table")
 
   def finalize_preset!(%Preset{} = base, isolation_kind, image, where) do
-    runtime = %Isolation{key: base.name, kind: isolation_kind, config: %{"image" => image}, status: "active"}
-    preset = %{base | runtime: runtime, launch_plan: nil}
+    isolation = %Isolation{key: base.name, kind: isolation_kind, config: %{"image" => image}, status: "active"}
+    preset = %{base | isolation: isolation, launch_plan: nil}
 
     launch_plan =
       case Interpreter.launch_plan(preset) do
@@ -66,19 +66,19 @@ defmodule Omashiki.Harnesses do
     reject_legacy_preset_fields!(attrs, where)
     reject_unknown!(attrs, @preset_fields, where)
 
-    adapter_key = require_string!(attrs, "plugin", where)
+    plugin = require_string!(attrs, "plugin", where)
     options = Map.get(attrs, "options", %{})
     unless is_map(options), do: raise(Error, "#{where}.options must be a table")
 
-    manifest = Loader.fetch!(plugins, adapter_key)
+    manifest = Loader.fetch!(plugins, plugin)
     validate_options!(manifest, options, where)
 
     %Preset{
       name: name,
       adapter: @adapter,
-      adapter_key: adapter_key,
+      plugin: plugin,
       options: options,
-      runtime: nil,
+      isolation: nil,
       launch_plan: nil,
       manifest: manifest
     }
@@ -103,17 +103,17 @@ defmodule Omashiki.Harnesses do
     end
   end
 
-  defp profile_from_snapshot!(%{"name" => name, "adapter_key" => adapter_key, "options" => options} = profile) do
-    runtime = runtime_from_snapshot(Map.get(profile, "runtime"))
-    launch_plan = launch_plan_from_snapshot(Map.get(profile, "launch_plan"), runtime)
+  defp profile_from_snapshot!(%{"name" => name, "plugin" => plugin, "options" => options} = profile) do
+    isolation = isolation_from_snapshot(Map.get(profile, "isolation"))
+    launch_plan = launch_plan_from_snapshot(Map.get(profile, "launch_plan"), isolation)
     manifest = manifest_from_snapshot(Map.get(profile, "manifest"))
 
     %Preset{
       name: name,
       adapter: @adapter,
-      adapter_key: adapter_key,
+      plugin: plugin,
       options: options,
-      runtime: runtime,
+      isolation: isolation,
       launch_plan: launch_plan,
       manifest: manifest
     }
@@ -125,18 +125,18 @@ defmodule Omashiki.Harnesses do
   defp manifest_from_snapshot(%Manifest{} = manifest), do: manifest
   defp manifest_from_snapshot(map) when is_map(map), do: Manifest.from_snapshot(map)
 
-  defp runtime_from_snapshot(%Isolation{} = runtime), do: runtime
+  defp isolation_from_snapshot(%Isolation{} = isolation), do: isolation
 
-  defp runtime_from_snapshot(%{"kind" => kind, "config" => config}),
+  defp isolation_from_snapshot(%{"kind" => kind, "config" => config}),
     do: %Isolation{key: nil, kind: kind, config: config, status: "active"}
 
-  defp runtime_from_snapshot(runtime), do: runtime
+  defp isolation_from_snapshot(isolation), do: isolation
 
-  defp launch_plan_from_snapshot(%LaunchPlan{} = plan, _runtime), do: plan
+  defp launch_plan_from_snapshot(%LaunchPlan{} = plan, _isolation), do: plan
 
-  defp launch_plan_from_snapshot(%{} = plan, runtime) do
+  defp launch_plan_from_snapshot(%{} = plan, isolation) do
     %LaunchPlan{
-      runtime: runtime,
+      isolation: isolation,
       transport: Map.get(plan, "transport", %{}),
       startup: Map.get(plan, "startup"),
       readiness: Map.get(plan, "readiness"),
@@ -152,11 +152,11 @@ defmodule Omashiki.Harnesses do
   defp normalize_egress("engine"), do: :engine
   defp normalize_egress(value), do: value
 
-  defp validate_launch_plan!(%LaunchPlan{runtime: runtime, transport: transport}, where) do
-    unless runtime.kind in Isolation.kinds(),
-      do: raise(Error, "#{where}: plugin launch plan has unsupported runtime #{inspect(runtime.kind)}")
+  defp validate_launch_plan!(%LaunchPlan{isolation: isolation, transport: transport}, where) do
+    unless isolation.kind in Isolation.kinds(),
+      do: raise(Error, "#{where}: plugin launch plan has unsupported isolation #{inspect(isolation.kind)}")
 
-    if runtime.kind == "docker" and not is_binary(Omashiki.Runtimes.docker_image(runtime)) do
+    if isolation.kind == "docker" and not is_binary(Omashiki.Runtimes.docker_image(isolation)) do
       raise Error, "#{where}: Docker launch plan requires an image"
     end
 

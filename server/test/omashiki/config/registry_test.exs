@@ -33,6 +33,24 @@ defmodule Omashiki.Config.RegistryTest do
     end
   end
 
+  test "rejects adapter, runtime, and image on presets at config load", ctx do
+    for {field, value} <- [{"adapter", "opencode"}, {"runtime", "docker"}, {"image", "agent"}] do
+      invalid = put_in(fixture(ctx), ["presets", "opencode", field], value)
+
+      assert_raise Error, ~r/unknown field "#{field}"/, fn ->
+        Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+      end
+    end
+  end
+
+  test "rejects harness on environments at config load", ctx do
+    invalid = put_in(fixture(ctx), ["environments", "opencode", "harness"], "opencode")
+
+    assert_raise Error, ~r/unknown field "harness"/, fn ->
+      Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+  end
+
   test "requires isolation, image, and sink on environments", ctx do
     for field <- ["isolation", "image", "sink"] do
       invalid = update_in(fixture(ctx), ["environments", "opencode"], &Map.delete(&1, field))

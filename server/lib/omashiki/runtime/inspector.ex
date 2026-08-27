@@ -341,7 +341,7 @@ defmodule Omashiki.Runtime.Inspector do
 
   # A process or a container observed here is on this machine by definition,
   # even when no row claims it.
-  defp implicit_node(nil, [], _node_id), do: nil
+  defp implicit_node(nil, [], _machine_id), do: nil
   defp implicit_node(_pid, _containers, machine_id), do: machine_id
 
   defp link(attempt, pid, containers, machine_id) do

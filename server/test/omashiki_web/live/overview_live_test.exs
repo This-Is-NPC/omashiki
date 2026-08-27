@@ -34,7 +34,7 @@ defmodule OmashikiWeb.OverviewLiveTest do
     now = DateTime.utc_now()
 
     Repo.insert!(%ExecutionCapacity{
-      node_id: node,
+      machine_id: node,
       capacity: capacity,
       active: 0,
       inserted_at: now,
