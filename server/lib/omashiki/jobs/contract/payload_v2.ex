@@ -1,8 +1,10 @@
 defmodule Omashiki.Jobs.Contract.Payload.V2 do
   @moduledoc "Neutral public harness payload."
 
+  alias Omashiki.Jobs.TaskBranch
+
   @version 2
-  @keys ["instruction", "context"]
+  @keys ["instruction", "context", "branch", "title"]
   @control_keys ~w(harness provider auth model)
   @max_bytes 1_048_576
 
@@ -14,6 +16,8 @@ defmodule Omashiki.Jobs.Contract.Payload.V2 do
       |> validate_keys(payload)
       |> validate_instruction(payload)
       |> validate_context(payload)
+      |> validate_branch(payload)
+      |> validate_title(payload)
 
     if errors == [], do: {:ok, payload}, else: {:error, Enum.reverse(errors)}
   end
@@ -79,6 +83,43 @@ defmodule Omashiki.Jobs.Contract.Payload.V2 do
 
       {:ok, _} ->
         [%{field: "payload.context", code: "object_required"} | errors]
+    end
+  end
+
+  defp validate_branch(errors, payload) do
+    case Map.fetch(payload, "branch") do
+      :error ->
+        errors
+
+      {:ok, value} when is_binary(value) ->
+        if TaskBranch.validate_branch(value) == {:ok, value},
+          do: errors,
+          else: [%{field: "payload.branch", code: "invalid_branch"} | errors]
+
+      {:ok, _} ->
+        [%{field: "payload.branch", code: "string_required"} | errors]
+    end
+  end
+
+  defp validate_title(errors, payload) do
+    case Map.fetch(payload, "title") do
+      :error ->
+        errors
+
+      {:ok, value} when is_binary(value) ->
+        case TaskBranch.validate_title(value) do
+          :ok ->
+            case TaskBranch.slug_title(value) do
+              {:ok, _} -> errors
+              {:error, _} -> [%{field: "payload.title", code: "invalid_title_slug"} | errors]
+            end
+
+          {:error, _} ->
+            [%{field: "payload.title", code: "invalid_title"} | errors]
+        end
+
+      {:ok, _} ->
+        [%{field: "payload.title", code: "string_required"} | errors]
     end
   end
 

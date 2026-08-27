@@ -290,7 +290,6 @@ defmodule Omashiki.Config.Registry do
 
       validate_requires!(preset.manifest, executables, packages, where)
 
-
       {resolved_credentials, resolved_host_credentials} =
         attrs
         |> credential_names!(where)
@@ -567,8 +566,12 @@ defmodule Omashiki.Config.Registry do
     end
   end
 
-
-  defp validate_requires!(%Omashiki.Plugin.Manifest{requires: %{"binaries" => required}}, executables, packages, where) do
+  defp validate_requires!(
+         %Omashiki.Plugin.Manifest{requires: %{"binaries" => required}},
+         executables,
+         packages,
+         where
+       ) do
     provided = MapSet.new(executables ++ packages)
 
     missing =
@@ -576,7 +579,8 @@ defmodule Omashiki.Config.Registry do
       |> Enum.reject(&MapSet.member?(provided, &1))
 
     if missing != [] do
-      raise Error, "#{where}: plugin requires.binaries #{inspect(missing)} not covered by executables ∪ packages"
+      raise Error,
+            "#{where}: plugin requires.binaries #{inspect(missing)} not covered by executables ∪ packages"
     end
   end
 
@@ -677,6 +681,7 @@ defmodule Omashiki.Config.Registry do
         raise Error, "#{where}.#{key} must be an array"
     end
   end
+
   defp packages_list!(attrs, key, where) do
     case Map.get(attrs, key) do
       [] ->
@@ -697,7 +702,6 @@ defmodule Omashiki.Config.Registry do
         raise Error, "#{where}.#{key} must be an array"
     end
   end
-
 
   defp optional_string_list!(attrs, key, where) do
     case Map.get(attrs, key, []) do
@@ -730,12 +734,14 @@ defmodule Omashiki.Config.Registry do
       do: raise(Error, "#{where} name must be kebab-case")
   end
 
-  defp valid_branch?(branch) do
+  def valid_branch?(branch) when is_binary(branch) do
     Regex.match?(@branch, branch) and not String.contains?(branch, ["..", "@{", "//"]) and
       not String.ends_with?(branch, [".", "/"]) and
       not Enum.any?(Path.split(branch), &String.ends_with?(&1, ".lock")) and
       not String.contains?(branch, "/.") and git_branch?(branch)
   end
+
+  def valid_branch?(_), do: false
 
   defp git_branch?(branch) do
     match?(
