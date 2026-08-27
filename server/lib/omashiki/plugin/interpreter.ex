@@ -12,11 +12,10 @@ defmodule Omashiki.Plugin.Interpreter do
   alias Omashiki.Runtime.HostCredentials
 
   @impl true
-  def validate_options(options) when is_map(options), do: :ok
-  def validate_options(_), do: {:error, :options_must_be_a_map}
-
-  def validate_options(%Manifest{} = manifest, options),
+  def validate_options(%Manifest{} = manifest, options) when is_map(options),
     do: OptionSchema.validate(manifest, options)
+
+  def validate_options(_, _), do: {:error, :options_must_be_a_map}
 
   @impl true
   def launch_plan(%Preset{manifest: %Manifest{} = manifest, runtime: runtime, options: raw}) do

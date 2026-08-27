@@ -35,7 +35,7 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
     @behaviour Omashiki.Harness.Adapter
 
     @impl true
-    def validate_options(_options), do: :ok
+    def validate_options(_manifest, _options), do: :ok
 
     @impl true
     def launch_plan(_spec), do: {:error, :not_used}

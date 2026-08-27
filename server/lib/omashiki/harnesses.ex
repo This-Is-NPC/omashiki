@@ -4,7 +4,7 @@ defmodule Omashiki.Harnesses do
   alias Omashiki.Config.Error
   alias Omashiki.Harness.LaunchPlan
   alias Omashiki.Isolation
-  alias Omashiki.Plugin.{Interpreter, Loader, Manifest, OptionSchema}
+  alias Omashiki.Plugin.{Interpreter, Loader, Manifest}
   alias Omashiki.Plugin.Preset
 
   @adapter Omashiki.Plugin.Interpreter
@@ -90,7 +90,7 @@ defmodule Omashiki.Harnesses do
   defp validate_options!(manifest, options, where) do
     unless is_map(options), do: raise(Error, "#{where}.options must be a table")
 
-    case OptionSchema.validate(manifest, options) do
+    case @adapter.validate_options(manifest, options) do
       :ok -> :ok
       {:error, {:unknown_options, keys}} ->
         raise Error, "#{where}.options unknown field #{inspect(hd(keys))}"

@@ -61,4 +61,13 @@ defmodule Omashiki.Plugin.OptionSchemaTest do
     assert {:error, :invalid_model} = OptionSchema.validate(manifest, %{"model" => "--offline"})
     assert {:error, :invalid_invocation_path} = OptionSchema.validate(manifest, %{"invocation_path" => "/etc/prompt.txt"})
   end
+
+  test "validates opencode options", %{plugins: plugins} do
+    manifest = Map.fetch!(plugins, "opencode")
+
+    assert :ok = OptionSchema.validate(manifest, %{})
+    assert {:error, {:unknown_options, ["extra"]}} = OptionSchema.validate(manifest, %{"extra" => true})
+    assert {:error, :invalid_timeout} = OptionSchema.validate(manifest, %{"readiness_timeout_ms" => 0})
+    assert {:error, :invalid_timeout} = OptionSchema.validate(manifest, %{"internal_port" => 0})
+  end
 end
