@@ -125,12 +125,13 @@ scan ADAPTER_EVENTS \
   lib/omashiki/engine lib/omashiki/gateway/providers lib/omashiki/harness
 
 # ---------------------------------------------------------------- INV4
-# Harness turns only through the configured Adapter. Concrete transports are
-# implementation details of their adapter.
-EXCLUDE='^lib/omashiki/harness/(open_code(_http)?|claude_code)\.ex'
+# Harness turns only through the configured Adapter. Concrete HTTP transport
+# lives in Plugin.Http; legacy harness modules may remain until 2829 but must
+# not call the removed OpenCode.Http module.
+EXCLUDE='^lib/omashiki/harness/(open_code(_http)?|claude_code)\.ex|^lib/omashiki/plugin/http\.ex'
 scan ENGINE_DIRECT \
   "INV4  adapter turns use the configured contract" \
-  'OpenCode\.Http\.[a-z]' \
+  'OpenCode\.Http' \
   lib
 
 # ---------------------------------------------------------------- INV13

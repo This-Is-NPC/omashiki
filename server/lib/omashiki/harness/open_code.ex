@@ -93,15 +93,6 @@ defmodule Omashiki.Harness.OpenCode do
   end
 
 
-  @doc false
-  def http_turn(%Capability{} = capability, payload) when is_map(payload) do
-    with {:ok, session} <- Omashiki.Harness.OpenCode.Http.start_session(capability),
-         result <- Omashiki.Harness.OpenCode.Http.send_turn(capability, session, payload) do
-      _ = Omashiki.Harness.OpenCode.Http.finish(capability, session)
-      result
-    end
-  end
-
   @impl true
   def invoke(%Invocation{} = invocation, %Context{} = context) do
     credential = context.credential || credential_from_environment(context.environment)
@@ -110,7 +101,9 @@ defmodule Omashiki.Harness.OpenCode do
     payload = if credential, do: put_model(payload, credential, llm_egress), else: payload
 
     with %Capability{} = capability <- context.capability,
-         result <- http_turn(capability, payload) do
+         {:ok, session} <- Omashiki.Plugin.Http.start_session(capability),
+         result <- Omashiki.Plugin.Http.send_turn(capability, session, payload) do
+      _ = Omashiki.Plugin.Http.finish(capability, session)
       result(result)
     else
       _ -> {:error, :harness_endpoint_unavailable}

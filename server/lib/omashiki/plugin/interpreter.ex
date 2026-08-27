@@ -5,7 +5,7 @@ defmodule Omashiki.Plugin.Interpreter do
 
   alias Omashiki.Credentials.Credential
   alias Omashiki.Harness.{CliJson, Context, Invocation, LaunchPlan, Result}
-  alias Omashiki.Plugin.{Manifest, Shapes}
+  alias Omashiki.Plugin.{Http, Manifest, Shapes}
   alias Omashiki.Plugin.Preset
   alias Omashiki.Jobs.Job
   alias Omashiki.Runtime.{Capability, Claims}
@@ -108,7 +108,9 @@ defmodule Omashiki.Plugin.Interpreter do
     payload = if credential, do: put_model(payload, credential, llm_egress, manifest, context), else: payload
 
     with %Capability{} = capability <- context.capability,
-         result <- Omashiki.Harness.OpenCode.http_turn(capability, payload) do
+         {:ok, session} <- Http.start_session(capability),
+         result <- Http.send_turn(capability, session, payload) do
+      _ = Http.finish(capability, session)
       normalize_http_result(result)
     else
       _ -> {:error, :harness_endpoint_unavailable}

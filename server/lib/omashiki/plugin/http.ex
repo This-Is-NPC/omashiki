@@ -1,6 +1,6 @@
-defmodule Omashiki.Harness.OpenCode.Http do
+defmodule Omashiki.Plugin.Http do
   @moduledoc """
-  Production HTTP/SSE client for `opencode serve`.
+  HTTP/SSE transport client for declarative plugin manifests (opencode serve API).
 
   Wraps the small subset of the OpenCode HTTP API the orchestrator drives:
   `POST /session`, `POST /session/:id/message`, `GET /event` (SSE),

@@ -1,7 +1,7 @@
-defmodule Omashiki.Harness.OpenCode.HttpTest do
+defmodule Omashiki.Plugin.HttpTest do
   use ExUnit.Case, async: true
 
-  alias Omashiki.Harness.OpenCode.Http
+  alias Omashiki.Plugin.Http
   alias Omashiki.Runtime.Capability
 
   setup do
