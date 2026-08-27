@@ -71,6 +71,22 @@ defmodule Omashiki.Jobs.Contract.V1Test do
     assert_error(on_failure_errors, "depends_on.on_failure", "unsupported")
   end
 
+  test "rejects single depends_on objects missing id or ref" do
+    assert {:error, empty_errors} =
+             single_request()
+             |> Map.put("depends_on", [%{}])
+             |> V1.validate_single()
+
+    assert_error(empty_errors, "depends_on", "id_or_ref_required")
+
+    assert {:error, on_failure_only_errors} =
+             single_request()
+             |> Map.put("depends_on", [%{"on_failure" => "cancel"}])
+             |> V1.validate_single()
+
+    assert_error(on_failure_only_errors, "depends_on", "id_or_ref_required")
+  end
+
   test "accepts well-formed single depends_on entries" do
     request =
       single_request()

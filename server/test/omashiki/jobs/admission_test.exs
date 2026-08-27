@@ -240,6 +240,25 @@ defmodule Omashiki.Jobs.AdmissionTest do
     assert Repo.aggregate(Oban.Job, :count, :id) == 0
   end
 
+  test "rejects single jobs with empty depends_on objects without writes", %{token: token} do
+    assert {:error, {:validation, errors}} =
+             Admission.admit(token, Map.put(single_request(), "depends_on", [%{}]))
+
+    assert %{field: "depends_on", code: "id_or_ref_required"} in errors
+    assert Repo.aggregate(Job, :count, :id) == 0
+
+    assert {:error, {:validation, on_failure_errors}} =
+             Admission.admit(
+               token,
+               Map.put(single_request(%{"idempotency_key" => "depends-on-failure-only"}), "depends_on", [
+                 %{"on_failure" => "cancel"}
+               ])
+             )
+
+    assert %{field: "depends_on", code: "id_or_ref_required"} in on_failure_errors
+    assert Repo.aggregate(Job, :count, :id) == 0
+  end
+
   test "accepts exactly 1 MiB of encoded payload and rejects the next byte", %{token: token} do
     exact = %{"instruction" => String.duplicate("x", 128), "branch" => "feat-exact"}
     assert {:ok, job} = Admission.admit(token, Map.put(single_request(), "payload", exact))
