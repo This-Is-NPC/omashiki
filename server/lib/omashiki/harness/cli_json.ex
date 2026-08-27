@@ -1,16 +1,11 @@
 defmodule Omashiki.Harness.CliJson do
   @moduledoc """
-  Shared CLI/JSON harness helpers extracted from the exec-and-parse-stdout adapters.
+  Shared CLI/JSON helpers for declarative plugin manifests.
 
-  Covers the 19 functions common to `jcode`, `pi`, `codex`, and `claude_code`:
-  compose, credential, gateway_base_url, launch_plan!, positive_timeout?,
+  Covers compose, credential, gateway_base_url, launch_plan!, positive_timeout?,
   prompt_for, string_or_nil, summarize, valid_absolute_path?, validate_invocation,
-  valid_model?, valid_path?, plus shared invoke/prepare scaffolding and exec-output
-  decoding wrappers.
-
-  **Decode shape** and **usage key mapping** stay in each adapter's
-  `decode_output/1` and `normalize_result/1`. HTTP transports (`open_code_http`)
-  and host-side credential checks (`claude_code`, `codex`) are out of scope here.
+  valid_model?, valid_path?, plus shared invoke scaffolding and exec-output
+  decoding wrappers used by `Omashiki.Plugin.Interpreter`.
   """
 
   alias Omashiki.Credentials.Credential

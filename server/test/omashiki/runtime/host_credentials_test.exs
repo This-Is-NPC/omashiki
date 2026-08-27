@@ -2,8 +2,8 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
   use ExUnit.Case, async: false
 
   alias Omashiki.Config.HostCredential
-  alias Omashiki.Harness.{ClaudeCode, Context}
-  alias Omashiki.Plugin.Preset
+  alias Omashiki.Harness.Context
+  alias Omashiki.Plugin.{Interpreter, Loader, Preset}
   alias Omashiki.Runtime.HostCredentials
   alias Omashiki.Isolation
 
@@ -134,7 +134,7 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
       runtime_mounts: materialized.mounts
     }
 
-    assert {:ok, _plan} = ClaudeCode.prepare(claude_profile(), context)
+    assert {:ok, _plan} = Interpreter.prepare(claude_profile(), context)
   end
 
   defp environment(auth) do
@@ -153,10 +153,14 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
     }
   end
 
+  @plugins_dir Path.expand("../../../../plugins", __DIR__)
+
   defp claude_profile do
+    manifest = @plugins_dir |> Loader.load!() |> Map.fetch!("claude-code")
+
     %Preset{
       name: "claude-code",
-      adapter: ClaudeCode,
+      adapter: Interpreter,
       adapter_key: "claude-code",
       options: %{},
       runtime: %Isolation{
@@ -166,7 +170,7 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
         status: "active"
       },
       launch_plan: nil,
-      manifest: nil
+      manifest: manifest
     }
   end
 

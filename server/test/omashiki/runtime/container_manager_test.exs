@@ -108,7 +108,7 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
 
     profile = %Preset{
       name: "claude-code",
-      adapter: Omashiki.Harness.ClaudeCode,
+      adapter: Omashiki.Plugin.Interpreter,
       adapter_key: "claude-code",
       options: %{},
       runtime: runtime,

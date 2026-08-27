@@ -4,7 +4,7 @@ defmodule Omashiki.Harnesses do
   alias Omashiki.Config.Error
   alias Omashiki.Harness.LaunchPlan
   alias Omashiki.Isolation
-  alias Omashiki.Plugin.{Interpreter, Loader, Manifest}
+  alias Omashiki.Plugin.{Interpreter, Loader, Manifest, OptionSchema}
   alias Omashiki.Plugin.Preset
 
   @adapter Omashiki.Plugin.Interpreter
@@ -88,16 +88,18 @@ defmodule Omashiki.Harnesses do
   end
 
   defp validate_options!(manifest, options, where) do
-    case Interpreter.validate_options(options) do
+    unless is_map(options), do: raise(Error, "#{where}.options must be a table")
+
+    case OptionSchema.validate(manifest, options) do
       :ok -> :ok
-      {:error, reason} -> raise Error, "#{where}.options are invalid: #{format(reason)}"
-      other -> raise Error, "#{where}.plugin returned invalid option result #{inspect(other)}"
-    end
+      {:error, {:unknown_options, keys}} ->
+        raise Error, "#{where}.options unknown field #{inspect(hd(keys))}"
 
-    unknown = Map.keys(options) -- Map.keys(manifest.options)
+      {:error, reason} ->
+        raise Error, "#{where}.options are invalid: #{format(reason)}"
 
-    if unknown != [] do
-      raise Error, "#{where}.options unknown field #{inspect(hd(unknown))}"
+      other ->
+        raise Error, "#{where}.plugin returned invalid option result #{inspect(other)}"
     end
   end
 

@@ -50,6 +50,7 @@ default = "/usr/local/bin/omashiki-jcode-runner"
 
 [options.invocation_path]
 type = "absolute_path"
+prefix = "/tmp"
 default = "/tmp/omashiki-jcode-invocation.txt"
 
 [requires]

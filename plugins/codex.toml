@@ -50,16 +50,21 @@ default = "/usr/local/bin/omashiki-codex-runner"
 
 [options.invocation_path]
 type = "absolute_path"
+prefix = "/tmp"
 default = "/tmp/omashiki-codex-invocation.json"
 
 [options.credentials_path]
 type = "absolute_path"
+prefix = "/run/omashiki/state"
 default = "/run/omashiki/state/codex-auth.json"
 
 [options.reasoning_effort]
+type = "enum"
+allowed = ["minimal", "low", "medium", "high"]
 optional = true
 
 [options.web_search]
+type = "boolean"
 default = false
 
 [requires]

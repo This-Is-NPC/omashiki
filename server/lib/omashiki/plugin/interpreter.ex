@@ -5,7 +5,7 @@ defmodule Omashiki.Plugin.Interpreter do
 
   alias Omashiki.Credentials.Credential
   alias Omashiki.Harness.{CliJson, Context, Invocation, LaunchPlan, Result}
-  alias Omashiki.Plugin.{Http, Manifest, Shapes}
+  alias Omashiki.Plugin.{Http, Manifest, OptionSchema, Shapes}
   alias Omashiki.Plugin.Preset
   alias Omashiki.Jobs.Job
   alias Omashiki.Runtime.{Capability, Claims}
@@ -14,6 +14,9 @@ defmodule Omashiki.Plugin.Interpreter do
   @impl true
   def validate_options(options) when is_map(options), do: :ok
   def validate_options(_), do: {:error, :options_must_be_a_map}
+
+  def validate_options(%Manifest{} = manifest, options),
+    do: OptionSchema.validate(manifest, options)
 
   @impl true
   def launch_plan(%Preset{manifest: %Manifest{} = manifest, runtime: runtime, options: raw}) do
@@ -143,14 +146,30 @@ defmodule Omashiki.Plugin.Interpreter do
   end
 
   defp prepare_gateway_prompt(spec, context, manifest, options) do
-    CliJson.prepare_gateway(spec, context, options, &launch_plan/1, fn credential, token, ctx ->
+    with %Credential{} = credential <- CliJson.credential(context),
+         %Job{} = job <- context.job,
+         {:ok, gateway_token} <- Claims.issue("gateway", job, %{credential: credential.name}),
+         {:ok, prompt} <- CliJson.prompt_for(job) do
+      plan = launch_plan!(spec)
+      secret = file_secret(manifest, options, prompt)
       gateway = Map.get(manifest.env, "gateway", %{})
-      bindings = bindings(options, %{"gateway_base_url" => CliJson.gateway_base_url(ctx), "gateway_token" => token, "gateway_model" => credential.model})
+      gateway_bindings = bindings(options, %{"gateway_base_url" => CliJson.gateway_base_url(context), "gateway_token" => gateway_token, "gateway_model" => credential.model})
 
-      Enum.map(gateway, fn {k, v} ->
-        "#{k}=#{substitute(v, bindings)}"
-      end)
-    end)
+      gateway_env =
+        Enum.map(gateway, fn {k, v} ->
+          "#{k}=#{substitute(v, gateway_bindings)}"
+        end)
+
+      {:ok,
+       %{
+         plan
+         | secret: secret,
+           environment: plan.environment ++ gateway_env
+       }}
+    else
+      nil -> {:error, :runtime_job_required}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp prepare_invocation_json(spec, context, _manifest, options) do
@@ -338,6 +357,29 @@ defmodule Omashiki.Plugin.Interpreter do
   end
 
   defp substitute_list(list, bindings) when is_list(list), do: Enum.map(list, &substitute(&1, bindings))
+
+  defp file_secret(%Manifest{files: %{"invocation" => %{"path" => path_tpl, "body" => body_tpl}}}, options, prompt) do
+    bindings = bindings(options, %{"instruction" => prompt})
+
+    %{
+      "target" => substitute(path_tpl, bindings),
+      "contents" => substitute(body_tpl, bindings)
+    }
+  end
+
+  defp file_secret(%Manifest{files: files}, options, prompt) when map_size(files) > 0 do
+    {_name, spec} = files |> Map.to_list() |> hd()
+    bindings = bindings(options, %{"instruction" => prompt})
+
+    %{
+      "target" => substitute(spec["path"], bindings),
+      "contents" => substitute(spec["body"], bindings)
+    }
+  end
+
+  defp file_secret(_, options, prompt) do
+    %{"target" => options["invocation_path"], "contents" => prompt}
+  end
 
   defp launch_plan!(spec) do
     {:ok, plan} = launch_plan(spec)

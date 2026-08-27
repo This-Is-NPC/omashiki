@@ -176,7 +176,7 @@ defmodule Omashiki.Gateway do
   #     worse — succeeds and bills the ledger for a model that never ran.
   #
   # Provision points the engine at `modelID: credential.model` of the primary
-  # (see `Harness.OpenCode`), so in practice the requested name *is* the
+  # (see `Plugin.Interpreter`), so in practice the requested name *is* the
   # primary's model. Resolving it verbatim on a fallback hop is exactly the
   # cross-provider mis-attribution this guards against.
   defp hop_model(requested, %Credential{} = cred, :primary) do

@@ -43,6 +43,7 @@ default = "/usr/local/bin/omashiki-pi-runner"
 
 [options.invocation_path]
 type = "absolute_path"
+prefix = "/tmp"
 default = "/tmp/omashiki-pi-invocation.txt"
 
 [requires]

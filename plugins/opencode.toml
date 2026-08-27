@@ -23,12 +23,15 @@ type = "absolute_path"
 default = "/run/secrets/opencode-auth.json"
 
 [options.internal_port]
+type = "positive_int"
 default = 4096
 
 [options.readiness_path]
+type = "string"
 default = "/doc"
 
 [options.readiness_timeout_ms]
+type = "positive_int"
 default = 60_000
 
 [output]

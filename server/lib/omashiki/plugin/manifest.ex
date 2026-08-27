@@ -1,6 +1,7 @@
 defmodule Omashiki.Plugin.Manifest do
   @moduledoc false
   alias Omashiki.Config.Error
+  alias Omashiki.Plugin.OptionSchema
 
   @legacy ~w(isolation runtime sink adapter harness)
   @vars ~w(instruction invocation_path runner_path model timeout_ms reasoning_effort PORT gateway_base_url gateway_token gateway_model credentials_path config_path auth_path gateway_auth_path item)
@@ -72,7 +73,9 @@ defmodule Omashiki.Plugin.Manifest do
     argv = stringify(Map.get(attrs, "argv", %{}))
     check_templates!(Map.get(argv, "template"), where <> ".argv.template")
 
-    %__MODULE__{
+    options = options!(Map.get(attrs, "options", %{}), where)
+    files = files!(Map.get(attrs, "files", %{}), where)
+    manifest = %__MODULE__{
       name: name,
       path: path,
       contents: contents,
@@ -82,15 +85,54 @@ defmodule Omashiki.Plugin.Manifest do
       prepare: prepare,
       argv: argv,
       env: env!(Map.get(attrs, "env", %{}), where),
-      files: stringify(Map.get(attrs, "files", %{})),
+      files: files,
       output: output,
-      options: stringify(Map.get(attrs, "options", %{})),
+      options: options,
       requires: %{"binaries" => Map.get(stringify(Map.get(attrs, "requires", %{})), "binaries", [])},
       llm_egress: egress(Map.get(attrs, "llm_egress")),
       http: if(transport == "http", do: stringify(Map.get(attrs, "http", %{}))),
       option_argv: option_argv!(Map.get(attrs, "option_argv", []), where)
     }
+
+    OptionSchema.validate_schema!(manifest, where)
+    manifest
   end
+
+
+  defp options!(table, w) when is_map(table) do
+    table
+    |> stringify()
+    |> Enum.map(fn {name, spec} ->
+      spec_where = w <> ".options." <> name
+      spec = stringify(spec)
+
+      unless Map.has_key?(spec, "type") do
+        raise Error, spec_where <> ".type required"
+      end
+
+      {name, spec}
+    end)
+    |> Map.new()
+  end
+
+  defp options!(_, w), do: raise(Error, w <> ".options must be a table")
+
+  defp files!(table, w) when is_map(table) do
+    table
+    |> stringify()
+    |> Enum.map(fn {name, spec} ->
+      spec_where = w <> ".files." <> name
+      spec = stringify(spec)
+      path = req!(spec, "path", spec_where)
+      body = req!(spec, "body", spec_where)
+      check_template!(path, spec_where <> ".path")
+      check_template!(body, spec_where <> ".body")
+      {name, %{"path" => path, "body" => body}}
+    end)
+    |> Map.new()
+  end
+
+  defp files!(_, w), do: raise(Error, w <> ".files must be a table")
 
   defp output!(nil, w), do: raise(Error, "#{w}.output required")
   defp output!(table, w) do
