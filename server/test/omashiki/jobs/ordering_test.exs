@@ -55,10 +55,10 @@ defmodule Omashiki.Jobs.OrderingTest do
              Jobs.Admission.admit_batch(
                token,
                batch_request([
-                 {"root", nil, 0},
-                 {"first", "root", 1},
-                 {"second", "root", 1},
-                 {"third", "root", 0}
+                 {"root", [], 0},
+                 {"first", [%{"ref" => "root"}], 1},
+                 {"second", [%{"ref" => "root"}], 1},
+                 {"third", [%{"ref" => "root"}], 0}
                ])
              )
 
@@ -68,9 +68,12 @@ defmodule Omashiki.Jobs.OrderingTest do
 
     children =
       Repo.all(
-        from(j in Job,
-          where: j.parent_job_id == ^root.id,
-          order_by: [asc: j.inserted_at, asc: j.id]
+        from(d in Omashiki.Jobs.JobDependency,
+          join: j in Job,
+          on: j.id == d.job_id,
+          where: d.depends_on_job_id == ^root.id,
+          order_by: [asc: j.inserted_at, asc: j.id],
+          select: j
         )
       )
 
@@ -111,7 +114,7 @@ defmodule Omashiki.Jobs.OrderingTest do
     assert {:ok, [root, child]} =
              Jobs.Admission.admit_batch(
                token,
-               batch_request([{"root", nil, 0}, {"child", "root", 0}])
+               batch_request([{"root", [], 0}, {"child", [%{"ref" => "root"}], 0}])
              )
 
     assert {:ok, _cancelled} = Jobs.cancel(root)
@@ -129,7 +132,7 @@ defmodule Omashiki.Jobs.OrderingTest do
     assert {:ok, [failed_root, failed_child]} =
              Jobs.Admission.admit_batch(
                token,
-               batch_request([{"failed-root", nil, 0}, {"failed-child", "failed-root", 0}])
+               batch_request([{"failed-root", [], 0}, {"failed-child", [%{"ref" => "failed-root"}], 0}])
              )
 
     assert {:ok, _running} = Jobs.start(failed_root)
@@ -147,7 +150,7 @@ defmodule Omashiki.Jobs.OrderingTest do
     assert {:ok, [root, child]} =
              Jobs.Admission.admit_batch(
                token,
-               batch_request([{"root", nil, 0}, {"child", "root", 0}])
+               batch_request([{"root", [], 0}, {"child", [%{"ref" => "root"}], 0}])
              )
 
     assert {:ok, _running} = Jobs.start(root)
@@ -173,7 +176,7 @@ defmodule Omashiki.Jobs.OrderingTest do
     assert {:ok, [root, child]} =
              Jobs.Admission.admit_batch(
                token,
-               batch_request([{"root", nil, 0}, {"child", "root", 0}])
+               batch_request([{"root", [], 0}, {"child", [%{"ref" => "root"}], 0}])
              )
 
     assert {:ok, _running} = Jobs.start(root)
@@ -211,7 +214,7 @@ defmodule Omashiki.Jobs.OrderingTest do
       "schema_version" => 1,
       "correlation_id" => "batch-#{System.unique_integer([:positive])}",
       "jobs" =>
-        Enum.map(jobs, fn {ref, parent_ref, priority} ->
+        Enum.map(jobs, fn {ref, depends_on, priority} ->
           job = %{
             "ref" => ref,
             "idempotency_key" => "#{ref}-#{System.unique_integer([:positive])}",
@@ -225,7 +228,7 @@ defmodule Omashiki.Jobs.OrderingTest do
             "priority" => priority
           }
 
-          if parent_ref, do: Map.put(job, "parent_ref", parent_ref), else: job
+          Map.put(job, "depends_on", depends_on)
         end)
     }
   end

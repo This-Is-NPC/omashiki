@@ -286,7 +286,6 @@ defmodule Omashiki.Jobs.AdmissionTest do
     assert {:ok, [root, child]} = Admission.admit_batch(token, batch_request())
     assert root.status == "queued"
     assert child.status == "blocked"
-    assert child.parent_job_id == root.id
     assert root.correlation_id == child.correlation_id
     assert Repo.aggregate(Oban.Job, :count, :id) == 1
 
@@ -297,7 +296,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
   end
 
   test "batch validation and registry failures write nothing", %{token: token} do
-    invalid = Map.put(batch_request(), "jobs", [batch_job("child", "unknown")])
+    invalid = Map.put(batch_request(), "jobs", [batch_job("child", [%{"ref" => "unknown"}])])
     assert {:error, {:validation, errors}} = Admission.admit_batch(token, invalid)
     assert %{code: "unknown_ref"} = Enum.find(errors, &(&1.code == "unknown_ref"))
 
@@ -307,7 +306,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
   test "rejects a cyclic batch before the transaction starts", %{token: token} do
     cyclic =
-      Map.put(batch_request(), "jobs", [batch_job("a", "b"), batch_job("b", "a")])
+      Map.put(batch_request(), "jobs", [batch_job("a", [%{"ref" => "b"}]), batch_job("b", [%{"ref" => "a"}])])
 
     assert {:error, {:validation, errors}} = Admission.admit_batch(token, cyclic)
     assert %{code: "cycle"} = Enum.find(errors, &(&1.code == "cycle"))
@@ -353,11 +352,11 @@ defmodule Omashiki.Jobs.AdmissionTest do
     %{
       "schema_version" => 1,
       "correlation_id" => "batch-1",
-      "jobs" => [batch_job("root"), batch_job("child", "root")]
+      "jobs" => [batch_job("root", []), batch_job("child", [%{"ref" => "root"}])]
     }
   end
 
-  defp batch_job(ref, parent_ref \\ nil) do
+  defp batch_job(ref, depends_on \\ []) do
     %{
       "ref" => ref,
       "idempotency_key" => "batch-#{ref}",
@@ -370,7 +369,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
       },
       "priority" => 0
     }
-    |> then(fn job -> if parent_ref, do: Map.put(job, "parent_ref", parent_ref), else: job end)
+    |> then(fn job -> Map.put(job, "depends_on", depends_on) end)
   end
 
   defp sha256(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)

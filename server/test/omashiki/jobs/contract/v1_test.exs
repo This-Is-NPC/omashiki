@@ -13,9 +13,9 @@ defmodule Omashiki.Jobs.Contract.V1Test do
     assert V1.max_payload_bytes() == 1_048_576
     assert V1.semantics().batch_admission == :atomic
     assert V1.semantics().payload_limit_scope == :per_job_json_encoded
-    assert V1.semantics().parent_scope == :same_batch
-    assert V1.semantics().parent_failure_effect == :none
-    assert V1.semantics().parent_success_effect == :unlock_once
+    assert V1.semantics().dependency_scope == :same_batch
+    assert V1.semantics().dependency_failure_effect == :edge_policy
+    assert V1.semantics().dependency_success_effect == :unlock_when_all_succeeded
     assert V1.semantics().retry_identity == :same_job_new_attempt
     assert V1.semantics().timeout_outcome == :failed
     assert V1.semantics().webhook_delivery == :at_least_once
@@ -29,7 +29,7 @@ defmodule Omashiki.Jobs.Contract.V1Test do
   test "rejects missing, unknown, and invalid single job fields" do
     assert {:error, errors} =
              single_request()
-             |> Map.put("parent_ref", "not-allowed-on-single")
+             |> Map.put("parent_ref", "legacy")
              |> Map.put("priority", 4)
              |> Map.put("schema_version", 2)
              |> V1.validate_single()
@@ -61,8 +61,8 @@ defmodule Omashiki.Jobs.Contract.V1Test do
       "correlation_id" => "workflow-42",
       "jobs" => [
         batch_job("root"),
-        batch_job("child", "root"),
-        batch_job("grandchild", "child")
+        batch_job("child", [%{"ref" => "root"}]),
+        batch_job("grandchild", [%{"ref" => "child"}])
       ]
     }
 
@@ -70,26 +70,26 @@ defmodule Omashiki.Jobs.Contract.V1Test do
   end
 
   test "rejects parent references outside the batch" do
-    batch = %{"schema_version" => 1, "jobs" => [batch_job("child", "external-job")]}
+    batch = %{"schema_version" => 1, "jobs" => [batch_job("child", [%{"ref" => "external-job"}])]}
 
     assert {:error, errors} = V1.validate_batch(batch)
-    assert_error(errors, "jobs.parent_ref", "unknown_ref")
+    assert_error(errors, "jobs.depends_on", "unknown_ref")
   end
 
   test "rejects self-parenting and cycles" do
-    self_parent = %{"schema_version" => 1, "jobs" => [batch_job("a", "a")]}
+    self_parent = %{"schema_version" => 1, "jobs" => [batch_job("a", [%{"ref" => "a"}])]}
 
     cycle = %{
       "schema_version" => 1,
-      "jobs" => [batch_job("a", "b"), batch_job("b", "a")]
+      "jobs" => [batch_job("a", [%{"ref" => "b"}]), batch_job("b", [%{"ref" => "a"}])]
     }
 
     assert {:error, self_errors} = V1.validate_batch(self_parent)
-    assert_error(self_errors, "jobs.parent_ref", "self_parent")
-    assert_error(self_errors, "jobs.parent_ref", "cycle")
+    assert_error(self_errors, "jobs.depends_on", "self_dependency")
+    assert_error(self_errors, "jobs.depends_on", "cycle")
 
     assert {:error, cycle_errors} = V1.validate_batch(cycle)
-    assert_error(cycle_errors, "jobs.parent_ref", "cycle")
+    assert_error(cycle_errors, "jobs.depends_on", "cycle")
   end
 
   test "rejects duplicate refs and idempotency keys" do
@@ -115,8 +115,8 @@ defmodule Omashiki.Jobs.Contract.V1Test do
   end
 
   test "validates single and atomic batch admission responses" do
-    root = admission_response("queued", nil, @parent_job_id)
-    child = admission_response("blocked", @parent_job_id)
+    root = admission_response("queued", [], @parent_job_id)
+    child = admission_response("blocked", [@parent_job_id], @job_id)
     batch = %{"schema_version" => 1, "correlation_id" => "workflow-42", "jobs" => [root, child]}
 
     assert {:ok, ^root} = V1.validate_single_response(root)
@@ -124,24 +124,24 @@ defmodule Omashiki.Jobs.Contract.V1Test do
   end
 
   test "batch admission rejects parent IDs outside the admitted batch" do
-    root = admission_response("queued", nil, @parent_job_id)
-    child = admission_response("blocked", @event_id)
+    root = admission_response("queued", [], @parent_job_id)
+    child = admission_response("blocked", [@event_id], @job_id)
     batch = %{"schema_version" => 1, "correlation_id" => "workflow-42", "jobs" => [root, child]}
 
     assert {:error, errors} = V1.validate_batch_response(batch)
-    assert_error(errors, "jobs.parent_job_id", "unknown_job_id")
+    assert_error(errors, "jobs.depends_on", "unknown_job_id")
   end
 
   test "admission response status reflects parent presence" do
     assert {:error, blocked_errors} =
              "blocked" |> admission_response() |> V1.validate_single_response()
 
-    assert_error(blocked_errors, "parent_job_id", "required_when_blocked")
+    assert_error(blocked_errors, "depends_on", "required_when_blocked")
 
     assert {:error, queued_errors} =
-             "queued" |> admission_response(@event_id) |> V1.validate_single_response()
+             admission_response("queued", [@event_id]) |> V1.validate_single_response()
 
-    assert_error(queued_errors, "parent_job_id", "not_allowed_when_queued")
+    assert_error(queued_errors, "depends_on", "not_allowed_when_queued")
   end
 
   test "retry eligibility is limited to unsuccessful terminal states" do
@@ -159,9 +159,9 @@ defmodule Omashiki.Jobs.Contract.V1Test do
     assert {:ok, ^retry} = V1.validate_transition(retry)
 
     unlock =
-      transition("parent_succeeded", "blocked", "queued")
-      |> Map.put("parent_job_id", @parent_job_id)
-      |> Map.put("parent_status", "succeeded")
+      transition("dependency_satisfied", "blocked", "queued")
+      |> Map.put("depends_on", [@parent_job_id])
+      
       |> Map.put("unlock_event_id", @event_id)
 
     assert {:ok, ^unlock} = V1.validate_transition(unlock)
@@ -169,18 +169,18 @@ defmodule Omashiki.Jobs.Contract.V1Test do
 
   test "parent unlock transitions are bound and cannot be replayed" do
     unlock =
-      transition("parent_succeeded", "blocked", "queued")
-      |> Map.put("parent_job_id", @parent_job_id)
-      |> Map.put("parent_status", "succeeded")
+      transition("dependency_satisfied", "blocked", "queued")
+      |> Map.put("depends_on", [@parent_job_id])
+      
       |> Map.put("unlock_event_id", @event_id)
 
     assert {:error, errors} = V1.validate_transition_stream([unlock, unlock])
     assert_error(errors, "transitions.unlock_event_id", "duplicate")
-    assert_error(errors, "transitions.parent_unlock", "duplicate")
+    assert_error(errors, "transitions.dependency_unlock", "duplicate")
 
     assert {:error, self_errors} =
              unlock
-             |> Map.put("parent_job_id", @job_id)
+             |> Map.put("depends_on", [@job_id])
              |> V1.validate_transition()
 
     assert_error(self_errors, "$", "invalid_transition")
@@ -411,7 +411,7 @@ defmodule Omashiki.Jobs.Contract.V1Test do
         "sequence" => 1,
         "type" => "job.blocked",
         "status" => "blocked",
-        "data" => %{"parent_job_id" => @parent_job_id}
+        "data" => %{"depends_on" => [@parent_job_id]}
       })
 
     queued =
@@ -421,7 +421,7 @@ defmodule Omashiki.Jobs.Contract.V1Test do
         "sequence" => 2,
         "type" => "job.queued",
         "status" => "queued",
-        "data" => %{"parent_job_id" => @parent_job_id, "unlock_event_id" => @event_id}
+        "data" => %{"depends_on" => [@parent_job_id], "unlock_event_id" => @event_id}
       })
 
     stream = [parent_queued, parent_running, parent_succeeded, blocked, queued]
@@ -448,7 +448,7 @@ defmodule Omashiki.Jobs.Contract.V1Test do
     assert_error(
       unlock_errors,
       "events.data.unlock_event_id",
-      "parent_success_event_required"
+      "dependency_success_event_required"
     )
   end
 
@@ -473,16 +473,16 @@ defmodule Omashiki.Jobs.Contract.V1Test do
     }
   end
 
-  defp batch_job(ref, parent_ref \\ nil) do
+  defp batch_job(ref, depends_on \\ []) do
     %{
       "ref" => ref,
       "idempotency_key" => "key-#{ref}",
       "repo" => "omashiki",
       "environment" => "opencode",
       "payload" => %{"instruction" => ref},
-      "priority" => 1
+      "priority" => 1,
+      "depends_on" => depends_on
     }
-    |> maybe_put("parent_ref", parent_ref)
   end
 
   defp successful_result do
@@ -520,11 +520,11 @@ defmodule Omashiki.Jobs.Contract.V1Test do
 
   defp admission_response(status), do: admission_response(status, nil, @job_id)
 
-  defp admission_response(status, parent_job_id),
-    do: admission_response(status, parent_job_id, @job_id)
+  defp admission_response(status, depends_on),
+    do: admission_response(status, depends_on, @job_id)
 
-  defp admission_response(status, parent_job_id, job_id) do
-    %{
+  defp admission_response(status, depends_on, job_id) do
+    response = %{
       "schema_version" => 1,
       "job_id" => job_id,
       "idempotency_key" => "client-job-#{job_id}",
@@ -536,7 +536,8 @@ defmodule Omashiki.Jobs.Contract.V1Test do
       "attempt" => 1,
       "submitted_at" => "2026-08-24T02:00:00Z"
     }
-    |> maybe_put("parent_job_id", parent_job_id)
+
+    if is_list(depends_on), do: Map.put(response, "depends_on", depends_on), else: response
   end
 
   defp transition(operation, from, to, from_attempt \\ 1, to_attempt \\ 1) do

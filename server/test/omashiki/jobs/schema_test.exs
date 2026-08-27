@@ -3,7 +3,7 @@ defmodule Omashiki.Jobs.SchemaTest do
 
   alias Omashiki.Accounts.User
   alias Omashiki.ApiTokens.Token
-  alias Omashiki.Jobs.{Job, JobAttempt, JobEvent, JobStep, WebhookDelivery}
+  alias Omashiki.Jobs.{Job, JobAttempt, JobDependency, JobEvent, JobStep, WebhookDelivery}
   alias Omashiki.UsageLedger.Entry
 
   @digest String.duplicate("a", 64)
@@ -21,7 +21,7 @@ defmodule Omashiki.Jobs.SchemaTest do
       |> List.flatten()
 
     assert tables ==
-             ~w(api_tokens execution_capacity job_attempts job_events job_steps jobs usage_ledger users webhook_deliveries)
+             ~w(api_tokens execution_capacity job_attempts job_dependencies job_events job_steps jobs usage_ledger users webhook_deliveries)
 
     oban_tables =
       Repo.query!(
@@ -42,19 +42,34 @@ defmodule Omashiki.Jobs.SchemaTest do
 
     assert token_owner_changeset.errors[:api_token_id]
     parent = persist_job(owner, token)
+    other_token =
+             %Token{}
+             |> Token.create_changeset(%{
+               user_id: other.id,
+               name: "other",
+               token_hash: String.duplicate("c", 64) <> Integer.to_string(System.unique_integer([:positive]))
+             })
+             |> Repo.insert!()
 
-    child_attrs =
-      other
-      |> job_attrs(nil)
-      |> Map.merge(%{
-        idempotency_key: "other-request",
-        parent_job_id: parent.id,
-        status: "blocked",
-        queued_at: nil
-      })
+    child =
+             %Job{}
+             |> Job.changeset(
+               job_attrs(other, other_token)
+               |> Map.put(:idempotency_key, "other-child-request")
+             )
+             |> Repo.insert!()
 
-    assert {:error, parent_changeset} = %Job{} |> Job.changeset(child_attrs) |> Repo.insert()
-    assert parent_changeset.errors[:parent_job_id]
+    assert {:error, dep_changeset} =
+             %JobDependency{}
+             |> JobDependency.changeset(%{
+               job_id: child.id,
+               depends_on_job_id: parent.id,
+               user_id: other.id,
+               on_failure: "cancel"
+             })
+             |> Repo.insert()
+
+    refute dep_changeset.valid?
 
     now = DateTime.utc_now(:microsecond)
 
@@ -63,7 +78,7 @@ defmodule Omashiki.Jobs.SchemaTest do
       |> job_attrs(token)
       |> Map.merge(%{
         idempotency_key: "blocked-request",
-        parent_job_id: parent.id,
+        
         status: "blocked",
         queued_at: nil
       })

@@ -742,11 +742,11 @@ defmodule Omashiki.Jobs.ClaimsTest do
     %{
       "schema_version" => 1,
       "correlation_id" => "cancel-batch",
-      "jobs" => [batch_job("parent"), batch_job("blocked", "parent")]
+      "jobs" => [batch_job("parent"), batch_job("blocked", [%{"ref" => "parent"}])]
     }
   end
 
-  defp batch_job(ref, parent_ref \\ nil) do
+  defp batch_job(ref, depends_on \\ []) do
     job = %{
       "ref" => ref,
       "idempotency_key" => "batch-#{ref}",
@@ -760,7 +760,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
       "priority" => 0
     }
 
-    if parent_ref, do: Map.put(job, "parent_ref", parent_ref), else: job
+    Map.put(job, "depends_on", depends_on)
   end
 
   defp error(code), do: %{"code" => code, "message" => code, "details" => %{}}
