@@ -194,6 +194,9 @@ defmodule Omashiki.Jobs.Admission do
 
       {:error, {:persistence, changeset}} ->
         {:error, changeset}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -338,38 +341,66 @@ defmodule Omashiki.Jobs.Admission do
   defp resolve_depends_on(user_id, request, jobs_by_ref, self_ref \\ nil) do
     depends_on = Map.get(request, "depends_on", [])
 
-    edges =
-      Enum.map(depends_on, fn dep ->
-        dep_id =
-          cond do
-            is_binary(Map.get(dep, "ref")) -> jobs_by_ref[dep["ref"]].id
-            is_binary(Map.get(dep, "id")) -> dep["id"]
-          end
+    with {:ok, edges} <- build_depends_on_edges(depends_on, jobs_by_ref),
+         :ok <- check_self_dependency(depends_on, self_ref),
+         :ok <- check_dependencies_exist(user_id, edges) do
+      {:ok, edges}
+    end
+  end
 
-        {dep_id, Map.get(dep, "on_failure", "cancel")}
-      end)
-
-    dep_jobs =
-      if edges == [] do
-        %{}
-      else
-        ids = Enum.map(edges, fn {id, _} -> id end)
-
-        from(j in Job, where: j.id in ^ids and j.user_id == ^user_id)
-        |> Repo.all()
-        |> Map.new(&{&1.id, &1})
+  defp build_depends_on_edges(depends_on, jobs_by_ref) do
+    depends_on
+    |> Enum.reduce_while({:ok, []}, fn dep, {:ok, acc} ->
+      case build_depends_on_edge(dep, jobs_by_ref) do
+        {:ok, edge} -> {:cont, {:ok, [edge | acc]}}
+        {:error, _} = err -> {:halt, err}
       end
+    end)
+    |> case do
+      {:ok, edges} -> {:ok, Enum.reverse(edges)}
+      err -> err
+    end
+  end
 
+  defp build_depends_on_edge(dep, jobs_by_ref) do
     cond do
-      Enum.any?(edges, fn {id, _} -> not Map.has_key?(dep_jobs, id) end) ->
-        {:error, :unknown_dependency}
+      is_map(dep) and is_binary(Map.get(dep, "ref")) ->
+        case Map.get(jobs_by_ref, dep["ref"]) do
+          %{id: id} -> {:ok, {id, Map.get(dep, "on_failure", "cancel")}}
+          nil -> {:error, :unknown_dependency}
+        end
 
-      not is_nil(self_ref) and
-          Enum.any?(depends_on, fn dep -> Map.get(dep, "ref") == self_ref end) ->
-        {:error, :self_dependency}
+      is_map(dep) and is_binary(Map.get(dep, "id")) ->
+        {:ok, {dep["id"], Map.get(dep, "on_failure", "cancel")}}
 
       true ->
-        {:ok, edges}
+        {:error, :id_or_ref_required}
+    end
+  end
+
+  defp check_self_dependency(depends_on, self_ref) do
+    if not is_nil(self_ref) and
+         Enum.any?(depends_on, fn dep -> Map.get(dep, "ref") == self_ref end) do
+      {:error, :self_dependency}
+    else
+      :ok
+    end
+  end
+
+  defp check_dependencies_exist(_user_id, []), do: :ok
+
+  defp check_dependencies_exist(user_id, edges) do
+    ids = Enum.map(edges, fn {id, _} -> id end)
+
+    dep_jobs =
+      from(j in Job, where: j.id in ^ids and j.user_id == ^user_id)
+      |> Repo.all()
+      |> Map.new(&{&1.id, &1})
+
+    if Enum.any?(edges, fn {id, _} -> not Map.has_key?(dep_jobs, id) end) do
+      {:error, :unknown_dependency}
+    else
+      :ok
     end
   end
 

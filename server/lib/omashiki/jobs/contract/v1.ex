@@ -566,7 +566,19 @@ defmodule Omashiki.Jobs.Contract.V1 do
 
       {:ok, deps} when is_list(deps) ->
         Enum.reduce(deps, errors, fn dep, acc ->
-          if is_map(dep), do: acc, else: [error("depends_on", "object_required") | acc]
+          cond do
+            not is_map(dep) ->
+              [error("depends_on", "object_required") | acc]
+
+            is_binary(Map.get(dep, "id")) and is_binary(Map.get(dep, "ref")) ->
+              [error("depends_on", "id_or_ref_required") | acc]
+
+            not (is_binary(Map.get(dep, "id")) or is_binary(Map.get(dep, "ref"))) ->
+              [error("depends_on", "id_or_ref_required") | acc]
+
+            true ->
+              acc
+          end
         end)
 
       {:ok, _} ->
