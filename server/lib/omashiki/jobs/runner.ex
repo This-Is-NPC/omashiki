@@ -19,24 +19,26 @@ defmodule Omashiki.Jobs.Runner.DockerContainer do
   def provision(%Job{} = job, %JobAttempt{} = attempt, environment, opts) do
     opts = Keyword.put_new(opts, :preset, profile_for(environment))
 
-    provision_fn(job, environment_sink(environment), opts, fn artifact ->
-      opts = Keyword.put(opts, :worktree_path, artifact.path)
+    with {:ok, sink} <- environment_sink(environment) do
+      provision_fn(job, sink, opts, fn artifact ->
+        opts = Keyword.put(opts, :worktree_path, artifact.path)
 
-      case ContainerManager.provision_for_job(job, attempt, environment, opts) do
-        {:ok, container} ->
-          container_id = Map.get(container, :id) || Map.get(container, :sandbox_id)
+        case ContainerManager.provision_for_job(job, attempt, environment, opts) do
+          {:ok, container} ->
+            container_id = Map.get(container, :id) || Map.get(container, :sandbox_id)
 
-          {:ok,
-           Map.merge(container, %{
-             artifact: artifact,
-             id: container_id,
-             worktree_path: artifact.path
-           })}
+            {:ok,
+             Map.merge(container, %{
+               artifact: artifact,
+               id: container_id,
+               worktree_path: artifact.path
+             })}
 
-        error ->
-          error
-      end
-    end)
+          error ->
+            error
+        end
+      end)
+    end
   end
 
   defp provision_fn(job, "git", opts, callback), do: GitArtifact.provision(job, opts, callback)
@@ -84,10 +86,14 @@ defmodule Omashiki.Jobs.Runner.DockerContainer do
   def cancel_scope(scope_id), do: ContainerManager.cancel_scope(scope_id)
 
   defp environment_sink(environment) when is_map(environment) do
-    Map.get(environment, "sink") || Map.get(environment, :sink) || "git"
+    case Map.get(environment, "sink") || Map.get(environment, :sink) do
+      nil -> {:error, {:unsupported_sink, :missing}}
+      sink when sink in ["git", "files", "none"] -> {:ok, sink}
+      sink -> {:error, {:unsupported_sink, sink}}
+    end
   end
 
-  defp environment_sink(_), do: "git"
+  defp environment_sink(_), do: {:error, {:unsupported_sink, :missing}}
 
   defp profile_for(environment) do
     Omashiki.Harnesses.profile(environment)

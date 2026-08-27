@@ -480,14 +480,38 @@ defmodule Omashiki.Jobs do
     updated
   end
 
-  defp valid_success_result?(_job, result, branch, base_sha, head_sha, worktree_clean)
+  defp valid_success_result?(job, result, branch, base_sha, head_sha, worktree_clean) do
+    case admitted_sink(job) do
+      {:ok, "git"} ->
+        git_success_result?(result, branch, base_sha, head_sha, worktree_clean)
+
+      {:ok, sink} when sink in ["files", "none"] ->
+        result_only_success_result?(result, branch, base_sha, head_sha, worktree_clean)
+
+      _ ->
+        false
+    end
+  end
+
+  defp admitted_sink(%Job{admitted_environment: env}) when is_map(env) do
+    case Map.get(env, "sink") || Map.get(env, :sink) do
+      sink when sink in ["git", "files", "none"] -> {:ok, sink}
+      _ -> :error
+    end
+  end
+
+  defp admitted_sink(_), do: :error
+
+  defp git_success_result?(result, branch, base_sha, head_sha, worktree_clean)
        when is_map(result) and is_binary(branch) and is_binary(base_sha) and
               is_binary(head_sha) and worktree_clean == true,
        do: true
 
-  defp valid_success_result?(_job, result, nil, nil, nil, nil) when is_map(result), do: true
+  defp git_success_result?(_result, _branch, _base_sha, _head_sha, _worktree_clean), do: false
 
-  defp valid_success_result?(_job, _result, _branch, _base_sha, _head_sha, _worktree_clean),
+  defp result_only_success_result?(result, nil, nil, nil, nil) when is_map(result), do: true
+
+  defp result_only_success_result?(_result, _branch, _base_sha, _head_sha, _worktree_clean),
     do: false
 
   defp maybe_put_git_fields(attrs, branch, base_sha, head_sha, true) do
