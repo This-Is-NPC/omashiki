@@ -20,7 +20,7 @@ defmodule Omashiki.Jobs.Runner.DockerContainer do
     opts = Keyword.put_new(opts, :preset, profile_for(environment))
 
     with {:ok, sink} <- environment_sink(environment) do
-      provision_fn(job, sink, opts, fn artifact ->
+      provision_fn(job, attempt, sink, opts, fn artifact ->
         opts = Keyword.put(opts, :worktree_path, artifact.path)
 
         case ContainerManager.provision_for_job(job, attempt, environment, opts) do
@@ -41,12 +41,13 @@ defmodule Omashiki.Jobs.Runner.DockerContainer do
     end
   end
 
-  defp provision_fn(job, "git", opts, callback), do: GitArtifact.provision(job, opts, callback)
+  defp provision_fn(job, attempt, "git", opts, callback),
+    do: GitArtifact.provision(job, attempt, opts, callback)
 
-  defp provision_fn(job, sink, opts, callback) when sink in ["files", "none"],
+  defp provision_fn(job, _attempt, sink, opts, callback) when sink in ["files", "none"],
     do: WorkArtifact.provision(job, sink, opts, callback)
 
-  defp provision_fn(_job, sink, _opts, _callback),
+  defp provision_fn(_job, _attempt, sink, _opts, _callback),
     do: {:error, {:unsupported_sink, sink}}
 
   @impl true
@@ -203,6 +204,7 @@ defmodule Omashiki.Jobs.Runner do
       opts: opts,
       steps: steps,
       container: nil,
+      container_started: false,
       outcome: :success,
       error: nil,
       harness_result: %{}
@@ -253,8 +255,13 @@ defmodule Omashiki.Jobs.Runner do
 
   defp mark_running_and_run(state) do
     case Omashiki.Jobs.mark_running(state.attempt, lease_token(state)) do
-      {:ok, _job} -> run_pre_steps(state)
-      {:error, reason} -> fail_state(state, reason)
+      {:ok, _job} ->
+        state
+        |> Map.put(:container_started, true)
+        |> run_pre_steps()
+
+      {:error, reason} ->
+        fail_state(state, reason)
     end
   end
 
@@ -357,7 +364,9 @@ defmodule Omashiki.Jobs.Runner do
   end
 
   defp complete_attempt(%{outcome: :success} = state) do
-    case container_mod(state).finalize(state.container, state.job, state.opts) do
+    opts = Keyword.put(state.opts, :update_task_branch, true)
+
+    case container_mod(state).finalize(state.container, state.job, opts) do
       {:ok, final} ->
         attrs = %{
           branch: Map.get(final, :branch, Map.get(final, "branch")),
@@ -390,6 +399,22 @@ defmodule Omashiki.Jobs.Runner do
     end
   end
 
+  defp complete_attempt(%{container_started: true, container: container} = state)
+       when is_map(container) and map_size(container) > 0 do
+    preserve = git_artifact?(container)
+
+    if preserve do
+      _ = container_mod(state).finalize(container, state.job, state.opts)
+    end
+
+    error = state.error || error_map("attempt_failed", "attempt did not complete")
+
+    case Omashiki.Jobs.complete(state.attempt, lease_token(state), :failed, %{error: error}) do
+      {:ok, _attempt} -> {:ok, %{"status" => "failed", "preserve_artifact" => preserve}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp complete_attempt(state) do
     error = state.error || error_map("attempt_failed", "attempt did not complete")
 
@@ -398,6 +423,9 @@ defmodule Omashiki.Jobs.Runner do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp git_artifact?(%{artifact: %{task_branch: _}}), do: true
+  defp git_artifact?(_), do: false
 
   defp run_command_step(state, step) do
     argv = step.input["argv"]

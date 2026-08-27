@@ -1,6 +1,13 @@
 defmodule Omashiki.Jobs.GitArtifact do
   @moduledoc """
-  Creates, validates, finalizes, and retires one job Git artifact.
+  Creates, validates, finalizes, and retires per-attempt Git run branches.
+
+  Each admitted git job carries a persisted `task_branch` (from `payload.branch`
+  or `slug(payload.title)`). Every attempt provisions an immutable run ref
+  `task_branch-run-NNN` and a worktree under
+  `.omashiki-worktrees/<sanitized-task-branch>-run-NNN`. The task-branch pointer
+  advances only on succeeded finalization; failed dirty attempts still publish
+  their run branch when finalized.
 
   ## Publication
 
@@ -9,6 +16,16 @@ defmodule Omashiki.Jobs.GitArtifact do
   unreachable from every other node. `finalize/3` therefore pushes after — never
   before — the safety validations, so unvalidated output cannot reach a remote
   shared by the whole cluster.
+
+  Run branches are create-only (`--force-with-lease=<run-ref>:`). The task-branch
+  pointer move may be non-fast-forward and uses `--force-with-lease` against the
+  previous task-branch SHA when one exists.
+
+  ## Prune
+
+  Retention (30 days by default) applies to `*-run-NNN` branches. Task branches
+  are not deleted by `prune_expired/2` while they remain the canonical pointer
+  for a succeeded job inside the retention window.
 
   ## Push credentials
 
@@ -23,12 +40,12 @@ defmodule Omashiki.Jobs.GitArtifact do
   validations above.
   """
 
-  alias Omashiki.Jobs.Job
+  alias Omashiki.Jobs.{Job, JobAttempt}
 
   @max_bytes 100 * 1024 * 1024
   @retention_seconds 30 * 24 * 60 * 60
-  @branch_prefix "omashiki/job-"
   @mirror_prefix "refs/omashiki-remote/"
+  @run_branch_suffix ~r/-run-\d{3}\z/
   # A remote operation that stops to ask for credentials would hold the attempt
   # until its lease expires. Absent credentials must fail it instead.
   @non_interactive [{"GIT_TERMINAL_PROMPT", "0"}]
@@ -37,28 +54,44 @@ defmodule Omashiki.Jobs.GitArtifact do
           repo_path: String.t(),
           path: String.t(),
           branch: String.t(),
+          task_branch: String.t(),
+          run_branch: String.t(),
           base_sha: String.t(),
           remote: String.t() | nil,
           job_id: String.t()
         }
 
-  @doc "Create the isolated job worktree from the captured base branch SHA."
-  def provision_worktree(job, opts \\ [])
+  @doc "Create the isolated attempt worktree from the captured base branch SHA."
+  def provision_worktree(job, attempt, opts \\ [])
 
-  def provision_worktree(%Job{id: job_id, admitted_repository: snapshot}, opts) do
+  def provision_worktree(
+        %Job{id: job_id, admitted_repository: snapshot},
+        %JobAttempt{number: attempt_number},
+        opts
+      ) do
     with :ok <- valid_job_id(job_id),
          {:ok, repo_path} <- snapshot_string(snapshot, "path"),
+         {:ok, task_branch} <- snapshot_string(snapshot, "task_branch"),
          {:ok, base_branch} <- snapshot_string(snapshot, "base_branch"),
          :ok <- validate_repo(repo_path),
          :ok <- not_cancelled(opts),
          {:ok, base_sha} <-
            git(repo_path, ["rev-parse", "--verify", "#{base_branch}^{commit}"], opts),
-         artifact <- artifact(repo_path, job_id, base_sha, snapshot_remote(snapshot)),
+         run_branch <- run_branch_name(task_branch, attempt_number),
+         artifact <-
+           artifact(
+             repo_path,
+             job_id,
+             task_branch,
+             run_branch,
+             base_sha,
+             snapshot_remote(snapshot)
+           ),
          :ok <- collision_check(artifact, opts),
          :ok <- File.mkdir_p(Path.dirname(artifact.path)) do
       case git(
              repo_path,
-             ["worktree", "add", "--quiet", "-b", artifact.branch, artifact.path, base_sha],
+             ["worktree", "add", "--quiet", "-b", run_branch, artifact.path, base_sha],
              opts
            ) do
         {:ok, _} ->
@@ -78,11 +111,12 @@ defmodule Omashiki.Jobs.GitArtifact do
     end
   end
 
-  def provision_worktree(_, _), do: {:error, :invalid_job_snapshot}
+  def provision_worktree(_, _, _), do: {:error, :invalid_job_snapshot}
 
   @doc "Provision a worktree, invoke the container callback, and clean up failures."
-  def provision(%Job{} = job, opts, callback) when is_function(callback, 1) do
-    with {:ok, artifact} <- provision_worktree(job, opts) do
+  def provision(%Job{} = job, %JobAttempt{} = attempt, opts, callback)
+      when is_function(callback, 1) do
+    with {:ok, artifact} <- provision_worktree(job, attempt, opts) do
       case safe_callback(callback, artifact) do
         {:ok, result} ->
           {:ok, Map.put(result, :artifact, artifact)}
@@ -104,6 +138,7 @@ defmodule Omashiki.Jobs.GitArtifact do
   """
   def finalize(%{} = artifact, %Job{} = job, opts \\ []) do
     remote = Map.get(artifact, :remote)
+    update_task_branch = Keyword.get(opts, :update_task_branch, false)
 
     with :ok <- not_cancelled(opts),
          {:ok, paths} <- dirty_paths(artifact.path, opts),
@@ -112,18 +147,26 @@ defmodule Omashiki.Jobs.GitArtifact do
          {:ok, previous_head} <- commit_if_dirty(artifact, job, paths, changed_bytes, opts),
          {:ok, head_sha} <- git(artifact.path, ["rev-parse", "HEAD"], opts),
          :ok <- verify_head(artifact, head_sha, previous_head, opts),
-         :ok <- publish(artifact, remote, opts) do
+         :ok <- publish_run_branch(artifact, remote, opts),
+         :ok <- maybe_update_task_branch(artifact, remote, head_sha, update_task_branch, opts) do
+      result_branch =
+        if update_task_branch, do: artifact.task_branch, else: artifact.run_branch
+
       {:ok,
        %{
          remote: remote,
-         branch: artifact.branch,
+         branch: result_branch,
+         task_branch: artifact.task_branch,
+         run_branch: artifact.run_branch,
          base_sha: artifact.base_sha,
          head_sha: head_sha,
          worktree_clean: true,
          result: %{
            "job_id" => to_string(job.id),
            "remote" => remote,
-           "branch" => artifact.branch,
+           "branch" => result_branch,
+           "task_branch" => artifact.task_branch,
+           "run_branch" => artifact.run_branch,
            "base_sha" => artifact.base_sha,
            "head_sha" => head_sha,
            "changed_bytes" => changed_bytes
@@ -140,7 +183,7 @@ defmodule Omashiki.Jobs.GitArtifact do
       if Keyword.get(opts, :preserve_branch, false) do
         :ok
       else
-        delete_branch(artifact.repo_path, artifact.branch, opts)
+        delete_branch(artifact.repo_path, artifact.run_branch, opts)
       end
 
     case {worktree_result, branch_result} do
@@ -151,12 +194,10 @@ defmodule Omashiki.Jobs.GitArtifact do
   end
 
   @doc """
-  Delete successful job branches whose tip is older than the retention period.
+  Delete expired run branches whose tip is older than the retention period.
 
-  Pass `:remote` to retire the artifacts the cluster can actually see. The
-  candidates then come from the remote's own refs, because the node running the
-  sweep may never have held a local branch for an attempt another node ran, and
-  a local-only sweep would leave those to accumulate forever.
+  Pass `:remote` to retire the artifacts the cluster can actually see. Task
+  branches are never removed by this sweep.
   """
   def prune_expired(repo_path, opts \\ []) when is_binary(repo_path) do
     cutoff = Keyword.get(opts, :cutoff, System.system_time(:second) - @retention_seconds)
@@ -169,6 +210,8 @@ defmodule Omashiki.Jobs.GitArtifact do
       |> Enum.reduce_while({:ok, []}, fn line, {:ok, pruned} ->
         case String.split(line, "\t", parts: 2) do
           [branch, timestamp] when branch != "" ->
+            branch = normalize_mirror_branch(branch)
+
             if parse_integer(timestamp) < cutoff do
               case retire_branch(repo_path, remote, branch, opts) do
                 :ok -> {:cont, {:ok, [branch | pruned]}}
@@ -192,22 +235,18 @@ defmodule Omashiki.Jobs.GitArtifact do
   @doc "Return the configured automatic-commit bound."
   def max_bytes, do: @max_bytes
 
-  @doc "Return the branch prefix used for successful job artifacts."
-  def branch_prefix, do: @branch_prefix
-
   defp retention_candidates(repo_path, nil, opts) do
-    git(
-      repo_path,
-      [
-        "for-each-ref",
-        "--format=%(refname:short)\t%(committerdate:unix)",
-        "refs/heads/#{@branch_prefix}*"
-      ],
-      opts
-    )
+    with {:ok, output} <-
+           git(
+             repo_path,
+             ["for-each-ref", "--format=%(refname:short)\t%(committerdate:unix)", "refs/heads"],
+             opts
+           ) do
+      {:ok, filter_run_branch_lines(output)}
+    end
   end
 
-  # `ls-remote` carries no committer date, so mirror the remote's artifact refs
+  # `ls-remote` carries no committer date, so mirror the remote's run refs
   # into a private namespace and age them out from there. `--prune` drops the
   # mirrors of branches a previous sweep already retired.
   defp retention_candidates(repo_path, remote, opts) do
@@ -219,20 +258,34 @@ defmodule Omashiki.Jobs.GitArtifact do
                "--quiet",
                "--prune",
                remote,
-               "+refs/heads/#{@branch_prefix}*:#{@mirror_prefix}#{@branch_prefix}*"
+               "+refs/heads/*:#{@mirror_prefix}heads/*"
              ],
              remote_opts(opts)
+           ),
+         {:ok, output} <-
+           git(
+             repo_path,
+             [
+               "for-each-ref",
+               "--format=%(refname:lstrip=2)\t%(committerdate:unix)",
+               "#{@mirror_prefix}heads/"
+             ],
+             opts
            ) do
-      git(
-        repo_path,
-        [
-          "for-each-ref",
-          "--format=%(refname:lstrip=2)\t%(committerdate:unix)",
-          "#{@mirror_prefix}#{@branch_prefix}*"
-        ],
-        opts
-      )
+      {:ok, filter_run_branch_lines(output)}
     end
+  end
+
+  defp filter_run_branch_lines(output) do
+    output
+    |> String.split("\n", trim: true)
+    |> Enum.filter(fn line ->
+      case String.split(line, "\t", parts: 2) do
+        [branch, _] -> Regex.match?(@run_branch_suffix, branch)
+        _ -> false
+      end
+    end)
+    |> Enum.join("\n")
   end
 
   defp retire_branch(repo_path, nil, branch, opts), do: delete_branch(repo_path, branch, opts)
@@ -258,13 +311,15 @@ defmodule Omashiki.Jobs.GitArtifact do
     end
   end
 
-  defp artifact(repo_path, job_id, base_sha, remote) do
-    branch = @branch_prefix <> to_string(job_id)
+  defp artifact(repo_path, job_id, task_branch, run_branch, base_sha, remote) do
+    worktree_dir = String.replace(run_branch, "/", "-")
 
     %{
       repo_path: repo_path,
-      path: Path.join(repo_path, Path.join(".omashiki-worktrees", "job-#{job_id}")),
-      branch: branch,
+      path: Path.join(repo_path, Path.join(".omashiki-worktrees", worktree_dir)),
+      branch: run_branch,
+      task_branch: task_branch,
+      run_branch: run_branch,
       base_sha: base_sha,
       remote: remote,
       job_id: to_string(job_id)
@@ -280,27 +335,18 @@ defmodule Omashiki.Jobs.GitArtifact do
 
   defp snapshot_remote(_), do: nil
 
-  # Local only, and it stays local only: absence of a local collision says
-  # nothing about the other nodes writing to the same canonical remote. This is
-  # a cheap guard against re-provisioning on the same node, not the arbiter.
-  # `publish/3` is the arbiter.
-  defp collision_check(%{repo_path: repo_path, path: path, branch: branch}, opts) do
+  defp collision_check(%{repo_path: repo_path, path: path, run_branch: run_branch}, opts) do
     cond do
       File.exists?(path) -> {:error, {:collision, :worktree, path}}
-      ref_exists?(repo_path, branch, opts) -> {:error, {:collision, :branch, branch}}
+      ref_exists?(repo_path, run_branch, opts) -> {:error, {:collision, :branch, run_branch}}
       true -> :ok
     end
   end
 
-  # The remote decides. `--force-with-lease=<ref>:` with an empty expectation
-  # means "this ref must not already exist there", so the push itself is the
-  # collision check and it is resolved by the one repository every node shares.
-  # A non-fast-forward rejection lands in the same branch: another node got
-  # there first and its artifact is the one that survives.
-  defp publish(_artifact, nil, _opts), do: :ok
+  defp publish_run_branch(_artifact, nil, _opts), do: :ok
 
-  defp publish(artifact, remote, opts) do
-    ref = "refs/heads/#{artifact.branch}"
+  defp publish_run_branch(artifact, remote, opts) do
+    ref = run_branch_ref(artifact.run_branch)
 
     case git(
            artifact.path,
@@ -312,13 +358,79 @@ defmodule Omashiki.Jobs.GitArtifact do
 
       {:error, {:git_failed, status, output}} ->
         if String.contains?(output, "[rejected]"),
-          do: {:error, {:collision, :remote, artifact.branch}},
+          do: {:error, {:collision, :remote, artifact.run_branch}},
           else: {:error, {:push_failed, status, output}}
 
       {:error, reason} ->
         {:error, reason}
     end
   end
+
+  defp maybe_update_task_branch(_artifact, _remote, _head_sha, false, _opts), do: :ok
+
+  defp maybe_update_task_branch(artifact, nil, head_sha, true, opts) do
+    case git(artifact.repo_path, ["branch", "-f", artifact.task_branch, head_sha], opts) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp maybe_update_task_branch(artifact, remote, head_sha, true, opts) do
+    ref = task_branch_ref(artifact.task_branch)
+
+    with {:ok, lease} <-
+           task_branch_push_lease(artifact.repo_path, remote, artifact.task_branch, opts),
+         {:ok, _} <-
+           git(artifact.path, ["push", lease, remote, "#{head_sha}:#{ref}"], remote_opts(opts)) do
+      :ok
+    else
+      {:error, {:git_failed, status, output}} ->
+        if String.contains?(output, "[rejected]"),
+          do: {:error, {:collision, :remote, artifact.task_branch}},
+          else: {:error, {:push_failed, status, output}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp task_branch_push_lease(repo_path, remote, task_branch, opts) do
+    ref = task_branch_ref(task_branch)
+
+    case git(repo_path, ["ls-remote", remote, ref], remote_opts(opts)) do
+      {:ok, ""} ->
+        {:ok, "--force-with-lease=#{ref}:"}
+
+      {:ok, output} ->
+        sha =
+          output
+          |> String.split("\n", trim: true)
+          |> Enum.find_value("", fn line ->
+            case String.split(line, "\t", parts: 2) do
+              [hash, ^ref] -> hash
+              _ -> nil
+            end
+          end)
+
+        {:ok,
+         if(sha == "",
+           do: "--force-with-lease=#{ref}:",
+           else: "--force-with-lease=#{ref}:#{sha}"
+         )}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp run_branch_name(task_branch, attempt_number),
+    do: "#{task_branch}-run-#{pad_attempt(attempt_number)}"
+
+  defp pad_attempt(number) when is_integer(number),
+    do: String.pad_leading(Integer.to_string(number), 3, "0")
+
+  defp run_branch_ref(branch), do: "refs/heads/#{branch}"
+  defp task_branch_ref(branch), do: "refs/heads/#{branch}"
 
   defp commit_if_dirty(_artifact, _job, [], _changed_bytes, _opts), do: {:ok, nil}
 
@@ -356,9 +468,9 @@ defmodule Omashiki.Jobs.GitArtifact do
   defp verify_head(artifact, head_sha, previous_head, opts) do
     result =
       with {:ok, branch} <- git(artifact.path, ["symbolic-ref", "--short", "HEAD"], opts),
-           true <- branch == artifact.branch,
+           true <- branch == artifact.run_branch,
            {:ok, branch_sha} <-
-             git(artifact.repo_path, ["rev-parse", "refs/heads/#{artifact.branch}"], opts),
+             git(artifact.repo_path, ["rev-parse", "refs/heads/#{artifact.run_branch}"], opts),
            true <- branch_sha == head_sha,
            {:ok, paths} <- dirty_paths(artifact.path, opts),
            true <- paths == [] do
@@ -505,13 +617,6 @@ defmodule Omashiki.Jobs.GitArtifact do
     end
   end
 
-  # `git worktree prune` is repo-wide, not scoped to this job. Running it from a
-  # per-job cleanup means one finishing job deletes the administrative directory
-  # of another that is still being created, which surfaces on the victim as
-  # `failed to read .git/worktrees/job-…`. Harmless when jobs are serial,
-  # a steady source of provisioning failures once they overlap. Removal of this
-  # worktree is enough here; reclaiming entries whose directory vanished belongs
-  # to the orphan sweep, which runs when nothing is in flight.
   @doc """
   Reclaim worktree entries whose directory no longer exists, for every declared
   repository.
@@ -618,6 +723,10 @@ defmodule Omashiki.Jobs.GitArtifact do
   defp summary(output), do: output |> to_string() |> String.trim() |> String.slice(0, 4_096)
   defp short_id(id), do: id |> to_string() |> String.slice(0, 8)
   defp parse_integer(value), do: String.to_integer(value)
+
+  defp normalize_mirror_branch(branch) do
+    String.replace_prefix(branch, "heads/", "")
+  end
 
   defp contained?(path, root) do
     path == root or String.starts_with?(path, root <> "/")
