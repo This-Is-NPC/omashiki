@@ -44,7 +44,7 @@ defmodule Omashiki.Harness.ClaudeCodeTest do
       }
     }
 
-    assert Omashiki.Harnesses.adapter(snapshot) == ClaudeCode
+    assert Omashiki.Harnesses.adapter(snapshot) == Omashiki.Plugin.Interpreter
   end
 
   test "builds a CLI plan with fixed invocation and tool policy" do
@@ -211,7 +211,8 @@ defmodule Omashiki.Harness.ClaudeCodeTest do
         config: %{"image" => "agent"},
         status: "active"
       },
-      launch_plan: nil
+      launch_plan: nil,
+      manifest: nil
     }
   end
 end

@@ -14,6 +14,18 @@ defmodule Omashiki.Fixtures do
       "limits" => %{}
     })
   end
+  @plugins_source Path.expand("../../../plugins", __DIR__)
+
+  def copy_plugins!(root) when is_binary(root) do
+    dest = Path.join(root, "plugins")
+    File.mkdir_p!(dest)
+
+    for file <- Path.wildcard(Path.join(@plugins_source, "*.toml")) do
+      File.cp!(file, Path.join(dest, Path.basename(file)))
+    end
+
+    :ok
+  end
 
   def merge_config!(partial) when is_map(partial) do
     partial = stringify_keys(partial)

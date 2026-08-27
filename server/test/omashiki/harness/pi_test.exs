@@ -179,7 +179,8 @@ defmodule Omashiki.Harness.PiTest do
         config: %{"image" => "omashiki/agent-pi:latest"},
         status: "active"
       },
-      launch_plan: nil
+      launch_plan: nil,
+      manifest: nil
     }
   end
 end

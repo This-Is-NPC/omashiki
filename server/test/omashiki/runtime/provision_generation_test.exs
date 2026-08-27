@@ -142,7 +142,8 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
         readiness: nil,
         secret: nil,
         environment: []
-      }
+      },
+      manifest: nil
     }
   end
 
@@ -176,6 +177,7 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
           "isolation" => "docker",
           "image" => "omashiki/agent:latest",
           "sink" => "git",
+          "packages" => [],
           "preset" => "opencode",
           "executables" => ["git"],
           "credentials" => ["secret"],

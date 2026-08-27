@@ -22,6 +22,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
             "isolation" => "docker",
           "image" => "omashiki/agent:latest",
           "sink" => "git",
+          "packages" => [],
           "preset" => "opencode",
             "executables" => ["git"],
             "credentials" => [],

@@ -189,6 +189,8 @@ defmodule Omashiki.Gateway.BudgetTest do
       admitted_repository_digest: String.duplicate("b", 64),
       admitted_environment: %{"name" => "agentic"},
       admitted_environment_digest: String.duplicate("c", 64),
+      admitted_plugin: %{"path" => "plugins/opencode.toml", "contents" => "", "digest" => String.duplicate("e", 64)},
+      admitted_plugin_digest: String.duplicate("e", 64),
       registry_digest: String.duplicate("d", 64),
       queue: "default",
       priority: 1,

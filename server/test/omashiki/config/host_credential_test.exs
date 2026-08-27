@@ -190,6 +190,7 @@ defmodule Omashiki.Config.HostCredentialTest do
           "isolation" => "docker",
           "image" => "omashiki/agent:latest",
           "sink" => "git",
+          "packages" => [],
           "preset" => "opencode",
           "executables" => ["git"],
           "credentials" => ["opencode-local"],

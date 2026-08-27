@@ -23,6 +23,7 @@ defmodule Omashiki.Runtime.LeaseRenewerTest do
             "isolation" => "docker",
           "image" => "omashiki/agent:latest",
           "sink" => "git",
+          "packages" => [],
           "preset" => "opencode",
             "executables" => ["git"],
             "timeout_ms" => 1_000,

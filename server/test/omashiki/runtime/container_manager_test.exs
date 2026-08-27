@@ -112,7 +112,8 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
       adapter_key: "claude-code",
       options: %{},
       runtime: runtime,
-      launch_plan: plan
+      launch_plan: plan,
+      manifest: nil
     }
 
     config =

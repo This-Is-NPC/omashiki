@@ -28,7 +28,8 @@ defmodule Omashiki.Harness.OpenCodeTest do
         config: %{"image" => "agent:latest"},
         status: "active"
       },
-      launch_plan: nil
+      launch_plan: nil,
+      manifest: nil
     }
 
     %{mounts: mounts, profile: profile}

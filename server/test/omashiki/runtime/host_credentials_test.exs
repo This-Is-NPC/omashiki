@@ -165,7 +165,8 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
         config: %{"image" => "agent"},
         status: "active"
       },
-      launch_plan: nil
+      launch_plan: nil,
+      manifest: nil
     }
   end
 

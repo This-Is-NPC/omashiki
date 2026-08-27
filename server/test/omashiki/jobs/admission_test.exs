@@ -16,6 +16,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
     repo_path = Path.join(root, "repo")
     File.mkdir_p!(repo_path)
+    copy_plugins!(root)
     {_, 0} = System.cmd("git", ["-C", repo_path, "init", "-q"])
     state_path = Path.join(root, "provider-state.json")
     File.write!(state_path, "{}")
@@ -57,6 +58,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
           "isolation" => "docker",
           "image" => "omashiki/agent:latest",
           "sink" => "git",
+          "packages" => [],
           "preset" => "opencode",
           "executables" => ["git"],
           "credentials" => ["secret"],
@@ -94,6 +96,14 @@ defmodule Omashiki.Jobs.AdmissionTest do
     assert job.admitted_environment["name"] == "safe"
     assert [%{"read_only" => false}] = job.admitted_environment["mounts"]
     refute inspect(job.admitted_environment) =~ "do-not-persist"
+
+    assert %{"path" => path, "contents" => contents, "digest" => plugin_digest} = job.admitted_plugin
+    assert is_binary(path) and path != ""
+    assert is_binary(contents) and contents != ""
+    assert byte_size(plugin_digest) == 64
+    assert plugin_digest == :crypto.hash(:sha256, contents) |> Base.encode16(case: :lower)
+    assert byte_size(job.admitted_plugin_digest) == 64
+    refute job.admitted_plugin_digest == plugin_digest
 
     assert Repo.aggregate(from(a in JobAttempt, where: a.job_id == ^job.id), :count, :id) == 1
     assert Repo.aggregate(from(e in JobEvent, where: e.job_id == ^job.id), :count, :event_id) == 1

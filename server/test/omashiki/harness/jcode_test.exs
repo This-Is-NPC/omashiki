@@ -121,7 +121,8 @@ defmodule Omashiki.Harness.JcodeTest do
         config: %{"image" => "omashiki/agent-jcode:latest"},
         status: "active"
       },
-      launch_plan: nil
+      launch_plan: nil,
+      manifest: nil
     }
   end
 end

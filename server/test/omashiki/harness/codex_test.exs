@@ -51,7 +51,7 @@ defmodule Omashiki.Harness.CodexTest do
       }
     }
 
-    assert Omashiki.Harnesses.adapter(snapshot) == Codex
+    assert Omashiki.Harnesses.adapter(snapshot) == Omashiki.Plugin.Interpreter
   end
 
   test "builds a CLI plan with a login readiness probe and web search off" do
@@ -293,7 +293,8 @@ defmodule Omashiki.Harness.CodexTest do
         config: %{"image" => "agent"},
         status: "active"
       },
-      launch_plan: nil
+      launch_plan: nil,
+      manifest: nil
     }
   end
 end

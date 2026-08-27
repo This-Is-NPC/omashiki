@@ -857,6 +857,8 @@ defmodule Omashiki.GatewayTest do
         "credentials" => entries
       },
       admitted_environment_digest: String.duplicate("c", 64),
+      admitted_plugin: %{"path" => "plugins/opencode.toml", "contents" => "", "digest" => String.duplicate("e", 64)},
+      admitted_plugin_digest: String.duplicate("e", 64),
       registry_digest: String.duplicate("d", 64),
       queue: "default",
       priority: 1,
@@ -929,6 +931,8 @@ defmodule Omashiki.GatewayTest do
         "credentials" => Enum.map(credential_names, &%{"name" => &1})
       },
       admitted_environment_digest: String.duplicate("c", 64),
+      admitted_plugin: %{"path" => "plugins/opencode.toml", "contents" => "", "digest" => String.duplicate("e", 64)},
+      admitted_plugin_digest: String.duplicate("e", 64),
       registry_digest: String.duplicate("d", 64),
       queue: "default",
       priority: 1,

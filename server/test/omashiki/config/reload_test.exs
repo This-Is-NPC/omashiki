@@ -12,6 +12,7 @@ defmodule Omashiki.Config.ReloadTest do
   use ExUnit.Case, async: false
 
   alias Omashiki.Config
+  import Omashiki.Fixtures
 
   @env_var "OMASHIKI_TEST_RELOAD_KEY"
 
@@ -20,6 +21,7 @@ defmodule Omashiki.Config.ReloadTest do
     root = Path.join(System.tmp_dir!(), "omashiki-reload-#{System.unique_integer([:positive])}")
     repo = Path.join(root, "repo")
     File.mkdir_p!(root)
+    copy_plugins!(root)
     assert {_output, 0} = System.cmd("git", ["init", "--quiet", repo], stderr_to_stdout: true)
     path = Path.join(root, "omashiki.toml")
 
@@ -215,6 +217,7 @@ defmodule Omashiki.Config.ReloadTest do
     isolation = "docker"
     image = "omashiki/agent:latest"
     sink = "git"
+    packages = []
     preset = "opencode"
     executables = ["git"]
     credentials = ["provider"]

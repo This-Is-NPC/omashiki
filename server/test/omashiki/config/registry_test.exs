@@ -5,6 +5,7 @@ defmodule Omashiki.Config.RegistryTest do
   alias Omashiki.Config.{Environment, Error, Machine, Repository, ResolvedJob, Step}
   alias Omashiki.Credentials.Credential
   alias Omashiki.Plugin.Preset
+  import Omashiki.Fixtures
 
   setup do
     Config.reset!()
@@ -13,6 +14,8 @@ defmodule Omashiki.Config.RegistryTest do
     mount = Path.join(root, "operator.json")
     assert {_output, 0} = System.cmd("git", ["init", "--quiet", repo], stderr_to_stdout: true)
     File.write!(mount, "{}")
+
+    copy_plugins!(root)
 
     on_exit(fn ->
       Config.reset!()
@@ -56,6 +59,7 @@ defmodule Omashiki.Config.RegistryTest do
                isolation: "docker",
                image: "omashiki/agent:latest",
                sink: "git",
+               packages: [],
                executables: ["mise", "git"],
                credentials: [%Credential{name: "provider"}],
                timeout_ms: 1_800_000,
@@ -69,7 +73,7 @@ defmodule Omashiki.Config.RegistryTest do
     assert {:ok, %ResolvedJob{} = resolved} = Config.resolve_job("app", "opencode")
     assert resolved.repository.path == ctx.repo
     assert resolved.environment.name == "opencode"
-    assert resolved.environment.preset.adapter == Omashiki.Harness.OpenCode
+    assert resolved.environment.preset.adapter == Omashiki.Plugin.Interpreter
     assert resolved.environment.preset.launch_plan.transport["kind"] == "http"
     assert resolved.digest == Config.current_digest()
     refute resolved.digest =~ "secret-value"
@@ -78,7 +82,7 @@ defmodule Omashiki.Config.RegistryTest do
   test "validates preset plugin options at load and changes the registry digest", ctx do
     invalid = put_in(fixture(ctx), ["presets", "opencode", "options"], %{"unknown" => true})
 
-    assert_raise Error, ~r/unknown_options/, fn ->
+    assert_raise Error, ~r/unknown field/, fn ->
       Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
     end
 
@@ -685,6 +689,7 @@ defmodule Omashiki.Config.RegistryTest do
           "isolation" => "docker",
           "image" => "omashiki/agent:latest",
           "sink" => "git",
+          "packages" => [],
           "executables" => ["mise", "git"],
           "credentials" => ["provider"],
           "timeout_ms" => 1_800_000,

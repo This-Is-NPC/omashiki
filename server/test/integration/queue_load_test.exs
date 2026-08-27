@@ -35,6 +35,7 @@ defmodule Omashiki.Integration.QueueLoadTest do
             "isolation" => "docker",
           "image" => "omashiki/agent:latest",
           "sink" => "git",
+          "packages" => [],
           "preset" => "opencode",
             "executables" => ["git"],
             "pre_steps" => [],
