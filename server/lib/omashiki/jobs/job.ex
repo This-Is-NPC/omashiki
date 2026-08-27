@@ -35,7 +35,6 @@ defmodule Omashiki.Jobs.Job do
   @admission_fields [
     :user_id,
     :api_token_id,
-    :parent_job_id,
     :schema_version,
     :idempotency_key,
     :correlation_id,
@@ -60,7 +59,8 @@ defmodule Omashiki.Jobs.Job do
     :started_at,
     :finished_at,
     :terminal_result,
-    :terminal_error
+    :terminal_error,
+    :dependency_artifacts
   ]
 
   schema "jobs" do
@@ -87,10 +87,11 @@ defmodule Omashiki.Jobs.Job do
     field :finished_at, :utc_datetime_usec
     field :terminal_result, :map
     field :terminal_error, :map
+    field :dependency_artifacts, Omashiki.Jobs.JsonValue
 
     belongs_to :user, Omashiki.Accounts.User
     belongs_to :api_token, Omashiki.ApiTokens.Token
-    belongs_to :parent_job, __MODULE__
+    has_many :dependencies, Omashiki.Jobs.JobDependency, foreign_key: :job_id
     has_many :attempts, Omashiki.Jobs.JobAttempt
     has_many :events, Omashiki.Jobs.JobEvent
 
@@ -128,8 +129,6 @@ defmodule Omashiki.Jobs.Job do
     |> foreign_key_constraint(:user_id)
     |> foreign_key_constraint(:api_token_id)
     |> foreign_key_constraint(:api_token_id, name: :jobs_api_token_owner_fkey)
-    |> foreign_key_constraint(:parent_job_id)
-    |> foreign_key_constraint(:parent_job_id, name: :jobs_parent_owner_fkey)
     |> check_constraint(:status, name: :jobs_terminal_shape)
   end
 
