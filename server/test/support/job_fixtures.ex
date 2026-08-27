@@ -21,7 +21,7 @@ defmodule Omashiki.JobFixtures do
           payload_hash: String.duplicate("a", 64),
           admitted_repository: %{"name" => "omashiki"},
           admitted_repository_digest: String.duplicate("b", 64),
-          admitted_environment: %{"name" => "opencode"},
+          admitted_environment: %{"name" => "opencode", "sink" => "git"},
           admitted_environment_digest: String.duplicate("c", 64),
           admitted_plugin: %{"path" => "plugins/opencode.toml", "contents" => "", "digest" => String.duplicate("e", 64)},
           admitted_plugin_digest: String.duplicate("e", 64),

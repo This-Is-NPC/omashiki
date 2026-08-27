@@ -205,7 +205,7 @@ defmodule Omashiki.Jobs.WebhooksTest do
         payload_hash: String.duplicate("a", 64),
         admitted_repository: %{"name" => "app"},
         admitted_repository_digest: String.duplicate("b", 64),
-        admitted_environment: %{"name" => "safe"},
+        admitted_environment: %{"name" => "safe", "sink" => "git"},
         admitted_environment_digest: String.duplicate("c", 64),
           admitted_plugin: %{"path" => "plugins/opencode.toml", "contents" => "", "digest" => String.duplicate("e", 64)},
           admitted_plugin_digest: String.duplicate("e", 64),
