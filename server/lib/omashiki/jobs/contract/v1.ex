@@ -88,6 +88,8 @@ defmodule Omashiki.Jobs.Contract.V1 do
       )
       |> validate_nonempty(attrs, ~w(idempotency_key correlation_id environment))
       |> validate_optional_nonempty(attrs, "repo")
+      |> validate_depends_on(attrs)
+      |> validate_depends_on_on_failure(attrs)
       |> validate_priority(attrs)
       |> validate_payload(attrs, "payload")
 
@@ -569,6 +571,29 @@ defmodule Omashiki.Jobs.Contract.V1 do
 
       {:ok, _} ->
         [error("depends_on", "array_required") | errors]
+    end
+  end
+
+  defp validate_depends_on_on_failure(errors, attrs) do
+    case Map.fetch(attrs, "depends_on") do
+      :error ->
+        errors
+
+      {:ok, deps} when is_list(deps) ->
+        Enum.reduce(deps, errors, fn dep, acc ->
+          if is_map(dep) do
+            case Map.get(dep, "on_failure") do
+              nil -> acc
+              value when value in ~w(cancel block proceed) -> acc
+              _ -> [error("depends_on.on_failure", "unsupported") | acc]
+            end
+          else
+            acc
+          end
+        end)
+
+      {:ok, _} ->
+        errors
     end
   end
 
