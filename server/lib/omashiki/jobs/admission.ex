@@ -100,6 +100,7 @@ defmodule Omashiki.Jobs.Admission do
 
   defp snapshot_context(%Config.ResolvedJob{} = resolved) do
     repository = snapshot_value(resolved.repository)
+    plugin = plugin_snapshot(resolved.environment)
     environment = snapshot_value(resolved.environment)
 
     %{
@@ -107,9 +108,20 @@ defmodule Omashiki.Jobs.Admission do
       environment: environment,
       admitted_repository_digest: digest(repository),
       admitted_environment_digest: digest(environment),
+      admitted_plugin: plugin,
+      admitted_plugin_digest: digest(plugin),
       registry_digest: resolved.digest
     }
   end
+  defp plugin_snapshot(%{preset: %{manifest: %Omashiki.Plugin.Manifest{} = manifest}}) do
+    Omashiki.Plugin.Manifest.admitted_snapshot(manifest)
+  end
+
+  defp plugin_snapshot(environment) do
+    raise ArgumentError, "environment has no plugin manifest: #{inspect(environment)}"
+  end
+
+  defp snapshot_value(%Omashiki.Plugin.Manifest{} = manifest), do: Omashiki.Plugin.Manifest.snapshot(manifest)
 
   defp snapshot_value(%_{} = struct) do
     struct
@@ -307,6 +319,8 @@ defmodule Omashiki.Jobs.Admission do
       admitted_repository_digest: resolved.admitted_repository_digest,
       admitted_environment: resolved.environment,
       admitted_environment_digest: resolved.admitted_environment_digest,
+      admitted_plugin: resolved.admitted_plugin,
+      admitted_plugin_digest: resolved.admitted_plugin_digest,
       registry_digest: resolved.registry_digest,
       queue: @default_queue,
       priority: request["priority"],

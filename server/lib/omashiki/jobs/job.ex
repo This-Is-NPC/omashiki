@@ -47,6 +47,8 @@ defmodule Omashiki.Jobs.Job do
     :admitted_repository_digest,
     :admitted_environment,
     :admitted_environment_digest,
+    :admitted_plugin_digest,
+    :admitted_plugin,
     :registry_digest,
     :queue,
     :priority
@@ -73,6 +75,8 @@ defmodule Omashiki.Jobs.Job do
     field :admitted_repository_digest, :string
     field :admitted_environment, :map
     field :admitted_environment_digest, :string
+    field :admitted_plugin, :map
+    field :admitted_plugin_digest, :string
     field :registry_digest, :string
     field :queue, :string, default: "default"
     field :priority, :integer, default: 0
@@ -111,6 +115,8 @@ defmodule Omashiki.Jobs.Job do
       :admitted_repository_digest,
       :admitted_environment,
       :admitted_environment_digest,
+    :admitted_plugin_digest,
+    :admitted_plugin,
       :registry_digest,
       :queue,
       :priority,
