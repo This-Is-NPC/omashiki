@@ -72,6 +72,26 @@ defmodule Omashiki.Jobs.RunnerTest do
     end
   end
 
+
+  defmodule FailedAttemptGitFinalizeFailureContainer do
+    def provision(_job, _attempt, _environment, _opts),
+      do: {:ok, %{id: "failed-git-finalize", artifact: %{task_branch: "feat-runner"}}}
+
+    def exec(_container, argv, _timeout_ms) do
+      if "fail" in argv,
+        do: {:error, {:exit_status, 7, "failed
+"}},
+        else: {:ok, %{exit_status: 0, output: Enum.join(argv, " ")}}
+    end
+
+    def finalize(_container, _job, _opts), do: {:error, :git_commit_failed}
+
+    def destroy(container) do
+      send(self(), {:destroyed, container.id, Map.get(container, :preserve_artifact)})
+      :ok
+    end
+  end
+
   defmodule CleanupFailureContainer do
     def provision(_job, _attempt, _environment, _opts),
       do: {:ok, %{id: "cleanup-failure-container"}}
@@ -279,6 +299,28 @@ defmodule Omashiki.Jobs.RunnerTest do
 
     assert Repo.aggregate(from(s in JobStep, where: s.attempt_id == ^attempt.id), :count, :id) ==
              8
+  end
+
+
+  test "failed git attempt does not preserve artifact when finalize fails", %{token: token} do
+    {:ok, job} = Jobs.Admission.admit(token, request("failed-git-finalize"))
+    {:ok, attempt} = Jobs.claim(job, "runner-test")
+
+    assert {:ok, failed} =
+             Runner.run(attempt,
+               container: FailedAttemptGitFinalizeFailureContainer,
+               adapter: FakeHarness,
+               pre_steps: [%{"argv" => ["git", "fail"], "condition" => "always"}]
+             )
+
+    assert failed.status == "failed"
+
+    finalization =
+      Repo.one!(from(s in JobStep, where: s.attempt_id == ^attempt.id and s.key == "finalization"))
+
+    refute finalization.output["preserve_artifact"]
+    assert_receive {:destroyed, "failed-git-finalize", preserve}
+    refute preserve
   end
 
   test "cleanup failure does not reopen a committed terminal job", %{token: token} do

@@ -90,6 +90,19 @@ defmodule Omashiki.Jobs.AdmissionTest do
              )
   end
 
+  test "admits git sink jobs with title-only cascade to task_branch slug", %{token: token} do
+    payload = %{"instruction" => "run", "title" => "Hello World"}
+
+    assert {:ok, job} =
+             Admission.admit(
+               token,
+               single_request(%{"payload" => payload, "idempotency_key" => "title-only"})
+             )
+
+    assert job.payload == payload
+    assert job.admitted_repository["task_branch"] == "hello-world"
+  end
+
   test "admits a root job with an immutable redacted snapshot", %{token: token} do
     assert {:ok, job} = Admission.admit(token, single_request())
     assert job.status == "queued"
