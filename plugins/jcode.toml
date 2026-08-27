@@ -1,0 +1,56 @@
+transport = "cli"
+llm_egress = "gateway"
+prepare = "gateway_prompt"
+readiness = { kind = "exec", argv = ["{{runner_path}}", "--version"], timeout_ms = 10_000 }
+
+[argv]
+template = ["{{runner_path}}", "{{invocation_path}}"]
+
+[[option_argv]]
+option = "model"
+when_present = true
+append = ["--model", "{{model}}"]
+
+[env]
+HOME = "/tmp/agent-home"
+JCODE_HOME = "/tmp/agent-home/.jcode"
+
+[env.gateway]
+JCODE_GATEWAY_BASE_URL = "{{gateway_base_url}}"
+JCODE_GATEWAY_MODEL = "{{gateway_model}}"
+JCODE_GATEWAY_TOKEN = "{{gateway_token}}"
+
+[files.invocation]
+path = "{{invocation_path}}"
+body = "{{instruction}}"
+
+[output]
+shape = "object"
+text = "text"
+model = "model"
+provider = "provider"
+
+[output.usage]
+input = "input_tokens"
+output = "output_tokens"
+cached_input = "cache_read_input_tokens"
+cache_write = "cache_creation_input_tokens"
+
+[options.timeout_ms]
+type = "positive_int"
+default = 900_000
+
+[options.model]
+type = "model"
+optional = true
+
+[options.runner_path]
+type = "absolute_path"
+default = "/usr/local/bin/omashiki-jcode-runner"
+
+[options.invocation_path]
+type = "absolute_path"
+default = "/tmp/omashiki-jcode-invocation.txt"
+
+[requires]
+binaries = []

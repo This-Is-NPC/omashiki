@@ -1,0 +1,49 @@
+transport = "cli"
+llm_egress = "gateway"
+prepare = "gateway_prompt"
+readiness = { kind = "exec", argv = ["{{runner_path}}", "--version"], timeout_ms = 10_000 }
+
+[argv]
+template = ["{{runner_path}}", "{{invocation_path}}"]
+
+[[option_argv]]
+option = "model"
+when_present = true
+append = ["--model", "{{model}}"]
+
+[env]
+HOME = "/tmp/agent-home"
+PI_CODING_AGENT_DIR = "/tmp/agent-home/.pi/agent"
+PI_OFFLINE = "1"
+
+[env.gateway]
+PI_GATEWAY_BASE_URL = "{{gateway_base_url}}"
+PI_GATEWAY_MODEL = "{{gateway_model}}"
+PI_GATEWAY_TOKEN = "{{gateway_token}}"
+
+[files.invocation]
+path = "{{invocation_path}}"
+body = "{{instruction}}"
+
+[output]
+shape = "jsonl_agent_end"
+event_type = "agent_end"
+
+[options.timeout_ms]
+type = "positive_int"
+default = 900_000
+
+[options.model]
+type = "model"
+optional = true
+
+[options.runner_path]
+type = "absolute_path"
+default = "/usr/local/bin/omashiki-pi-runner"
+
+[options.invocation_path]
+type = "absolute_path"
+default = "/tmp/omashiki-pi-invocation.txt"
+
+[requires]
+binaries = []

@@ -1,0 +1,66 @@
+transport = "cli"
+llm_egress = "engine"
+prepare = "invocation_json"
+readiness = { kind = "exec", argv = ["/usr/local/bin/codex", "login", "status"], timeout_ms = 10_000 }
+
+[argv]
+template = ["{{runner_path}}", "{{invocation_path}}"]
+
+[[option_argv]]
+option = "web_search"
+when_value = true
+append = ["--web-search"]
+
+[[option_argv]]
+option = "model"
+when_present = true
+append = ["--model", "{{model}}"]
+
+[[option_argv]]
+option = "reasoning_effort"
+when_present = true
+append = ["--reasoning-effort", "{{reasoning_effort}}"]
+
+[env]
+HOME = "/tmp/agent-home"
+CODEX_HOME = "/tmp/agent-home/.codex"
+CODEX_CREDENTIALS_PATH = "{{credentials_path}}"
+
+[output]
+shape = "result_envelope"
+provider_default = "openai"
+
+[output.usage]
+input = "input_tokens"
+output = "output_tokens"
+cached_input = "cached_input_tokens"
+cache_write = "cache_write_input_tokens"
+
+[options.timeout_ms]
+type = "positive_int"
+default = 900_000
+
+[options.model]
+type = "model"
+optional = true
+
+[options.runner_path]
+type = "absolute_path"
+default = "/usr/local/bin/omashiki-codex-runner"
+
+[options.invocation_path]
+type = "absolute_path"
+default = "/tmp/omashiki-codex-invocation.json"
+
+[options.credentials_path]
+type = "absolute_path"
+default = "/run/omashiki/state/codex-auth.json"
+
+[options.reasoning_effort]
+optional = true
+
+[options.web_search]
+default = false
+
+[requires]
+binaries = []

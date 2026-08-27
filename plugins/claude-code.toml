@@ -1,0 +1,56 @@
+transport = "cli"
+llm_egress = "engine"
+prepare = "invocation_json"
+readiness = { kind = "exec", argv = ["/usr/local/bin/claude", "auth", "status"], timeout_ms = 10_000 }
+
+[argv]
+template = ["{{runner_path}}", "{{invocation_path}}"]
+
+[[option_argv]]
+option = "allowed_tools"
+append = ["--allowed-tool", "PLACEHOLDER"]
+
+[[option_argv]]
+option = "model"
+when_present = true
+append = ["--model", "{{model}}"]
+
+[env]
+HOME = "/tmp/agent-home"
+CLAUDE_CREDENTIALS_PATH = "{{credentials_path}}"
+
+[output]
+shape = "result_envelope"
+provider_default = "anthropic"
+
+[output.usage]
+input = "input_tokens"
+output = "output_tokens"
+cached_input = "cache_read_input_tokens"
+cache_write = "cache_creation_input_tokens"
+
+[options.timeout_ms]
+type = "positive_int"
+default = 900_000
+
+[options.model]
+type = "model"
+optional = true
+
+[options.runner_path]
+type = "absolute_path"
+default = "/usr/local/bin/omashiki-claude-runner"
+
+[options.invocation_path]
+type = "absolute_path"
+default = "/tmp/omashiki-claude-invocation.json"
+
+[options.credentials_path]
+type = "absolute_path"
+default = "/run/omashiki/state/claude-credentials.json"
+
+[options.allowed_tools]
+default = ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git *)", "Bash(python3 *)"]
+
+[requires]
+binaries = []

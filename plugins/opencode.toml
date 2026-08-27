@@ -1,0 +1,39 @@
+transport = "http"
+prepare = "opencode_gateway"
+readiness = { kind = "http", path = "/doc", timeout_ms = 60_000 }
+
+[http]
+internal_port = 4096
+readiness_path = "/doc"
+readiness_timeout_ms = 60_000
+port_environment = ["OPENCODE_PORT=${PORT}"]
+secret_target = "{{auth_path}}"
+gateway_auth_path = "/run/secrets/opencode-auth.json"
+
+[options.auth_path]
+type = "absolute_path"
+default = "/run/omashiki/state/auth.json"
+
+[options.config_path]
+type = "absolute_path"
+default = "/run/omashiki/state/opencode.json"
+
+[options.gateway_auth_path]
+type = "absolute_path"
+default = "/run/secrets/opencode-auth.json"
+
+[options.internal_port]
+default = 4096
+
+[options.readiness_path]
+default = "/doc"
+
+[options.readiness_timeout_ms]
+default = 60_000
+
+[output]
+shape = "object"
+text = "text"
+
+[requires]
+binaries = []
