@@ -3,7 +3,7 @@ defmodule Omashiki.Plugin.Manifest do
   alias Omashiki.Config.Error
 
   @legacy ~w(isolation runtime sink adapter harness)
-  @vars ~w(instruction invocation_path runner_path model timeout_ms reasoning_effort PORT gateway_base_url gateway_token gateway_model credentials_path config_path auth_path gateway_auth_path)
+  @vars ~w(instruction invocation_path runner_path model timeout_ms reasoning_effort PORT gateway_base_url gateway_token gateway_model credentials_path config_path auth_path gateway_auth_path item)
   @shapes ~w(object jsonl_agent_end result_envelope)
   @transports ~w(cli http)
   @prepare_modes ~w(gateway_prompt invocation_json opencode_gateway opencode_host none)

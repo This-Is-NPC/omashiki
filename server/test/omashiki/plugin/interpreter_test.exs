@@ -74,6 +74,21 @@ defmodule Omashiki.Plugin.InterpreterTest do
     assert result.cache_write_tokens == nil
   end
 
+  test "expands list option_argv with {{item}} for claude-code", %{plugins: plugins} do
+    manifest = Map.fetch!(plugins, "claude-code")
+    preset = preset(manifest, %{})
+    argv = preset.launch_plan.transport["argv"]
+    tools = ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git *)", "Bash(python3 *)"]
+
+    refute "PLACEHOLDER" in argv
+
+    assert Enum.flat_map(tools, &["--allowed-tool", &1]) ==
+             argv
+             |> Enum.chunk_every(2)
+             |> Enum.filter(&match?(["--allowed-tool", _], &1))
+             |> List.flatten()
+  end
+
   test "admitted snapshot keeps only path, contents, and digest", %{manifest: manifest} do
     snapshot = Manifest.admitted_snapshot(manifest)
 

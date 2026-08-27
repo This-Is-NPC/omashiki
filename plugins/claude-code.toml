@@ -8,7 +8,7 @@ template = ["{{runner_path}}", "{{invocation_path}}"]
 
 [[option_argv]]
 option = "allowed_tools"
-append = ["--allowed-tool", "PLACEHOLDER"]
+append = ["--allowed-tool", "{{item}}"]
 
 [[option_argv]]
 option = "model"

@@ -269,14 +269,16 @@ defmodule Omashiki.Plugin.Interpreter do
       val = Map.get(options, opt)
 
       cond do
-        Map.get(rule, "when_present") and val not in [nil, ""] ->
+        Map.get(rule, "when_present") == true and val not in [nil, ""] ->
           acc ++ substitute_list(Map.get(rule, "append", []), bindings(options, %{}))
 
         not is_nil(Map.get(rule, "when_value")) and val == Map.get(rule, "when_value") ->
           acc ++ substitute_list(Map.get(rule, "append", []), bindings(options, %{}))
 
         is_list(val) and val != [] ->
-          Enum.reduce(val, acc, fn item, a -> a ++ substitute_list(Map.get(rule, "append", []), bindings(Map.put(options, opt, item), %{})) end)
+          Enum.reduce(val, acc, fn item, a ->
+            a ++ substitute_list(Map.get(rule, "append", []), bindings(options, %{"item" => item}))
+          end)
 
         true ->
           acc
