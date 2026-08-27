@@ -96,19 +96,19 @@ defmodule Omashiki.Jobs.Admission do
   defp resolve(request) do
     with {:ok, %Config.ResolvedJob{} = resolved} <-
            Config.resolve_job(request["repo"], request["environment"]),
-         :ok <- validate_git_task_branch(request, resolved.environment) do
-      {:ok, snapshot_context(resolved, request)}
+         {:ok, task_branch} <- validate_git_task_branch(request, resolved.environment) do
+      {:ok, snapshot_context(resolved, task_branch, resolved.environment)}
     else
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp snapshot_context(%Config.ResolvedJob{} = resolved, request) do
+  defp snapshot_context(%Config.ResolvedJob{} = resolved, task_branch, environment) do
     repository =
       if resolved.repository,
         do:
           snapshot_value(resolved.repository)
-          |> maybe_put_task_branch(request, resolved.environment),
+          |> maybe_put_task_branch(task_branch, environment),
         else: nil
 
     plugin = plugin_snapshot(resolved.environment)
@@ -433,8 +433,8 @@ defmodule Omashiki.Jobs.Admission do
 
   defp validate_git_task_branch(request, %Environment{sink: "git"}) do
     case TaskBranch.resolve(request["payload"]) do
-      {:ok, _} ->
-        :ok
+      {:ok, task_branch} ->
+        {:ok, task_branch}
 
       {:error, :task_branch_required} ->
         {:error, :task_branch_required}
@@ -446,15 +446,17 @@ defmodule Omashiki.Jobs.Admission do
 
   defp validate_git_task_branch(_request, %Environment{sink: sink})
        when sink in ["files", "none"],
-       do: :ok
+       do: {:ok, nil}
 
-  defp maybe_put_task_branch(repository, request, %Environment{sink: "git"})
-       when is_map(repository) do
-    {:ok, task_branch} = TaskBranch.resolve(request["payload"])
+  defp maybe_put_task_branch(repository, task_branch, %Environment{sink: "git"})
+       when is_map(repository) and is_binary(task_branch) do
     Map.put(repository, "task_branch", task_branch)
   end
 
-  defp maybe_put_task_branch(repository, _request, _environment), do: repository
+  defp maybe_put_task_branch(repository, _task_branch, %Environment{sink: "git"}) when is_map(repository),
+    do: repository
+
+  defp maybe_put_task_branch(repository, _task_branch, _environment), do: repository
 
   defp task_branch_validation_error(:invalid_branch),
     do: %{field: "payload.branch", code: "invalid_branch"}

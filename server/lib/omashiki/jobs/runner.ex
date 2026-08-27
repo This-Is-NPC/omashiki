@@ -401,11 +401,15 @@ defmodule Omashiki.Jobs.Runner do
 
   defp complete_attempt(%{container_started: true, container: container} = state)
        when is_map(container) and map_size(container) > 0 do
-    preserve = git_artifact?(container)
-
-    if preserve do
-      _ = container_mod(state).finalize(container, state.job, state.opts)
-    end
+    preserve =
+      if git_artifact?(container) do
+        case container_mod(state).finalize(container, state.job, state.opts) do
+          {:ok, _} -> true
+          {:error, _} -> false
+        end
+      else
+        false
+      end
 
     error = state.error || error_map("attempt_failed", "attempt did not complete")
 
