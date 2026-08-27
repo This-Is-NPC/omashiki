@@ -41,7 +41,7 @@ defmodule Omashiki.Plugin.Interpreter do
     readiness =
       case manifest.readiness do
         %{"kind" => "none"} -> nil
-        %{"kind" => kind} = r -> Map.put(r, "argv", substitute_list(Map.get(r, "argv", []), bindings(options, %{})))
+        %{"kind" => _kind} = r -> Map.put(r, "argv", substitute_list(Map.get(r, "argv", []), bindings(options, %{})))
       end
 
     {:ok,
@@ -153,7 +153,7 @@ defmodule Omashiki.Plugin.Interpreter do
     end)
   end
 
-  defp prepare_invocation_json(spec, context, manifest, options) do
+  defp prepare_invocation_json(spec, context, _manifest, options) do
     with :ok <- HostCredentials.validate_mount(context.runtime_mounts, options["credentials_path"]),
          {:ok, payload} <- CliJson.invocation_payload(context.job) do
       plan = launch_plan!(spec)
@@ -169,7 +169,7 @@ defmodule Omashiki.Plugin.Interpreter do
     end
   end
 
-  defp prepare_opencode_gateway(spec, context, manifest, options) do
+  defp prepare_opencode_gateway(spec, context, manifest, _options) do
     with %Credential{} = credential <- CliJson.credential(context),
          %Job{} = job <- context.job,
          {:ok, gateway_token} <- Claims.issue("gateway", job, %{credential: credential.name}),
@@ -199,7 +199,7 @@ defmodule Omashiki.Plugin.Interpreter do
     end
   end
 
-  defp prepare_opencode_host(spec, context, manifest, options) do
+  defp prepare_opencode_host(spec, context, _manifest, options) do
     with :ok <- HostCredentials.validate_mount(context.runtime_mounts, options["config_path"]),
          :ok <- HostCredentials.validate_mount(context.runtime_mounts, options["auth_path"]) do
       model = Map.get(spec.options, "model")
@@ -351,7 +351,7 @@ defmodule Omashiki.Plugin.Interpreter do
   defp put_model(payload, %Credential{} = c, :gateway, _m, _ctx),
     do: Map.put(payload, :model, %{providerID: "gateway", modelID: c.model})
 
-  defp put_model(payload, %Credential{} = c, _, manifest, ctx) do
+  defp put_model(payload, %Credential{} = c, _, _manifest, ctx) do
     model = Map.get(ctx.profile.options, "model") || c.model
     Map.put(payload, :model, %{providerID: c.provider, modelID: model})
   end

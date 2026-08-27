@@ -64,11 +64,11 @@ defmodule Omashiki.Plugin.Shapes do
         {:ok,
          %Result{
            assistant_text: Map.get(d, "result", ""),
-           input_tokens: int(usage["input_tokens"] || usage["inputTokens"]),
-           output_tokens: int(usage["output_tokens"] || usage["outputTokens"]),
-           cached_input_tokens: int(usage["cached_input_tokens"] || usage["cacheReadInputTokens"]),
+           input_tokens: int(get_usage(usage, um, "input") || usage["input_tokens"] || usage["inputTokens"]),
+           output_tokens: int(get_usage(usage, um, "output") || usage["output_tokens"] || usage["outputTokens"]),
+           cached_input_tokens: int(get_usage(usage, um, "cached_input") || usage["cached_input_tokens"] || usage["cacheReadInputTokens"]),
            cache_write_tokens:
-             int(usage["cache_creation_input_tokens"] || usage["cacheWriteInputTokens"] || usage["cache_write_input_tokens"]),
+             int(get_usage(usage, um, "cache_write") || usage["cache_creation_input_tokens"] || usage["cacheWriteInputTokens"] || usage["cache_write_input_tokens"]),
            model_resolved: str(Map.get(d, "model") || first_model(mu)),
            provider: str(Map.get(output, "provider_default")),
            raw: decoded
