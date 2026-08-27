@@ -40,7 +40,7 @@ defmodule Omashiki.Jobs.GitArtifact do
   validations above.
   """
 
-  alias Omashiki.Jobs.{Job, JobAttempt}
+  alias Omashiki.Jobs.{Job, JobAttempt, JobDependency, Validate}
   alias Omashiki.Repo
   import Ecto.Query
 
@@ -52,23 +52,43 @@ defmodule Omashiki.Jobs.GitArtifact do
   # until its lease expires. Absent credentials must fail it instead.
   @non_interactive [{"GIT_TERMINAL_PROMPT", "0"}]
 
-
-  defp resolve_base_sha(repo_path, snapshot, base_branch, opts) do
+  defp resolve_base_sha(repo_path, snapshot, base_branch, job_id, opts) do
     case Map.get(snapshot, "base") do
       "dependency:" <> dep_id ->
-        with %Job{} = dep <- Repo.get(Job, dep_id),
-             %JobAttempt{} = attempt <- succeeded_attempt(dep) do
-          if is_binary(attempt.head_sha) do
-            git(repo_path, ["rev-parse", "--verify", "#{attempt.head_sha}^{commit}"], opts)
-          else
-            {:error, :missing_dependency_head_sha}
-          end
-        else
-          _ -> {:error, :missing_dependency_head_sha}
-        end
+        resolve_dep_head(repo_path, dep_id, opts)
+
+      "dependency" ->
+        resolve_first_succeeded_dep_head(repo_path, job_id, opts)
 
       _ ->
         git(repo_path, ["rev-parse", "--verify", "#{base_branch}^{commit}"], opts)
+    end
+  end
+
+  defp resolve_first_succeeded_dep_head(repo_path, job_id, opts) do
+    edges =
+      from(d in JobDependency,
+        where: d.job_id == ^job_id,
+        order_by: [asc: d.inserted_at, asc: d.id],
+        select: d.depends_on_job_id
+      )
+      |> Repo.all()
+
+    Enum.find_value(edges, {:error, :missing_dependency_head_sha}, fn dep_id ->
+      case resolve_dep_head(repo_path, dep_id, opts) do
+        {:ok, sha} -> {:ok, sha}
+        _ -> nil
+      end
+    end)
+  end
+
+  defp resolve_dep_head(repo_path, dep_id, opts) do
+    with %Job{} = dep <- Repo.get(Job, dep_id),
+         %JobAttempt{} = attempt <- succeeded_attempt(dep),
+         true <- is_binary(attempt.head_sha) do
+      git(repo_path, ["rev-parse", "--verify", "#{attempt.head_sha}^{commit}"], opts)
+    else
+      _ -> {:error, :missing_dependency_head_sha}
     end
   end
 
@@ -107,7 +127,7 @@ defmodule Omashiki.Jobs.GitArtifact do
          {:ok, base_branch} <- snapshot_string(snapshot, "base_branch"),
          :ok <- validate_repo(repo_path),
          :ok <- not_cancelled(opts),
-         {:ok, base_sha} <- resolve_base_sha(repo_path, snapshot, base_branch, opts),
+         {:ok, base_sha} <- resolve_base_sha(repo_path, snapshot, base_branch, job_id, opts),
          run_branch <- run_branch_name(task_branch, attempt_number),
          artifact <-
            artifact(
@@ -174,7 +194,7 @@ defmodule Omashiki.Jobs.GitArtifact do
     with :ok <- not_cancelled(opts),
          {:ok, paths} <- dirty_paths(artifact.path, opts),
          {:ok, changed_bytes} <- changed_bytes(artifact.path, paths),
-         :ok <- safety_scan(artifact.path, paths, changed_bytes, opts),
+         :ok <- Validate.scan(artifact.path, paths, changed_bytes, opts),
          {:ok, previous_head} <- commit_if_dirty(artifact, job, paths, changed_bytes, opts),
          {:ok, head_sha} <- git(artifact.path, ["rev-parse", "HEAD"], opts),
          :ok <- verify_head(artifact, head_sha, previous_head, opts),
@@ -531,30 +551,6 @@ defmodule Omashiki.Jobs.GitArtifact do
     end
   end
 
-  defp safety_scan(path, paths, changed_bytes, opts) do
-    max_bytes = Keyword.get(opts, :max_bytes, @max_bytes)
-    protected_paths = Keyword.get(opts, :protected_paths, [])
-    protected = Enum.find(paths, &protected_path?(&1, protected_paths))
-    symlink = Enum.find(paths, &symlink_path?(path, &1))
-
-    cond do
-      symlink ->
-        {:error, {:symlink_path, symlink}}
-
-      changed_bytes > max_bytes ->
-        {:error, {:oversized_output, changed_bytes, max_bytes}}
-
-      protected ->
-        {:error, {:protected_path, protected}}
-
-      Enum.any?(paths, &contains_secret?(path, &1)) ->
-        {:error, {:likely_secret, Enum.find(paths, &contains_secret?(path, &1))}}
-
-      true ->
-        :ok
-    end
-  end
-
   defp dirty_paths(path, opts) do
     case git(path, ["status", "--porcelain=v1", "--untracked-files=all"], opts) do
       {:ok, output} ->
@@ -599,53 +595,6 @@ defmodule Omashiki.Jobs.GitArtifact do
 
   defp rename_destination(path) do
     path |> String.split(" -> ", parts: 2) |> List.last()
-  end
-
-  defp protected_path?(path, configured) do
-    protected_path?(path) or
-      Enum.any?(configured, fn prefix ->
-        is_binary(prefix) and
-          (path == prefix or String.starts_with?(path, String.trim_trailing(prefix, "/") <> "/"))
-      end)
-  end
-
-  defp protected_path?(path) do
-    normalized = String.downcase(String.trim_leading(path, "./"))
-    base = Path.basename(normalized)
-
-    String.starts_with?(normalized, [".git/", ".ssh/", ".aws/"]) or
-      base in [".env", ".npmrc", ".pypirc", "id_rsa", "id_ed25519"] or
-      String.contains?(base, ["secret", "credential", "password", "token"]) or
-      String.ends_with?(base, [".pem", ".key", ".p12", ".pfx"])
-  end
-
-  defp contains_secret?(path, relative) do
-    absolute = Path.expand(Path.join(path, relative))
-
-    case File.lstat(absolute) do
-      {:ok, %File.Stat{type: :regular}} ->
-        case File.read(absolute) do
-          {:ok, content} ->
-            String.valid?(content) and
-              Regex.match?(
-                ~r/(?:-----BEGIN .*PRIVATE KEY-----|(?:api[_-]?key|secret|password|token)\s*[:=]\s*\S+|(?:AKIA|ASIA)[A-Z0-9]{16}|gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{12,})/i,
-                content
-              )
-
-          _ ->
-            false
-        end
-
-      _ ->
-        false
-    end
-  end
-
-  defp symlink_path?(path, relative) do
-    case File.lstat(Path.expand(Path.join(path, relative))) do
-      {:ok, %File.Stat{type: :symlink}} -> true
-      _ -> false
-    end
   end
 
   @doc """

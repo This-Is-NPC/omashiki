@@ -124,16 +124,21 @@ defmodule Omashiki.Harness.CliJson do
   def gateway_base_url(_), do: Omashiki.Gateway.openai_base_url()
 
   @doc false
-  def prompt_for(%Job{payload: payload}) when is_map(payload), do: compose(payload)
-  def prompt_for(%{payload: payload}) when is_map(payload), do: compose(payload)
-  def prompt_for(%{"payload" => payload}) when is_map(payload), do: compose(payload)
+  def prompt_for(%Job{payload: payload} = job) when is_map(payload),
+    do: compose(payload, artifacts(job))
+
+  def prompt_for(%{payload: payload} = job) when is_map(payload),
+    do: compose(payload, artifacts(job))
+
+  def prompt_for(%{"payload" => payload} = job) when is_map(payload),
+    do: compose(payload, artifacts(job))
+
   def prompt_for(_), do: {:error, :runtime_job_payload_required}
 
-  @doc false
-  def compose(payload) do
+  def compose(payload, artifacts \\ []) do
     case Map.get(payload, "instruction", Map.get(payload, :instruction)) do
       instruction when is_binary(instruction) and instruction != "" ->
-        case Map.get(payload, "context", Map.get(payload, :context)) do
+        case merged_context(payload, artifacts) do
           context when is_map(context) ->
             {:ok, instruction <> "\n\nContext:\n" <> Jason.encode!(context)}
 
@@ -146,11 +151,58 @@ defmodule Omashiki.Harness.CliJson do
     end
   end
 
-  @doc false
-  def invocation_payload(%Job{payload: payload}) when is_map(payload), do: {:ok, payload}
-  def invocation_payload(%{payload: payload}) when is_map(payload), do: {:ok, payload}
-  def invocation_payload(%{"payload" => payload}) when is_map(payload), do: {:ok, payload}
+  def invocation_payload(%Job{payload: payload} = job) when is_map(payload),
+    do: {:ok, with_artifact_context(payload, artifacts(job))}
+
+  def invocation_payload(%{payload: payload} = job) when is_map(payload),
+    do: {:ok, with_artifact_context(payload, artifacts(job))}
+
+  def invocation_payload(%{"payload" => payload} = job) when is_map(payload),
+    do: {:ok, with_artifact_context(payload, artifacts(job))}
+
   def invocation_payload(_), do: {:error, :runtime_job_payload_required}
+
+  def runtime_context(job) do
+    payload =
+      case job do
+        %Job{payload: payload} -> payload
+        %{payload: payload} -> payload
+        %{"payload" => payload} -> payload
+        _ -> %{}
+      end
+
+    merged_context(payload, artifacts(job))
+  end
+
+  defp artifacts(%Job{dependency_artifacts: arts}) when is_list(arts) and arts != [], do: arts
+  defp artifacts(%{dependency_artifacts: arts}) when is_list(arts) and arts != [], do: arts
+  defp artifacts(%{"dependency_artifacts" => arts}) when is_list(arts) and arts != [], do: arts
+  defp artifacts(_), do: []
+
+  defp with_artifact_context(payload, []), do: payload
+
+  defp with_artifact_context(payload, arts) when is_map(payload) do
+    Map.put(
+      payload,
+      "context",
+      merged_context(payload, arts) || %{"dependency_artifacts" => arts}
+    )
+  end
+
+  defp merged_context(payload, artifacts) do
+    base = Map.get(payload, "context") || Map.get(payload, :context)
+
+    cond do
+      artifacts == [] ->
+        if is_map(base), do: base, else: nil
+
+      is_map(base) ->
+        Map.put(base, "dependency_artifacts", artifacts)
+
+      true ->
+        %{"dependency_artifacts" => artifacts}
+    end
+  end
 
   @doc false
   def validate_invocation(%Invocation{instruction: instruction})

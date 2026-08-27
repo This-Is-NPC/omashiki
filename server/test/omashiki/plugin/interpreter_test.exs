@@ -20,6 +20,20 @@ defmodule Omashiki.Plugin.InterpreterTest do
     end
   end
 
+  test "shipped plugins declare their tool binary in requires.binaries", %{plugins: plugins} do
+    expected = %{
+      "opencode" => ["opencode"],
+      "claude-code" => ["claude"],
+      "codex" => ["codex"],
+      "jcode" => ["jcode"],
+      "pi" => ["pi"]
+    }
+
+    for {name, binaries} <- expected do
+      assert Map.fetch!(plugins, name).requires["binaries"] == binaries
+    end
+  end
+
   test "rejects unknown template variables at parse time" do
     path = Path.join(System.tmp_dir!(), "bad-plugin-#{System.unique_integer([:positive])}.toml")
 

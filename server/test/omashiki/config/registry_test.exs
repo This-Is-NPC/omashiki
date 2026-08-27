@@ -43,6 +43,40 @@ defmodule Omashiki.Config.RegistryTest do
     end
   end
 
+  defp with_image_provides(value, fun) do
+    previous = Application.get_env(:omashiki, :plugin_image_provides)
+    Application.put_env(:omashiki, :plugin_image_provides, value)
+
+    try do
+      fun.()
+    after
+      Application.put_env(:omashiki, :plugin_image_provides, previous)
+    end
+  end
+
+  test "requires.binaries fail closed when packages and image omit the binary", ctx do
+    with_image_provides(%{"omashiki/agent:latest" => []}, fn ->
+      assert_raise Error, ~r/requires.binaries/, fn ->
+        Config.load_map!(fixture(ctx), path: Path.join(ctx.root, "omashiki.toml"))
+      end
+    end)
+  end
+
+  test "packages cover requires.binaries without treating executables as provides", ctx do
+    with_image_provides(%{"omashiki/agent:latest" => []}, fn ->
+      attrs = put_in(fixture(ctx), ["environments", "opencode", "packages"], ["opencode"])
+      assert :ok = Config.load_map!(attrs, path: Path.join(ctx.root, "omashiki.toml"))
+      env = Enum.find(Config.environments(), &(&1.name == "opencode"))
+      assert env.packages == ["opencode"]
+    end)
+  end
+
+  test "image-provides map covers requires.binaries", ctx do
+    with_image_provides(%{"omashiki/agent:latest" => ["opencode"]}, fn ->
+      assert :ok = Config.load_map!(fixture(ctx), path: Path.join(ctx.root, "omashiki.toml"))
+    end)
+  end
+
   test "tracked omashiki.toml boots and pins OpenCode Go GLM-5.3-Flash" do
     path = Path.expand("../../../../omashiki.toml", __DIR__)
     assert :ok = Config.load!(path)

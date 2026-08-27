@@ -47,4 +47,4 @@ prefix = "/tmp"
 default = "/tmp/omashiki-pi-invocation.txt"
 
 [requires]
-binaries = []
+binaries = ["pi"]

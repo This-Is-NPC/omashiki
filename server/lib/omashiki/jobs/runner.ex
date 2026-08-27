@@ -61,8 +61,7 @@ defmodule Omashiki.Jobs.Runner.DockerContainer do
   def finalize(%{artifact: %{sink: sink}} = container, job, opts) when sink in ["files", "none"],
     do: WorkArtifact.finalize(container.artifact, job, opts)
 
-  def finalize(container, job, opts),
-    do: Omashiki.Jobs.Runner.Finalizer.finalize(container, job, opts)
+  def finalize(_container, _job, _opts), do: {:error, :artifact_unavailable}
 
   @impl true
   def destroy(%{id: container_id, artifact: %{branch: _} = artifact, preserve_artifact: true}) do
@@ -101,60 +100,12 @@ defmodule Omashiki.Jobs.Runner.DockerContainer do
   end
 end
 
-defmodule Omashiki.Jobs.Runner.Finalizer do
-  @moduledoc "Collects clean committed-worktree metadata without changing Git state."
-
-  alias Omashiki.Jobs.Job
-
-  def finalize(%{worktree_path: path}, %Job{} = job, _opts) when is_binary(path) do
-    with {:ok, branch} <- git(path, ["symbolic-ref", "--short", "HEAD"]),
-         {:ok, head_sha} <- git(path, ["rev-parse", "HEAD"]),
-         {:ok, base_sha} <- base_sha(path, job),
-         {:ok, clean} <- clean?(path) do
-      {:ok,
-       %{
-         branch: branch,
-         base_sha: base_sha,
-         head_sha: head_sha,
-         worktree_clean: clean,
-         result: %{"head_sha" => head_sha}
-       }}
-    end
-  end
-
-  def finalize(_container, _job, _opts), do: {:error, :worktree_unavailable}
-
-  defp base_sha(path, %Job{admitted_repository: %{"base_branch" => branch}}),
-    do: git(path, ["rev-parse", branch])
-
-  defp base_sha(_path, _job), do: {:error, :base_branch_unavailable}
-
-  defp clean?(path) do
-    case System.cmd("git", ["-C", path, "status", "--porcelain"], stderr_to_stdout: true) do
-      {output, 0} -> {:ok, String.trim(output) == ""}
-      {output, status} -> {:error, {:git_failed, status, summary(output)}}
-    end
-  rescue
-    error -> {:error, {:git_exception, inspect(error)}}
-  end
-
-  defp git(path, args) do
-    case System.cmd("git", ["-C", path | args], stderr_to_stdout: true) do
-      {output, 0} -> {:ok, String.trim(output)}
-      {output, status} -> {:error, {:git_failed, status, summary(output)}}
-    end
-  rescue
-    error -> {:error, {:git_exception, inspect(error)}}
-  end
-
-  defp summary(output), do: output |> to_string() |> String.trim() |> String.slice(0, 1_024)
-end
-
 defmodule Omashiki.Jobs.Runner do
   @moduledoc "Executes exactly one claimed attempt through its governed lifecycle."
 
   import Ecto.Query
 
+  alias Omashiki.Harness.CliJson
   alias Omashiki.Jobs.{Job, JobAttempt, JobStep}
   alias Omashiki.Repo
 
@@ -301,7 +252,7 @@ defmodule Omashiki.Jobs.Runner do
         adapter_mod(state).invoke(
           %Omashiki.Harness.Invocation{
             instruction: state.job.payload["instruction"],
-            context: state.job.payload["context"]
+            context: CliJson.runtime_context(state.job)
           },
           harness_context(state)
         )

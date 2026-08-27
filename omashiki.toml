@@ -230,8 +230,6 @@ pids = 256
 #
 #[presets.jcode]
 #plugin = "jcode"
-#runtime = "docker"
-#image = "omashiki/agent-jcode:latest"
 #options = { timeout_ms = 1800000 }
 #
 ## jcode is a single static binary: no mise, no npm, no cache mounts, and no
@@ -239,6 +237,10 @@ pids = 256
 ## network must not be "none" and the credential must be a gateway credential.
 #[environments.jcode]
 #preset = "jcode"
+#isolation = "docker"
+#image = "omashiki/agent-jcode:latest"
+#sink = "git"
+#packages = []
 #executables = ["git"]
 #credentials = ["local-llm"]
 #caches = []

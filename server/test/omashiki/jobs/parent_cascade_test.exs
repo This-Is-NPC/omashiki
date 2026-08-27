@@ -1,11 +1,9 @@
 defmodule Omashiki.Jobs.ParentCascadeTest do
   use Omashiki.DataCase, async: false
 
-  import Ecto.Query
-
   alias Omashiki.Config
   alias Omashiki.Jobs
-  alias Omashiki.Jobs.{Job, JobAttempt, JobEvent}
+  alias Omashiki.Jobs.{Job, JobAttempt}
   alias Omashiki.Repo
 
   setup do
@@ -143,7 +141,10 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
     assert Enum.find(queued.dependency_artifacts, &(&1["id"] == b.id))["status"] == "succeeded"
   end
 
-  test "git child with base dependency uses dependency head sha", %{token: token, repo_path: repo_path} do
+  test "git child with base dependency uses dependency head sha", %{
+    token: token,
+    repo_path: repo_path
+  } do
     parent_sha = commit_file!(repo_path, "parent.txt", "parent\n")
 
     assert {:ok, parent} =
@@ -166,9 +167,88 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
     assert child.status == "queued"
 
     {:ok, attempt} = Jobs.claim(child, "runner")
-    assert {:ok, artifact} = Omashiki.Jobs.GitArtifact.provision_worktree(child, attempt, git_env: [])
+
+    assert {:ok, artifact} =
+             Omashiki.Jobs.GitArtifact.provision_worktree(child, attempt, git_env: [])
 
     assert artifact.base_sha == parent_sha
+  end
+
+  test "git child defaults base to dependency and sees parent artifact in prompt", %{
+    token: token,
+    repo_path: repo_path
+  } do
+    parent_sha = commit_file!(repo_path, "parent-default.txt", "parent\n")
+
+    assert {:ok, parent} =
+             Jobs.Admission.admit(
+               token,
+               single_job("parent-default", %{"branch" => "feat-parent-default"})
+             )
+
+    succeed_job!(parent, head_sha: parent_sha)
+
+    assert {:ok, child} =
+             Jobs.Admission.admit(
+               token,
+               single_job("child-default", %{"branch" => "feat-child-default"}, [
+                 %{"id" => parent.id}
+               ])
+             )
+
+    assert child.status == "queued"
+    assert child.admitted_repository["base"] == "dependency"
+    assert length(child.dependency_artifacts) == 1
+    assert hd(child.dependency_artifacts)["head_sha"] == parent_sha
+
+    assert {:ok, prompt} = Omashiki.Harness.CliJson.prompt_for(child)
+    assert prompt =~ parent_sha
+    assert prompt =~ parent.id
+
+    {:ok, attempt} = Jobs.claim(child, "runner")
+
+    assert {:ok, artifact} =
+             Omashiki.Jobs.GitArtifact.provision_worktree(child, attempt, git_env: [])
+
+    assert artifact.base_sha == parent_sha
+  end
+
+  test "default git base uses first succeeded dependency head sha", %{
+    token: token,
+    repo_path: repo_path
+  } do
+    sha_b = commit_file!(repo_path, "b-default.txt", "b\n")
+
+    assert {:ok, [a, b, c]} =
+             Jobs.Admission.admit_batch(
+               token,
+               %{
+                 "schema_version" => 1,
+                 "correlation_id" => "default-base-proceed",
+                 "jobs" => [
+                   batch_job("a", []),
+                   batch_job("b", []),
+                   batch_job("c", [
+                     %{"ref" => "a", "on_failure" => "proceed"},
+                     %{"ref" => "b"}
+                   ])
+                 ]
+               }
+             )
+
+    fail_job!(a)
+    succeed_job!(b, head_sha: sha_b)
+
+    child = Repo.get!(Job, c.id)
+    assert child.status == "queued"
+    assert child.admitted_repository["base"] == "dependency"
+
+    {:ok, attempt} = Jobs.claim(child, "runner")
+
+    assert {:ok, artifact} =
+             Omashiki.Jobs.GitArtifact.provision_worktree(child, attempt, git_env: [])
+
+    assert artifact.base_sha == sha_b
   end
 
   test "a cancelled parent cascade-cancels blocked children with cancel edge", %{token: token} do

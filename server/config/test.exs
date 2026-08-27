@@ -70,6 +70,9 @@ config :omashiki, :rollout_poll_ms, 25
 # The capacity row is owned by the sandbox; tests call `Jobs.sync_capacity/0`.
 config :omashiki, :sync_execution_capacity_on_boot, false
 
+# Fixtures never run Docker; ImageProvides.cover! trusts the image half.
+config :omashiki, :plugin_image_provides, :trust
+
 # Oban — manual testing mode: jobs are not auto-executed; tests call
 # `Oban.drain_queue/1` or `perform_job/2` explicitly.
 config :omashiki, Oban, testing: :manual
@@ -77,7 +80,10 @@ config :omashiki, Oban, testing: :manual
 # Keep provider/dispatch timeout tests fast without weakening production bounds.
 # The real-provider E2E forwards to a local reasoning model (Qwen 3.5 9b needs
 # ~24s for a one-word ping); 500ms would fail every gateway turn.
-config :omashiki, :gateway_provider_request_timeout_ms, if(real_provider_e2e?, do: 180_000, else: 500)
+config :omashiki,
+       :gateway_provider_request_timeout_ms,
+       if(real_provider_e2e?, do: 180_000, else: 500)
+
 config :omashiki, :dispatch_await_slack_ms, 200
 
 # Host credential copies stay inside the test sandbox, never /dev/shm.

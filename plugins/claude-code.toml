@@ -57,4 +57,4 @@ exact_set = true
 default = ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git *)", "Bash(python3 *)"]
 
 [requires]
-binaries = []
+binaries = ["claude"]

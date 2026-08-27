@@ -72,7 +72,6 @@ defmodule Omashiki.Jobs.RunnerTest do
     end
   end
 
-
   defmodule FailedAttemptGitFinalizeFailureContainer do
     def provision(_job, _attempt, _environment, _opts),
       do: {:ok, %{id: "failed-git-finalize", artifact: %{task_branch: "feat-runner"}}}
@@ -155,6 +154,13 @@ defmodule Omashiki.Jobs.RunnerTest do
     {token, _plaintext} = api_token_fixture(user)
     on_exit(fn -> File.rm_rf!(root) end)
     {:ok, token: token}
+  end
+
+  test "docker container finalize without artifact is an error", %{token: token} do
+    {:ok, job} = Jobs.Admission.admit(token, request("success"))
+
+    assert {:error, :artifact_unavailable} =
+             Omashiki.Jobs.Runner.DockerContainer.finalize(%{id: "missing-artifact"}, job, [])
   end
 
   test "runs one attempt in order and persists step evidence", %{token: token} do
@@ -301,7 +307,6 @@ defmodule Omashiki.Jobs.RunnerTest do
              8
   end
 
-
   test "failed git attempt does not preserve artifact when finalize fails", %{token: token} do
     {:ok, job} = Jobs.Admission.admit(token, request("failed-git-finalize"))
     {:ok, attempt} = Jobs.claim(job, "runner-test")
@@ -316,7 +321,9 @@ defmodule Omashiki.Jobs.RunnerTest do
     assert failed.status == "failed"
 
     finalization =
-      Repo.one!(from(s in JobStep, where: s.attempt_id == ^attempt.id and s.key == "finalization"))
+      Repo.one!(
+        from(s in JobStep, where: s.attempt_id == ^attempt.id and s.key == "finalization")
+      )
 
     refute finalization.output["preserve_artifact"]
     assert_receive {:destroyed, "failed-git-finalize", preserve}

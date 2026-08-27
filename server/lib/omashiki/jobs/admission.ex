@@ -9,7 +9,7 @@ defmodule Omashiki.Jobs.Admission do
   alias Omashiki.ApiTokens.Token
   alias Omashiki.Config
   alias Omashiki.Config.Rollout
-  alias Omashiki.Jobs.{DispatchWorker, Job, JobAttempt, JobDependency, JobEvent}
+  alias Omashiki.Jobs.{Dependencies, DispatchWorker, Job, JobAttempt, JobDependency, JobEvent}
   alias Omashiki.Jobs.Contract.V1
   alias Omashiki.Repo
 
@@ -419,7 +419,7 @@ defmodule Omashiki.Jobs.Admission do
   defp job_attrs(user_id, token_id, request, resolved, edges) do
     status = initial_status(edges)
     now = DateTime.utc_now(:microsecond)
-    repository = maybe_put_git_base(resolved.repository, request)
+    repository = maybe_put_git_base(resolved.repository, request, edges, resolved.environment)
 
     %{
       user_id: user_id,
@@ -431,6 +431,7 @@ defmodule Omashiki.Jobs.Admission do
       environment: request["environment"],
       payload: request["payload"],
       payload_hash: digest_payload(request["payload"]),
+      dependency_artifacts: queued_dependency_artifacts(status, edges),
       admitted_repository: repository,
       admitted_repository_digest: resolved.admitted_repository_digest,
       admitted_environment: resolved.environment,
@@ -446,14 +447,31 @@ defmodule Omashiki.Jobs.Admission do
     }
   end
 
-  defp maybe_put_git_base(nil, _request), do: nil
+  defp queued_dependency_artifacts("queued", [_ | _] = edges),
+    do: Dependencies.artifacts_for(edges)
 
-  defp maybe_put_git_base(repository, request) when is_map(repository) do
-    case Map.get(request, "base") do
-      base when is_binary(base) -> Map.put(repository, "base", base)
-      _ -> repository
+  defp queued_dependency_artifacts(_, _), do: nil
+
+  defp maybe_put_git_base(nil, _request, _edges, _environment), do: nil
+
+  defp maybe_put_git_base(repository, request, edges, environment) when is_map(repository) do
+    cond do
+      is_binary(Map.get(request, "base")) and Map.get(request, "base") != "" ->
+        Map.put(repository, "base", request["base"])
+
+      edges != [] and git_sink?(environment) ->
+        Map.put(repository, "base", "dependency")
+
+      true ->
+        repository
     end
   end
+
+  defp git_sink?(environment) when is_map(environment) do
+    (Map.get(environment, "sink") || Map.get(environment, :sink)) == "git"
+  end
+
+  defp git_sink?(_), do: false
 
   defp insert_dependencies!(%Job{} = job, edges) do
     Enum.each(edges, fn {depends_on_job_id, on_failure} ->
@@ -587,8 +605,9 @@ defmodule Omashiki.Jobs.Admission do
     Map.put(repository, "task_branch", task_branch)
   end
 
-  defp maybe_put_task_branch(repository, _task_branch, %Environment{sink: "git"}) when is_map(repository),
-    do: repository
+  defp maybe_put_task_branch(repository, _task_branch, %Environment{sink: "git"})
+       when is_map(repository),
+       do: repository
 
   defp maybe_put_task_branch(repository, _task_branch, _environment), do: repository
 

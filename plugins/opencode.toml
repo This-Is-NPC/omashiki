@@ -43,4 +43,4 @@ shape = "object"
 text = "text"
 
 [requires]
-binaries = []
+binaries = ["opencode"]

@@ -87,6 +87,10 @@ defmodule Omashiki.Jobs.Dependencies do
     |> Repo.all()
   end
 
+  def artifacts_for(edges) when is_list(edges) do
+    build_dependency_artifacts(edges, load_dependency_jobs(edges))
+  end
+
   defp load_dependency_jobs(edges) do
     ids = Enum.map(edges, fn {dep_id, _} -> dep_id end)
 

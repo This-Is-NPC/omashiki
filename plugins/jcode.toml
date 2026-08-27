@@ -54,4 +54,4 @@ prefix = "/tmp"
 default = "/tmp/omashiki-jcode-invocation.txt"
 
 [requires]
-binaries = []
+binaries = ["jcode"]

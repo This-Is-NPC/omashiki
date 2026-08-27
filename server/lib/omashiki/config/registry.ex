@@ -71,6 +71,7 @@ defmodule Omashiki.Config.Registry do
   @moduledoc false
 
   alias Omashiki.Config.{Environment, Error, Mount, Machine, Repository, Step}
+  alias Omashiki.Plugin.ImageProvides
   alias Omashiki.SupplyChain.Policy
 
   @name ~r/^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -288,7 +289,7 @@ defmodule Omashiki.Config.Registry do
 
       preset = Omashiki.Harnesses.finalize_preset!(base_preset, isolation, image, where)
 
-      validate_requires!(preset.manifest, executables, packages, where)
+      validate_requires!(preset.manifest, image, packages, where)
 
       {resolved_credentials, resolved_host_credentials} =
         attrs
@@ -568,23 +569,15 @@ defmodule Omashiki.Config.Registry do
 
   defp validate_requires!(
          %Omashiki.Plugin.Manifest{requires: %{"binaries" => required}},
-         executables,
+         image,
          packages,
          where
-       ) do
-    provided = MapSet.new(executables ++ packages)
-
-    missing =
-      required
-      |> Enum.reject(&MapSet.member?(provided, &1))
-
-    if missing != [] do
-      raise Error,
-            "#{where}: plugin requires.binaries #{inspect(missing)} not covered by executables ∪ packages"
-    end
+       )
+       when is_list(required) and is_binary(image) and is_list(packages) do
+    ImageProvides.cover!(image, required, packages, where)
   end
 
-  defp validate_requires!(_manifest, _executables, _packages, where) do
+  defp validate_requires!(_manifest, _image, _packages, where) do
     raise Error, "#{where}: preset plugin manifest missing for requires check"
   end
 
