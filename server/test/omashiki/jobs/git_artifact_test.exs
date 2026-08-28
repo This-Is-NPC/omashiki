@@ -1,7 +1,9 @@
 defmodule Omashiki.Jobs.GitArtifactTest do
   use ExUnit.Case, async: false
 
+  alias Omashiki.Config
   alias Omashiki.Jobs.{GitArtifact, Job, JobAttempt}
+  import Omashiki.Fixtures
 
   setup do
     root =
@@ -9,6 +11,7 @@ defmodule Omashiki.Jobs.GitArtifactTest do
 
     repo = Path.join(root, "repo")
     File.mkdir_p!(repo)
+    copy_plugins!(root)
     git!(repo, ["init", "-q", "-b", "main"])
     git!(repo, ["commit", "--allow-empty", "-q", "-m", "init"], identity_env())
 
@@ -27,6 +30,7 @@ defmodule Omashiki.Jobs.GitArtifactTest do
 
     attempt = %JobAttempt{number: 2}
 
+    on_exit(fn -> Config.reset!() end)
     on_exit(fn -> File.rm_rf!(root) end)
     {:ok, root: root, job: job, attempt: attempt, repo: repo, task_branch: task_branch}
   end
@@ -336,6 +340,91 @@ defmodule Omashiki.Jobs.GitArtifactTest do
     end
   end
 
+  describe "managed mirror" do
+    test "clones a missing path from the remote then creates the worktree", ctx do
+      canonical = canonical_remote!(ctx)
+      mirror = Path.join(ctx.root, "managed-mirror")
+      refute File.exists?(mirror)
+
+      job = at_node(ctx.job, mirror, canonical)
+
+      assert {:ok, artifact} = GitArtifact.provision_worktree(job, ctx.attempt)
+      assert File.dir?(Path.join(mirror, ".git"))
+      assert File.dir?(artifact.path)
+      assert artifact.base_sha == git!(canonical, ["rev-parse", "refs/heads/main"])
+      assert :ok = GitArtifact.cleanup(artifact)
+    end
+  end
+
+  describe "host Git credentials" do
+    test "SSH passphrase environment is absent from local commit hooks", ctx do
+      canonical = canonical_remote!(ctx)
+      passphrase_var = "OMASHIKI_TEST_GIT_KEY_PASSPHRASE"
+      previous = System.get_env(passphrase_var)
+      System.put_env(passphrase_var, "hook-secret")
+
+      on_exit(fn ->
+        if previous,
+          do: System.put_env(passphrase_var, previous),
+          else: System.delete_env(passphrase_var)
+      end)
+
+      Config.load_map!(
+        %{
+          "repositories" => %{
+            "app" => %{
+              "path" => "repo",
+              "base_branch" => "main",
+              "remote" => canonical,
+              "ssh_key" => "/home/operator/.ssh/omashiki_deploy",
+              "ssh_key_passphrase" => "${env:OMASHIKI_TEST_GIT_KEY_PASSPHRASE}"
+            }
+          },
+          "presets" => %{"opencode" => %{"plugin" => "opencode", "options" => %{}}},
+          "environments" => %{
+            "git" => %{
+              "preset" => "opencode",
+              "isolation" => "docker",
+              "image" => "omashiki/agent:latest",
+              "sink" => "git",
+              "packages" => [],
+              "executables" => ["git"],
+              "credentials" => [],
+              "timeout_ms" => 1_000,
+              "caches" => [],
+              "mounts" => [],
+              "pre_steps" => [],
+              "post_steps" => [],
+              "policy" => %{"mode" => "off"},
+              "network" => "none",
+              "resources" => %{"cpus" => 1, "memory" => "1GB", "pids" => 32}
+            }
+          }
+        },
+        path: Path.join(ctx.root, "omashiki.toml")
+      )
+
+      job = %{at_node(ctx.job, ctx.repo, canonical) | repository: "app"}
+      {:ok, artifact} = GitArtifact.provision_worktree(job, ctx.attempt)
+      File.write!(Path.join(artifact.path, "generated.txt"), "generated\n")
+
+      install_hook!(
+        artifact.repo_path,
+        "#!/bin/sh\nif test -n \"${OMASHIKI_GIT_ASKPASS_PASSPHRASE-}\"; then exit 42; fi\nif test -n \"${GIT_SSH_COMMAND-}\"; then exit 43; fi\nexit 0\n"
+      )
+
+      install_hook!(
+        artifact.repo_path,
+        "#!/bin/sh\nif test -n \"${OMASHIKI_GIT_ASKPASS_PASSPHRASE-}\"; then exit 42; fi\nif test -n \"${GIT_SSH_COMMAND-}\"; then exit 43; fi\nexit 0\n",
+        "pre-push"
+      )
+
+      assert {:ok, result} = GitArtifact.finalize(artifact, job, update_task_branch: true)
+      assert result.worktree_clean
+      assert :ok = GitArtifact.cleanup(artifact)
+    end
+  end
+
   describe "task branch and run-NNN" do
     test "two attempts create two run branches; task branch follows the succeeded head", %{
       repo: repo,
@@ -391,6 +480,25 @@ defmodule Omashiki.Jobs.GitArtifactTest do
       assert {:error, {:collision, _, _}} = GitArtifact.provision_worktree(job, attempt)
       assert :ok = GitArtifact.cleanup(artifact)
     end
+
+    test "concurrent same-worktree provisioning leaves the winner intact", %{
+      job: job,
+      attempt: attempt
+    } do
+      tasks =
+        for _ <- 1..2 do
+          Task.async(fn -> GitArtifact.provision_worktree(job, attempt) end)
+        end
+
+      results = Enum.map(tasks, &Task.await(&1, 30_000))
+      artifacts = for {:ok, artifact} <- results, do: artifact
+
+      assert [artifact] = artifacts
+      assert Enum.any?(results, &match?({:error, {:collision, _, _}}, &1))
+      assert File.dir?(artifact.path)
+      assert branch?(artifact.repo_path, artifact.run_branch)
+      assert :ok = GitArtifact.cleanup(artifact)
+    end
   end
 
   defp canonical_remote!(%{root: root, repo: repo}) do
@@ -418,8 +526,8 @@ defmodule Omashiki.Jobs.GitArtifactTest do
     }
   end
 
-  defp install_hook!(repo, contents) do
-    hook = Path.join([repo, ".git", "hooks", "pre-commit"])
+  defp install_hook!(repo, contents, name \\ "pre-commit") do
+    hook = Path.join([repo, ".git", "hooks", name])
     File.write!(hook, contents)
     File.chmod!(hook, 0o755)
   end

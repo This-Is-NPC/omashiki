@@ -351,6 +351,144 @@ defmodule Omashiki.Config.RegistryTest do
     end
   end
 
+  test "remote without path defaults to a per-name cache mirror", ctx do
+    declared =
+      fixture(ctx)
+      |> put_in(["repositories", "app", "remote"], "git@host:app.git")
+      |> update_in(["repositories", "app"], &Map.delete(&1, "path"))
+
+    assert :ok = Config.load_map!(declared, path: Path.join(ctx.root, "omashiki.toml"))
+
+    assert [%Repository{path: path, remote: "git@host:app.git"}] = Config.repositories()
+    assert path == Path.join([System.user_home!(), ".cache", "omashiki", "mirrors", "app"])
+  end
+
+  test "remote default mirror rejects a symlinked mirror path", ctx do
+    name = "mirror-test-#{System.unique_integer([:positive])}"
+    path = Path.join([System.user_home!(), ".cache", "omashiki", "mirrors", name])
+    File.mkdir_p!(Path.dirname(path))
+    File.ln_s!(ctx.root, path)
+    on_exit(fn -> File.rm(path) end)
+
+    declared =
+      fixture(ctx)
+      |> Map.put("repositories", %{
+        name => %{"remote" => "git@host:app.git", "base_branch" => "main"}
+      })
+
+    assert_raise Error, ~r/non-symlink path/, fn ->
+      Config.load_map!(declared, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+  end
+
+  test "remote mirror paths reject symlinked parents", ctx do
+    parent_name = "mirror-parent-test-#{System.unique_integer([:positive])}"
+    parent = Path.join([System.user_home!(), ".cache", "omashiki", "mirrors", parent_name])
+    File.mkdir_p!(Path.dirname(parent))
+    File.ln_s!(ctx.root, parent)
+    on_exit(fn -> File.rm(parent) end)
+
+    declared =
+      fixture(ctx)
+      |> put_in(
+        ["repositories", "app", "path"],
+        "~/.cache/omashiki/mirrors/#{parent_name}/app"
+      )
+      |> put_in(["repositories", "app", "remote"], "git@host:app.git")
+
+    assert_raise Error, ~r/non-symlink path/, fn ->
+      Config.load_map!(declared, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+  end
+
+  test "remote rejects an existing path that is not a Git checkout", ctx do
+    path = Path.join(ctx.root, "not-a-repository")
+    File.mkdir_p!(path)
+
+    invalid =
+      fixture(ctx)
+      |> put_in(["repositories", "app", "path"], "not-a-repository")
+      |> put_in(["repositories", "app", "remote"], "git@host:app.git")
+
+    assert_raise Error, ~r/non-symlink directory/, fn ->
+      Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+  end
+
+  test "registry digest ignores local path and ssh_key" do
+    a = %Repository{name: "app", path: "/one", base_branch: "main", remote: "git@h:a.git"}
+
+    b = %Repository{
+      name: "app",
+      path: "/two",
+      base_branch: "main",
+      remote: "git@h:a.git",
+      ssh_key: "/home/op/.ssh/id_ed25519"
+    }
+
+    c = %Repository{name: "app", path: "/one", base_branch: "next", remote: "git@h:a.git"}
+
+    assert Omashiki.Config.Registry.digest([a], [], []) ==
+             Omashiki.Config.Registry.digest([b], [], [])
+
+    refute Omashiki.Config.Registry.digest([a], [], []) ==
+             Omashiki.Config.Registry.digest([c], [], [])
+  end
+
+  test "ssh_key requires remote and a safe absolute path", ctx do
+    invalid = put_in(fixture(ctx), ["repositories", "app", "ssh_key"], "/home/op/.ssh/id")
+
+    assert_raise Error, ~r/ssh_key requires remote/, fn ->
+      Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+
+    declared =
+      fixture(ctx)
+      |> put_in(["repositories", "app", "remote"], "git@host:app.git")
+      |> put_in(["repositories", "app", "ssh_key"], "~/.ssh/omashiki_deploy")
+
+    assert :ok = Config.load_map!(declared, path: Path.join(ctx.root, "omashiki.toml"))
+    key = Path.join(System.user_home!(), ".ssh/omashiki_deploy")
+    assert [%Repository{ssh_key: ^key}] = Config.repositories()
+
+    for unsafe <- ["/home/op/.ssh/id;touch", "/home/op/.ssh/id$1", "/home/op/.ssh/id\n"] do
+      invalid =
+        declared
+        |> put_in(["repositories", "app", "ssh_key"], unsafe)
+
+      assert_raise Error, ~r/ssh_key is not a safe host path/, fn ->
+        Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+      end
+    end
+  end
+
+  test "ssh_key_passphrase must be an environment reference", ctx do
+    invalid =
+      fixture(ctx)
+      |> put_in(["repositories", "app", "remote"], "git@host:app.git")
+      |> put_in(["repositories", "app", "ssh_key"], "/home/op/.ssh/id_ed25519")
+      |> put_in(["repositories", "app", "ssh_key_passphrase"], "hunter2")
+
+    assert_raise Error, ~r/environment reference/, fn ->
+      Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+
+    declared =
+      fixture(ctx)
+      |> put_in(["repositories", "app", "remote"], "git@host:app.git")
+      |> put_in(["repositories", "app", "ssh_key"], "/home/op/.ssh/id_ed25519")
+      |> put_in(
+        ["repositories", "app", "ssh_key_passphrase"],
+        "${env:OMASHIKI_GIT_KEY_PASSPHRASE}"
+      )
+
+    assert :ok = Config.load_map!(declared, path: Path.join(ctx.root, "omashiki.toml"))
+
+    assert [
+             %Repository{ssh_key_passphrase: "${env:OMASHIKI_GIT_KEY_PASSPHRASE}"}
+           ] = Config.repositories()
+  end
+
   test "declares execution nodes", ctx do
     put_env!("OMASHIKI_NODE", "builder-01")
     declared = Map.put(fixture(ctx), "nodes", %{"builder-02" => %{}, "builder-01" => %{}})

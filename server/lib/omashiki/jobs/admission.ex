@@ -144,7 +144,16 @@ defmodule Omashiki.Jobs.Admission do
 
   defp snapshot_value(%{} = map) do
     map
-    |> Enum.reject(fn {key, _value} -> key in [:api_key, "api_key"] end)
+    |> Enum.reject(fn {key, _value} ->
+      key in [
+        :api_key,
+        "api_key",
+        :ssh_key,
+        "ssh_key",
+        :ssh_key_passphrase,
+        "ssh_key_passphrase"
+      ]
+    end)
     |> Map.new(fn {key, value} -> {to_string(key), snapshot_value(value)} end)
   end
 

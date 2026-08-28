@@ -40,7 +40,9 @@ defmodule Omashiki.Jobs.AdmissionTest do
         "app" => %{
           "path" => "repo",
           "base_branch" => "main",
-          "remote" => "/srv/canonical/app.git"
+          "remote" => "/srv/canonical/app.git",
+          "ssh_key" => "/home/operator/.ssh/omashiki_deploy",
+          "ssh_key_passphrase" => "${env:OMASHIKI_TEST_GIT_KEY_PASSPHRASE}"
         }
       },
       "presets" => %{
@@ -114,6 +116,10 @@ defmodule Omashiki.Jobs.AdmissionTest do
     # silently downgrades every job to a local-only, unreachable artifact.
     assert job.admitted_repository["remote"] == "/srv/canonical/app.git"
     assert job.admitted_repository["task_branch"] == "feat-test"
+    refute Map.has_key?(job.admitted_repository, "ssh_key")
+    refute Map.has_key?(job.admitted_repository, "ssh_key_passphrase")
+    refute inspect(job) =~ "omashiki_deploy"
+    refute inspect(job) =~ "OMASHIKI_TEST_GIT_KEY_PASSPHRASE"
 
     assert job.admitted_environment["name"] == "safe"
     assert [%{"read_only" => false}] = job.admitted_environment["mounts"]
@@ -250,9 +256,13 @@ defmodule Omashiki.Jobs.AdmissionTest do
     assert {:error, {:validation, on_failure_errors}} =
              Admission.admit(
                token,
-               Map.put(single_request(%{"idempotency_key" => "depends-on-failure-only"}), "depends_on", [
-                 %{"on_failure" => "cancel"}
-               ])
+               Map.put(
+                 single_request(%{"idempotency_key" => "depends-on-failure-only"}),
+                 "depends_on",
+                 [
+                   %{"on_failure" => "cancel"}
+                 ]
+               )
              )
 
     assert %{field: "depends_on", code: "id_or_ref_required"} in on_failure_errors
@@ -325,7 +335,10 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
   test "rejects a cyclic batch before the transaction starts", %{token: token} do
     cyclic =
-      Map.put(batch_request(), "jobs", [batch_job("a", [%{"ref" => "b"}]), batch_job("b", [%{"ref" => "a"}])])
+      Map.put(batch_request(), "jobs", [
+        batch_job("a", [%{"ref" => "b"}]),
+        batch_job("b", [%{"ref" => "a"}])
+      ])
 
     assert {:error, {:validation, errors}} = Admission.admit_batch(token, cyclic)
     assert %{code: "cycle"} = Enum.find(errors, &(&1.code == "cycle"))

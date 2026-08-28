@@ -1,3 +1,158 @@
+defmodule Omashiki.Jobs.GitArtifact.MirrorLock do
+  @moduledoc false
+  use GenServer
+
+  @name __MODULE__
+
+  def with_lock(path, fun) when is_binary(path) and is_function(fun, 0) do
+    with {:ok, server} <- server() do
+      token = make_ref()
+
+      try do
+        case GenServer.call(server, {:acquire, path, self(), token}, :infinity) do
+          :ok ->
+            try do
+              fun.()
+            after
+              release(server, path, self(), token)
+            end
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+      catch
+        :exit, reason -> {:error, {:mirror_lock_failed, reason}}
+      end
+    end
+  end
+
+  def start_link(_arg), do: GenServer.start(__MODULE__, %{}, name: @name)
+
+  @impl true
+  def init(_state), do: {:ok, %{locks: %{}, queues: %{}}}
+
+  @impl true
+  def handle_call({:acquire, path, owner, token}, from, state) do
+    case Map.has_key?(state.locks, path) do
+      false ->
+        {:reply, :ok, acquire_lock(state, path, owner, token, from)}
+
+      true ->
+        monitor = Process.monitor(owner)
+        queue = Map.get(state.queues, path, :queue.new())
+        queue = :queue.in({from, owner, token, monitor}, queue)
+        {:noreply, %{state | queues: Map.put(state.queues, path, queue)}}
+    end
+  end
+
+  @impl true
+  def handle_call({:release, path, owner, token}, _from, state) do
+    case Map.get(state.locks, path) do
+      %{owner: ^owner, token: ^token, monitor: monitor} ->
+        Process.demonitor(monitor, [:flush])
+        state = %{state | locks: Map.delete(state.locks, path)}
+        {:reply, :ok, grant_next(state, path)}
+
+      _ ->
+        {:reply, :ok, state}
+    end
+  end
+
+  @impl true
+  def handle_info({:DOWN, monitor, :process, _owner, _reason}, state) do
+    case locked_path(state.locks, monitor) do
+      {:ok, path} ->
+        state = %{state | locks: Map.delete(state.locks, path)}
+        {:noreply, grant_next(state, path)}
+
+      :error ->
+        {:noreply, remove_queued_monitor(state, monitor)}
+    end
+  end
+
+  defp server do
+    case Process.whereis(@name) do
+      pid when is_pid(pid) ->
+        {:ok, pid}
+
+      nil ->
+        case start_link(:ok) do
+          {:ok, pid} -> {:ok, pid}
+          {:error, {:already_started, pid}} -> {:ok, pid}
+          {:error, reason} -> {:error, {:mirror_lock_failed, reason}}
+        end
+    end
+  end
+
+  defp release(server, path, owner, token) do
+    _ = GenServer.call(server, {:release, path, owner, token}, :infinity)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp acquire_lock(state, path, owner, token, _from) do
+    monitor = Process.monitor(owner)
+    lock = %{owner: owner, token: token, monitor: monitor}
+    %{state | locks: Map.put(state.locks, path, lock)}
+  end
+
+  defp grant_next(state, path) do
+    case Map.get(state.queues, path) do
+      nil ->
+        state
+
+      queue ->
+        case :queue.out(queue) do
+          {:empty, _queue} ->
+            %{state | queues: Map.delete(state.queues, path)}
+
+          {{:value, {from, owner, token, monitor}}, queue} ->
+            state =
+              if Process.alive?(owner) do
+                GenServer.reply(from, :ok)
+                lock = %{owner: owner, token: token, monitor: monitor}
+                %{state | locks: Map.put(state.locks, path, lock)}
+              else
+                Process.demonitor(monitor, [:flush])
+                state
+              end
+
+            state =
+              if :queue.is_empty(queue),
+                do: %{state | queues: Map.delete(state.queues, path)},
+                else: %{state | queues: Map.put(state.queues, path, queue)}
+
+            if Map.has_key?(state.locks, path), do: state, else: grant_next(state, path)
+        end
+    end
+  end
+
+  defp locked_path(locks, monitor) do
+    case Enum.find(locks, fn {_path, lock} -> lock.monitor == monitor end) do
+      {path, _lock} -> {:ok, path}
+      nil -> :error
+    end
+  end
+
+  defp remove_queued_monitor(state, monitor) do
+    queues =
+      state.queues
+      |> Enum.reduce(%{}, fn {path, queue}, acc ->
+        queue =
+          queue
+          |> :queue.to_list()
+          |> Enum.reject(fn {_from, _owner, _token, queued_monitor} ->
+            queued_monitor == monitor
+          end)
+          |> :queue.from_list()
+
+        if :queue.is_empty(queue), do: acc, else: Map.put(acc, path, queue)
+      end)
+
+    %{state | queues: queues}
+  end
+end
+
 defmodule Omashiki.Jobs.GitArtifact do
   @moduledoc """
   Creates, validates, finalizes, and retires per-attempt Git run branches.
@@ -29,17 +184,18 @@ defmodule Omashiki.Jobs.GitArtifact do
 
   ## Push credentials
 
-  Nothing is declared for them, deliberately. The push runs on the host as the
-  Omashiki OS user, so it authenticates the way every other host-side Git
-  command does: SSH agent, `~/.ssh/config`, or a credential helper. Declaring
-  them in `[host_credentials.*]` would be wrong twice over — that section is
-  harness-shaped (`kind` is one of the agent CLIs) and its delivery mechanism is
-  a copy into the per-attempt container mount, which is exactly where a push
-  credential must never appear. An agent holding it could push straight to the
-  canonical remote and bypass the secret, symlink, protected-path and size
-  validations above.
+  Fetch and push run on the host as the Omashiki OS user. Optional
+  `[repositories.*].ssh_key` (and `ssh_key_passphrase = "${env:VAR}"`) become
+  `GIT_SSH_COMMAND` / `SSH_ASKPASS` on those host commands only. Declaring the
+  same material in `[host_credentials.*]` would be wrong twice over — that
+  section is harness-shaped and copies into the per-attempt container mount,
+  which is exactly where a push credential must never appear. An agent holding
+  it could push straight to the canonical remote and bypass the secret, symlink,
+  protected-path and size validations above.
   """
 
+  alias Omashiki.Config
+  alias Omashiki.Jobs.GitArtifact.MirrorLock
   alias Omashiki.Jobs.{Job, JobAttempt, JobDependency, Validate}
   alias Omashiki.Repo
   import Ecto.Query
@@ -59,6 +215,20 @@ defmodule Omashiki.Jobs.GitArtifact do
 
       "dependency" ->
         resolve_first_succeeded_dep_head(repo_path, job_id, opts)
+
+      _ ->
+        resolve_declared_base(repo_path, snapshot, base_branch, opts)
+    end
+  end
+
+  defp resolve_declared_base(repo_path, snapshot, base_branch, opts) do
+    case snapshot_remote(snapshot) do
+      remote when is_binary(remote) ->
+        git(
+          repo_path,
+          ["rev-parse", "--verify", "#{@mirror_prefix}heads/#{base_branch}^{commit}"],
+          opts
+        )
 
       _ ->
         git(repo_path, ["rev-parse", "--verify", "#{base_branch}^{commit}"], opts)
@@ -117,14 +287,15 @@ defmodule Omashiki.Jobs.GitArtifact do
   def provision_worktree(job, attempt, opts \\ [])
 
   def provision_worktree(
-        %Job{id: job_id, admitted_repository: snapshot},
+        %Job{id: job_id, admitted_repository: snapshot} = job,
         %JobAttempt{number: attempt_number},
         opts
       ) do
     with :ok <- valid_job_id(job_id),
-         {:ok, repo_path} <- snapshot_string(snapshot, "path"),
+         {:ok, repo_path} <- local_repo_path(job, snapshot),
          {:ok, task_branch} <- snapshot_string(snapshot, "task_branch"),
          {:ok, base_branch} <- snapshot_string(snapshot, "base_branch"),
+         :ok <- ensure_mirror(repo_path, snapshot, job, opts),
          :ok <- validate_repo(repo_path),
          :ok <- not_cancelled(opts),
          {:ok, base_sha} <- resolve_base_sha(repo_path, snapshot, base_branch, job_id, opts),
@@ -138,24 +309,27 @@ defmodule Omashiki.Jobs.GitArtifact do
              base_sha,
              snapshot_remote(snapshot)
            ),
-         :ok <- collision_check(artifact, opts),
-         :ok <- File.mkdir_p(Path.dirname(artifact.path)) do
-      case git(
-             repo_path,
-             ["worktree", "add", "--quiet", "-b", run_branch, artifact.path, base_sha],
-             opts
-           ) do
-        {:ok, _} ->
-          {:ok, artifact}
+         {:ok, artifact} <-
+           MirrorLock.with_lock(repo_path, fn ->
+             with :ok <- collision_check(artifact, opts),
+                  :ok <- File.mkdir_p(Path.dirname(artifact.path)) do
+               case git(
+                      repo_path,
+                      ["worktree", "add", "--quiet", "-b", run_branch, artifact.path, base_sha],
+                      opts
+                    ) do
+                 {:ok, _} ->
+                   {:ok, artifact}
 
-        {:error, {:git_failed, status, output}} ->
-          _ = cleanup(artifact, preserve_branch: false, git_env: Keyword.get(opts, :git_env, []))
-          {:error, {:provision_failed, status, output}}
+                 {:error, {:git_failed, status, output}} ->
+                   {:error, {:provision_failed, status, output}}
 
-        {:error, reason} ->
-          _ = cleanup(artifact, preserve_branch: false, git_env: Keyword.get(opts, :git_env, []))
-          {:error, reason}
-      end
+                 {:error, reason} ->
+                   {:error, reason}
+               end
+             end
+           end) do
+      {:ok, artifact}
     else
       {:error, {:git_failed, status, output}} -> {:error, {:provision_failed, status, output}}
       {:error, reason} -> {:error, reason}
@@ -198,8 +372,9 @@ defmodule Omashiki.Jobs.GitArtifact do
          {:ok, previous_head} <- commit_if_dirty(artifact, job, paths, changed_bytes, opts),
          {:ok, head_sha} <- git(artifact.path, ["rev-parse", "HEAD"], opts),
          :ok <- verify_head(artifact, head_sha, previous_head, opts),
-         :ok <- publish_run_branch(artifact, remote, opts),
-         :ok <- maybe_update_task_branch(artifact, remote, head_sha, update_task_branch, opts) do
+         :ok <- publish_run_branch(artifact, remote, job, opts),
+         :ok <-
+           maybe_update_task_branch(artifact, remote, head_sha, update_task_branch, job, opts) do
       result_branch =
         if update_task_branch, do: artifact.task_branch, else: artifact.run_branch
 
@@ -301,7 +476,8 @@ defmodule Omashiki.Jobs.GitArtifact do
   # into a private namespace and age them out from there. `--prune` drops the
   # mirrors of branches a previous sweep already retired.
   defp retention_candidates(repo_path, remote, opts) do
-    with {:ok, _} <-
+    with {:ok, remote_opts} <- remote_git_opts(opts, repo_path),
+         {:ok, _} <-
            git(
              repo_path,
              [
@@ -311,7 +487,7 @@ defmodule Omashiki.Jobs.GitArtifact do
                remote,
                "+refs/heads/*:#{@mirror_prefix}heads/*"
              ],
-             remote_opts(opts)
+             remote_opts
            ),
          {:ok, output} <-
            git(
@@ -348,17 +524,19 @@ defmodule Omashiki.Jobs.GitArtifact do
   end
 
   defp delete_remote_branch(repo_path, remote, branch, opts) do
-    case git(repo_path, ["push", remote, "--delete", "refs/heads/#{branch}"], remote_opts(opts)) do
-      {:ok, _} ->
-        :ok
+    with {:ok, remote_opts} <- remote_git_opts(opts, repo_path) do
+      case git(repo_path, ["push", remote, "--delete", "refs/heads/#{branch}"], remote_opts) do
+        {:ok, _} ->
+          :ok
 
-      {:error, {:git_failed, _status, output}} ->
-        if String.contains?(output, "remote ref does not exist"),
-          do: :ok,
-          else: {:error, {:branch_cleanup_failed, {:git_failed, output}}}
+        {:error, {:git_failed, _status, output}} ->
+          if String.contains?(output, "remote ref does not exist"),
+            do: :ok,
+            else: {:error, {:branch_cleanup_failed, {:git_failed, output}}}
 
-      {:error, reason} ->
-        {:error, {:branch_cleanup_failed, reason}}
+        {:error, reason} ->
+          {:error, {:branch_cleanup_failed, reason}}
+      end
     end
   end
 
@@ -394,45 +572,48 @@ defmodule Omashiki.Jobs.GitArtifact do
     end
   end
 
-  defp publish_run_branch(_artifact, nil, _opts), do: :ok
+  defp publish_run_branch(_artifact, nil, _job, _opts), do: :ok
 
-  defp publish_run_branch(artifact, remote, opts) do
+  defp publish_run_branch(artifact, remote, job, opts) do
     ref = run_branch_ref(artifact.run_branch)
 
-    case git(
-           artifact.path,
-           ["push", "--force-with-lease=#{ref}:", remote, "#{ref}:#{ref}"],
-           remote_opts(opts)
-         ) do
-      {:ok, _} ->
-        :ok
+    with {:ok, remote_opts} <- remote_git_opts(opts, job) do
+      case git(
+             artifact.path,
+             ["push", "--force-with-lease=#{ref}:", remote, "#{ref}:#{ref}"],
+             remote_opts
+           ) do
+        {:ok, _} ->
+          :ok
 
-      {:error, {:git_failed, status, output}} ->
-        if String.contains?(output, "[rejected]"),
-          do: {:error, {:collision, :remote, artifact.run_branch}},
-          else: {:error, {:push_failed, status, output}}
+        {:error, {:git_failed, status, output}} ->
+          if String.contains?(output, "[rejected]"),
+            do: {:error, {:collision, :remote, artifact.run_branch}},
+            else: {:error, {:push_failed, status, output}}
 
-      {:error, reason} ->
-        {:error, reason}
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 
-  defp maybe_update_task_branch(_artifact, _remote, _head_sha, false, _opts), do: :ok
+  defp maybe_update_task_branch(_artifact, _remote, _head_sha, false, _job, _opts), do: :ok
 
-  defp maybe_update_task_branch(artifact, nil, head_sha, true, opts) do
+  defp maybe_update_task_branch(artifact, nil, head_sha, true, _job, opts) do
     case git(artifact.repo_path, ["branch", "-f", artifact.task_branch, head_sha], opts) do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp maybe_update_task_branch(artifact, remote, head_sha, true, opts) do
+  defp maybe_update_task_branch(artifact, remote, head_sha, true, job, opts) do
     ref = task_branch_ref(artifact.task_branch)
 
-    with {:ok, lease} <-
-           task_branch_push_lease(artifact.repo_path, remote, artifact.task_branch, opts),
+    with {:ok, remote_opts} <- remote_git_opts(opts, job),
+         {:ok, lease} <-
+           task_branch_push_lease(artifact.repo_path, remote, artifact.task_branch, remote_opts),
          {:ok, _} <-
-           git(artifact.path, ["push", lease, remote, "#{head_sha}:#{ref}"], remote_opts(opts)) do
+           git(artifact.path, ["push", lease, remote, "#{head_sha}:#{ref}"], remote_opts) do
       :ok
     else
       {:error, {:git_failed, status, output}} ->
@@ -448,7 +629,7 @@ defmodule Omashiki.Jobs.GitArtifact do
   defp task_branch_push_lease(repo_path, remote, task_branch, opts) do
     ref = task_branch_ref(task_branch)
 
-    case git(repo_path, ["ls-remote", remote, ref], remote_opts(opts)) do
+    case git(repo_path, ["ls-remote", remote, ref], opts) do
       {:ok, ""} ->
         {:ok, "--force-with-lease=#{ref}:"}
 
@@ -645,7 +826,7 @@ defmodule Omashiki.Jobs.GitArtifact do
   end
 
   defp validate_repo(path) when is_binary(path) do
-    if File.dir?(path), do: :ok, else: {:error, :repository_unavailable}
+    if git_checkout?(path), do: :ok, else: {:error, :repository_unavailable}
   end
 
   defp validate_repo(_), do: {:error, :repository_unavailable}
@@ -685,8 +866,8 @@ defmodule Omashiki.Jobs.GitArtifact do
     kind, reason -> {:error, {:provision_throw, kind, reason}}
   end
 
-  defp git(path, args, opts) do
-    case System.cmd("git", ["-C", path | args],
+  defp git_clone(remote, path, opts) do
+    case System.cmd("git", ["clone", "--quiet", "--no-checkout", remote, path],
            env: Keyword.get(opts, :git_env, []),
            stderr_to_stdout: true
          ) do
@@ -697,8 +878,214 @@ defmodule Omashiki.Jobs.GitArtifact do
     error -> {:error, {:git_exception, inspect(error)}}
   end
 
-  defp remote_opts(opts),
-    do: Keyword.update(opts, :git_env, @non_interactive, &(@non_interactive ++ &1))
+  defp local_repo_path(%Job{repository: name}, snapshot) when is_binary(name) and name != "" do
+    case snapshot_remote(snapshot) do
+      remote when is_binary(remote) ->
+        case Config.get_repository(name) do
+          %Config.Repository{path: path} when is_binary(path) and path != "" -> {:ok, path}
+          _ -> snapshot_string(snapshot, "path")
+        end
+
+      _ ->
+        snapshot_string(snapshot, "path")
+    end
+  end
+
+  defp local_repo_path(_job, snapshot), do: snapshot_string(snapshot, "path")
+
+  defp ssh_env(%Job{} = job), do: ssh_env_for_repository(repo_for(job))
+
+  defp ssh_env(path) when is_binary(path) do
+    repository = Enum.find(Config.repositories(), &(&1.path == path))
+    ssh_env_for_repository(repository)
+  end
+
+  defp ssh_env(_), do: {:ok, []}
+
+  defp ssh_env_for_repository(repository) do
+    case repository do
+      %Config.Repository{ssh_key: key} = repo when is_binary(key) and key != "" ->
+        ssh_env_for_key(key, repo.ssh_key_passphrase)
+
+      _ ->
+        {:ok, []}
+    end
+  end
+
+  defp ssh_env_for_key(key, nil) do
+    {:ok,
+     [
+       {"GIT_SSH_COMMAND",
+        "ssh -i #{key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes"}
+     ]}
+  end
+
+  defp ssh_env_for_key(key, passphrase_ref) when is_binary(passphrase_ref) do
+    case resolve_passphrase_ref(passphrase_ref) do
+      {:ok, secret} ->
+        {:ok,
+         [
+           {"GIT_SSH_COMMAND",
+            "ssh -i #{key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"},
+           {"SSH_ASKPASS", askpass_path()},
+           {"SSH_ASKPASS_REQUIRE", "force"},
+           {"DISPLAY", "none"},
+           {"OMASHIKI_GIT_ASKPASS_PASSPHRASE", secret}
+         ]}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp resolve_passphrase_ref(ref) do
+    case Regex.run(~r/^\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/, ref) do
+      [_, name] ->
+        case System.get_env(name) do
+          value when is_binary(value) and value != "" -> {:ok, value}
+          _ -> {:error, {:git_auth, :passphrase_unset}}
+        end
+
+      _ ->
+        {:error, {:git_auth, :passphrase_unset}}
+    end
+  end
+
+  defp askpass_path do
+    Path.join(:code.priv_dir(:omashiki), "git-ssh-askpass.sh")
+  end
+
+  defp repo_for(%Job{repository: name}) when is_binary(name) and name != "",
+    do: Config.get_repository(name)
+
+  defp repo_for(_), do: nil
+
+  defp remote_git_opts(opts, source) do
+    with {:ok, extra} <- ssh_env(source) do
+      env =
+        opts
+        |> Keyword.get(:git_env, [])
+        |> merge_git_env(extra)
+        |> merge_git_env(@non_interactive)
+
+      {:ok,
+       opts
+       |> Keyword.put(:git_env, env)
+       |> Keyword.put(:remote_git, true)}
+    end
+  end
+
+  defp ensure_mirror(repo_path, snapshot, job, opts) do
+    case snapshot_remote(snapshot) do
+      nil ->
+        :ok
+
+      remote ->
+        with :ok <- validate_managed_mirror_path(repo_path),
+             {:ok, remote_opts} <- remote_git_opts(opts, job),
+             :ok <-
+               MirrorLock.with_lock(repo_path, fn ->
+                 with :ok <- ensure_clone(repo_path, remote, remote_opts) do
+                   fetch_mirror(repo_path, remote, remote_opts)
+                 end
+               end) do
+          :ok
+        end
+    end
+  end
+
+  defp ensure_clone(repo_path, remote, opts) do
+    cond do
+      git_checkout?(repo_path) ->
+        :ok
+
+      File.exists?(repo_path) ->
+        {:error, :repository_unavailable}
+
+      true ->
+        tmp = repo_path <> ".clone-#{System.unique_integer([:positive])}"
+
+        case File.mkdir_p(Path.dirname(repo_path)) do
+          :ok ->
+            case git_clone(remote, tmp, opts) do
+              {:ok, _} ->
+                case File.rename(tmp, repo_path) do
+                  :ok ->
+                    :ok
+
+                  {:error, :eexist} ->
+                    File.rm_rf(tmp)
+                    :ok
+
+                  {:error, reason} ->
+                    File.rm_rf(tmp)
+                    {:error, {:clone_failed, reason}}
+                end
+
+              error ->
+                File.rm_rf(tmp)
+                error
+            end
+
+          {:error, reason} ->
+            {:error, {:clone_failed, reason}}
+        end
+    end
+  end
+
+  defp fetch_mirror(repo_path, remote, opts) do
+    case git(
+           repo_path,
+           ["fetch", "--prune", remote, "+refs/heads/*:#{@mirror_prefix}heads/*"],
+           opts
+         ) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, {:fetch_failed, reason}}
+    end
+  end
+
+  defp git_checkout?(path) do
+    File.dir?(path) and git(path, ["rev-parse", "--is-inside-work-tree"], []) == {:ok, "true"}
+  end
+
+  defp validate_managed_mirror_path(path) do
+    root = Path.join([System.user_home!(), ".cache", "omashiki", "mirrors"])
+    path = Path.expand(path)
+
+    if contained?(path, root) and symlink_in_absolute_path?(path),
+      do: {:error, :repository_unavailable},
+      else: :ok
+  end
+
+  defp merge_git_env(existing, additions) do
+    Enum.uniq_by(additions ++ existing, &elem(&1, 0))
+  end
+
+  defp symlink_in_absolute_path?(path) do
+    path
+    |> Path.split()
+    |> Enum.scan(&Path.join(&2, &1))
+    |> Enum.any?(fn component ->
+      match?({:ok, %File.Stat{type: :symlink}}, File.lstat(component))
+    end)
+  end
+
+  defp git(path, args, opts) do
+    args =
+      if Keyword.get(opts, :remote_git, false),
+        do: ["-c", "core.hooksPath=/dev/null" | args],
+        else: args
+
+    case System.cmd("git", ["-C", path | args],
+           env: Keyword.get(opts, :git_env, []),
+           stderr_to_stdout: true
+         ) do
+      {output, 0} -> {:ok, String.trim(output)}
+      {output, status} -> {:error, {:git_failed, status, summary(output)}}
+    end
+  rescue
+    error -> {:error, {:git_exception, inspect(error)}}
+  end
 
   defp summary(output), do: output |> to_string() |> String.trim() |> String.slice(0, 4_096)
   defp short_id(id), do: id |> to_string() |> String.slice(0, 8)

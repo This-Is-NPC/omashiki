@@ -2,12 +2,16 @@ defmodule Omashiki.Config.Repository do
   @moduledoc """
   Immutable registered repository definition.
 
-  `remote` is the canonical Git remote a finished job artifact is published to.
-  It is optional, and `nil` keeps the single-node behaviour of leaving the
-  artifact branch only in the local repository.
+  Identity is `name` plus `remote` and `base_branch`. `path` is this machine's
+  clone: an operator checkout, or a core-managed mirror under
+  `~/.cache/omashiki/mirrors/<name>` when `remote` is set and `path` is omitted.
+
+  `ssh_key` / `ssh_key_passphrase` are host-side fetch and push credentials.
+  They never enter the agent container.
   """
+  @derive {Inspect, except: [:ssh_key_passphrase]}
   @enforce_keys [:name, :path, :base_branch]
-  defstruct [:name, :path, :base_branch, :remote]
+  defstruct [:name, :path, :base_branch, :remote, :ssh_key, :ssh_key_passphrase]
 end
 
 defmodule Omashiki.Config.Machine do
@@ -86,6 +90,7 @@ defmodule Omashiki.Config.Registry do
   @mount_roots ~w(/workspace /run/omashiki /omashiki-cache)
   @max_timeout_ms 24 * 60 * 60 * 1_000
   @max_memory_bytes 1024 * 1024 * 1024 * 1024
+  @env_reference ~r/^\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/
 
   def build!(
         repository_section,
@@ -144,7 +149,7 @@ defmodule Omashiki.Config.Registry do
   # outright rather than claiming work under a node id nothing else knows about.
   def digest(repositories, presets, environments) do
     canonical = %{
-      repositories: repositories,
+      repositories: Enum.map(repositories, &digest_repository/1),
       presets: presets,
       environments: Enum.map(environments, &digest_environment/1)
     }
@@ -153,6 +158,10 @@ defmodule Omashiki.Config.Registry do
     |> :erlang.term_to_binary([:deterministic])
     |> then(&:crypto.hash(:sha256, &1))
     |> Base.encode16(case: :lower)
+  end
+
+  defp digest_repository(%Repository{} = repo) do
+    %{name: repo.name, remote: repo.remote, base_branch: repo.base_branch}
   end
 
   # A node declares a name and nothing else today. The fields a distributed
@@ -178,18 +187,11 @@ defmodule Omashiki.Config.Registry do
       where = "repositories.#{name}"
       validate_name!(name, where)
       attrs = require_table!(attrs, where)
-      reject_unknown!(attrs, ~w(path base_branch remote), where)
-      path = attrs |> require_string!("path", where) |> resolve_path(base_dir)
-
-      unless contained?(path, base_dir) do
-        raise Error, "#{where}.path must stay inside the configuration root"
-      end
-
-      unless File.dir?(path) and valid_git_metadata?(path, base_dir) and
-               not symlink_in_path?(path, base_dir) do
-        raise Error, "#{where}.path must be a real, non-symlink Git repository"
-      end
-
+      reject_unknown!(attrs, ~w(path base_branch remote ssh_key ssh_key_passphrase), where)
+      remote = optional_remote!(attrs, where)
+      path = repository_path!(attrs, name, remote, base_dir, where)
+      ssh_key = optional_ssh_key!(attrs, remote, where)
+      ssh_key_passphrase = optional_ssh_passphrase!(attrs, ssh_key, where)
       base_branch = require_string!(attrs, "base_branch", where)
 
       unless valid_branch?(base_branch) do
@@ -200,7 +202,9 @@ defmodule Omashiki.Config.Registry do
         name: name,
         path: path,
         base_branch: base_branch,
-        remote: optional_remote!(attrs, where)
+        remote: remote,
+        ssh_key: ssh_key,
+        ssh_key_passphrase: ssh_key_passphrase
       }
     end)
     |> Enum.sort_by(& &1.name)
@@ -226,6 +230,134 @@ defmodule Omashiki.Config.Registry do
     String.valid?(value) and not String.contains?(value, [<<0>>, "\n", " "]) and
       not String.starts_with?(value, ["-", "ext::"])
   end
+
+  defp repository_path!(attrs, name, remote, base_dir, where) do
+    case Map.get(attrs, "path") do
+      nil when is_binary(remote) ->
+        path = default_mirror_path(name)
+        validate_declared_path!(path, remote, base_dir, where)
+        path
+
+      nil ->
+        raise Error, "#{where}: missing required field \"path\""
+
+      value when is_binary(value) and value != "" ->
+        path = resolve_path(value, base_dir)
+        validate_declared_path!(path, remote, base_dir, where)
+        path
+
+      _ ->
+        raise Error, "#{where}.path must be a non-empty string"
+    end
+  end
+
+  defp default_mirror_path(name),
+    do: Path.join(mirror_root(), name)
+
+  defp mirror_root,
+    do: Path.join([System.user_home!(), ".cache", "omashiki", "mirrors"])
+
+  defp validate_declared_path!(path, remote, base_dir, where) do
+    unless contained?(path, base_dir) or contained?(path, mirror_root()) do
+      raise Error,
+            "#{where}.path must stay inside the configuration root or #{mirror_root()}"
+    end
+
+    if symlink_in_absolute_path?(path) do
+      raise Error, "#{where}.path must be a real, non-symlink path"
+    end
+
+    if is_nil(remote) do
+      unless File.dir?(path) and valid_git_metadata?(path, base_dir) and
+               not symlink_in_path?(path, base_dir) do
+        raise Error, "#{where}.path must be a real, non-symlink Git repository"
+      end
+    else
+      if File.exists?(path) do
+        unless File.dir?(path) and valid_git_metadata?(path, base_dir) do
+          raise Error, "#{where}.path must be a real, non-symlink directory"
+        end
+      end
+    end
+  end
+
+  defp optional_ssh_key!(attrs, remote, where) do
+    case Map.get(attrs, "ssh_key") do
+      nil ->
+        nil
+
+      value when is_binary(value) and value != "" ->
+        unless is_binary(remote) do
+          raise Error, "#{where}.ssh_key requires remote"
+        end
+
+        path = expand_host_path(value)
+
+        unless Path.type(path) == :absolute do
+          raise Error, "#{where}.ssh_key must resolve to an absolute host path"
+        end
+
+        unless String.printable?(path) and
+                 not String.contains?(path, [
+                   <<0>>,
+                   "\n",
+                   "\r",
+                   "\t",
+                   " ",
+                   "'",
+                   "\"",
+                   ";",
+                   "|",
+                   "&",
+                   "$",
+                   "`",
+                   "<",
+                   ">",
+                   "(",
+                   ")",
+                   "{",
+                   "}",
+                   "[",
+                   "]",
+                   "*",
+                   "?",
+                   "!",
+                   "\\"
+                 ]) do
+          raise Error, "#{where}.ssh_key is not a safe host path"
+        end
+
+        path
+
+      _ ->
+        raise Error, "#{where}.ssh_key must be a non-empty string"
+    end
+  end
+
+  defp optional_ssh_passphrase!(attrs, ssh_key, where) do
+    case Map.get(attrs, "ssh_key_passphrase") do
+      nil ->
+        nil
+
+      value when is_binary(value) ->
+        unless is_binary(ssh_key) do
+          raise Error, "#{where}.ssh_key_passphrase requires ssh_key"
+        end
+
+        unless Regex.match?(@env_reference, value) do
+          raise Error,
+                "#{where}.ssh_key_passphrase must be an environment reference ${env:VAR}"
+        end
+
+        value
+
+      _ ->
+        raise Error, "#{where}.ssh_key_passphrase must be a string"
+    end
+  end
+
+  defp expand_host_path("~/" <> rest), do: Path.join(System.user_home!(), rest)
+  defp expand_host_path(path), do: Path.expand(path)
 
   defp build_environments!(section, presets, caches, credentials, host_credentials, base_dir) do
     presets_by_name = Map.new(presets, &{&1.name, &1})
