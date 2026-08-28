@@ -40,6 +40,7 @@ Environment (CLI flags win over environment, which wins over defaults):
     HOST         listen address                             (default 127.0.0.1)
     MODEL        model id echoed in responses               (default fake-model)
     SEED         RNG seed, for reproducible jitter          (default: random)
+    SCENARIO     deterministic workload (default generic; python-hello is opt-in)
 """
 
 from __future__ import annotations
@@ -48,6 +49,7 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 import threading
 import time
@@ -65,17 +67,25 @@ DEFAULTS = {
     "port": 8787,
     "host": "127.0.0.1",
     "model": "fake-model",
+    "scenario": "generic",
 }
+
+PYTHON_HELLO_CONTENT = 'print("Hello, World!")\n'
+
+
+class ScenarioConfigurationError(ValueError):
+    """The request's tools cannot support the selected deterministic scenario."""
 
 
 class Settings:
     """Resolved knobs, shared read-only by every handler thread."""
 
-    def __init__(self, lat_ms, jitter_pct, turns, model, rng_seed=None):
+    def __init__(self, lat_ms, jitter_pct, turns, model, rng_seed=None, scenario="generic"):
         self.lat_ms = max(0, int(lat_ms))
         self.jitter_pct = max(0, min(100, int(jitter_pct)))
         self.turns = max(0, int(turns))
         self.model = model
+        self.scenario = scenario
         self._rng = random.Random(rng_seed)
         self._rng_lock = threading.Lock()
 
@@ -110,18 +120,28 @@ class Stats:
             self.stops = 0
             self.in_flight = 0
             self.peak_in_flight = 0
+            self.active_markers = set()
+            self.job_markers = set()
+            self.job_marker_peak = 0
             self.started_at = time.time()
 
-    def enter(self) -> None:
+    def enter(self, marker: str | None = None) -> None:
         with self._lock:
             self.total += 1
             self.in_flight += 1
             if self.in_flight > self.peak_in_flight:
                 self.peak_in_flight = self.in_flight
+            if marker:
+                self.active_markers.add(marker)
+                self.job_markers.add(marker)
+                if len(self.active_markers) > self.job_marker_peak:
+                    self.job_marker_peak = len(self.active_markers)
 
-    def leave(self, *, finish_reason: str | None) -> None:
+    def leave(self, *, finish_reason: str | None, marker: str | None = None) -> None:
         with self._lock:
             self.in_flight -= 1
+            if marker:
+                self.active_markers.discard(marker)
             if finish_reason is not None:
                 self.completions += 1
                 if finish_reason == "tool_calls":
@@ -138,6 +158,8 @@ class Stats:
                 "stops": self.stops,
                 "in_flight": self.in_flight,
                 "peak_in_flight": self.peak_in_flight,
+                "job_markers": sorted(self.job_markers),
+                "job_marker_peak": self.job_marker_peak,
                 "uptime_s": round(time.time() - self.started_at, 3),
             }
 
@@ -225,6 +247,132 @@ def synthesize_arguments(tool: dict) -> str:
     return json.dumps(arguments)
 
 
+def python_hello_tool(tools: list) -> dict | None:
+    """Return the write tool used by the opt-in Python hello scenario."""
+    for tool in tools:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        name = function.get("name", "") if isinstance(function, dict) else ""
+        if isinstance(name, str) and name.lower() in {
+            "write",
+            "write_file",
+            "writefile",
+            "create_file",
+        }:
+            return tool
+    raise ScenarioConfigurationError(
+        "python-hello requires a write tool in the request's tool schema"
+    )
+
+
+def schema_accepts_string(schema: object, value: str) -> bool:
+    """Check the string constraints needed by the deterministic call."""
+    if not isinstance(schema, dict):
+        return False
+    if not isinstance(value, str):
+        return False
+    schema_type = schema.get("type")
+    if isinstance(schema_type, str) and schema_type != "string":
+        return False
+    if isinstance(schema_type, list) and "string" not in schema_type:
+        return False
+    enum = schema.get("enum")
+    if isinstance(enum, list) and value not in enum:
+        return False
+    if "const" in schema and schema["const"] != value:
+        return False
+    minimum = schema.get("minLength")
+    if isinstance(minimum, int) and len(value) < minimum:
+        return False
+    maximum = schema.get("maxLength")
+    if isinstance(maximum, int) and len(value) > maximum:
+        return False
+    pattern = schema.get("pattern")
+    if isinstance(pattern, str):
+        try:
+            if re.search(pattern, value) is None:
+                return False
+        except re.error as exc:
+            raise ScenarioConfigurationError(
+                f"python-hello write schema has an invalid string pattern: {exc}"
+            ) from exc
+    return True
+
+
+def python_hello_field(properties: dict, candidates: set[str]) -> str | None:
+    for name in properties:
+        if isinstance(name, str) and name.lower().replace("-", "_") in candidates:
+            return name
+    return None
+
+
+def python_hello_arguments(tool: dict) -> str:
+    """Build an exact, schema-valid hello.py write."""
+    function = tool.get("function") if isinstance(tool, dict) else None
+    schema = function.get("parameters") if isinstance(function, dict) else None
+    properties = schema.get("properties") if isinstance(schema, dict) else None
+    if not isinstance(properties, dict):
+        raise ScenarioConfigurationError(
+            "python-hello write tool has no object parameter schema"
+        )
+
+    path_name = python_hello_field(
+        properties, {"path", "file_path", "filepath", "filename", "file_name"}
+    )
+    content_name = python_hello_field(properties, {"content", "contents", "text", "body"})
+    if path_name is None or content_name is None:
+        raise ScenarioConfigurationError(
+            "python-hello write schema must expose both a file path and content field"
+        )
+    if not schema_accepts_string(properties[path_name], "hello.py"):
+        raise ScenarioConfigurationError(
+            f"python-hello write schema cannot carry the required path in {path_name!r}"
+        )
+    if not schema_accepts_string(properties[content_name], PYTHON_HELLO_CONTENT):
+        raise ScenarioConfigurationError(
+            f"python-hello write schema cannot carry the required exact content in {content_name!r}"
+        )
+
+    required = schema.get("required")
+    names = list(required) if isinstance(required, list) else []
+    for name in (path_name, content_name):
+        if name not in names:
+            names.append(name)
+    intent_name = "intent" if "intent" in properties else None
+    if intent_name is not None and intent_name not in names:
+        names.append(intent_name)
+    if "intent" in names and intent_name is None:
+        raise ScenarioConfigurationError(
+            "python-hello write schema requires intent but does not define it"
+        )
+    if not names:
+        names = list(properties)[:1]
+
+    arguments = {}
+    for name in names:
+        lowered = name.lower().replace("-", "_")
+        prop = properties.get(name)
+        if name == path_name:
+            value = "hello.py"
+        elif name == content_name:
+            value = PYTHON_HELLO_CONTENT
+        elif lowered == "intent":
+            enum = prop.get("enum") if isinstance(prop, dict) else None
+            if isinstance(enum, list) and enum:
+                value = enum[0]
+            elif isinstance(prop, dict) and "const" in prop:
+                value = prop["const"]
+            else:
+                value = "create hello.py"
+        else:
+            value = placeholder_for(name, prop if isinstance(prop, dict) else {})
+        if lowered == "intent" and not schema_accepts_string(prop, value):
+            raise ScenarioConfigurationError(
+                "python-hello write schema cannot carry a schema-valid intent"
+            )
+        arguments[name] = value
+    return json.dumps(arguments)
+
+
 def estimate_tokens(value) -> int:
     """~4 characters per token. Deliberately crude: the ledger only needs a
     plausible, non-zero, monotonic-with-size number, and inventing precision
@@ -243,11 +391,22 @@ def build_completion(body: dict, settings: Settings) -> tuple[dict, str]:
     model = body.get("model") or settings.model
 
     turn = prior_tool_turns(messages)
-    wants_tool_call = turn < settings.turns and bool(tools)
+    scenario_tool = (
+        python_hello_tool(tools) if settings.scenario == "python-hello" else None
+    )
+    if settings.scenario == "python-hello":
+        wants_tool_call = scenario_tool is not None and turn == 0
+    else:
+        wants_tool_call = turn < settings.turns and bool(tools)
 
     if wants_tool_call:
-        tool = tools[turn % len(tools)]
+        tool = scenario_tool or tools[turn % len(tools)]
         function = tool.get("function", {}) if isinstance(tool, dict) else {}
+        arguments = (
+            python_hello_arguments(tool)
+            if scenario_tool is not None
+            else synthesize_arguments(tool)
+        )
         message = {
             "role": "assistant",
             "content": None,
@@ -257,7 +416,7 @@ def build_completion(body: dict, settings: Settings) -> tuple[dict, str]:
                     "type": "function",
                     "function": {
                         "name": function.get("name", "unknown"),
-                        "arguments": synthesize_arguments(tool),
+                        "arguments": arguments,
                     },
                 }
             ],
@@ -429,7 +588,9 @@ class Handler(BaseHTTPRequestHandler):
         if body is None:
             return
 
-        self.stats.enter()
+        marker_match = re.search(r"vm-e2e-marker-[A-Za-z0-9-]+", json.dumps(body))
+        marker = marker_match.group(0) if marker_match else None
+        self.stats.enter(marker)
         finish_reason = None
         try:
             # The sleep happens before any byte is written, so the client sees
@@ -449,12 +610,19 @@ class Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
             else:
                 self._send(200, response)
+        except ScenarioConfigurationError as exc:
+            # A bad scenario/tool pairing is a request-level configuration
+            # failure. Return it explicitly without taking down the stub.
+            try:
+                self._error(500, str(exc), "scenario_configuration_error")
+            except (BrokenPipeError, ConnectionResetError):
+                self.close_connection = True
         except (BrokenPipeError, ConnectionResetError):
             # Client vanished mid-flight (job cancelled, container torn down).
             # Not an error worth failing the stub over.
             self.close_connection = True
         finally:
-            self.stats.leave(finish_reason=finish_reason)
+            self.stats.leave(finish_reason=finish_reason, marker=marker)
 
 
 class Server(ThreadingHTTPServer):
@@ -501,6 +669,12 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="tool-call turns to return before finish_reason=stop",
     )
     parser.add_argument("--model", default=os.environ.get("MODEL", DEFAULTS["model"]))
+    parser.add_argument(
+        "--scenario",
+        choices=("generic", "python-hello"),
+        default=os.environ.get("SCENARIO", DEFAULTS["scenario"]),
+        help="deterministic workload to run",
+    )
     seed_env = os.environ.get("SEED")
     parser.add_argument(
         "--seed",
@@ -516,7 +690,12 @@ def main(argv=None) -> int:
     args = parse_args(argv)
 
     Handler.settings = Settings(
-        args.lat_ms, args.jitter_pct, args.turns, args.model, rng_seed=args.seed
+        args.lat_ms,
+        args.jitter_pct,
+        args.turns,
+        args.model,
+        rng_seed=args.seed,
+        scenario=args.scenario,
     )
     Handler.stats = Stats()
     Handler.verbose = args.verbose

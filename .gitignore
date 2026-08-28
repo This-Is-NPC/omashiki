@@ -16,3 +16,4 @@ opencode.json
 # Python bytecode from the mise task scripts
 __pycache__/
 *.pyc
+vm/__pycache__/

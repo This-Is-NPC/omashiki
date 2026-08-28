@@ -338,3 +338,7 @@ mise run e2e:overture:opencode
 mise run e2e:overture:claude
 mise run e2e:overture:jcode
 """
+
+[tasks."e2e:vm"]
+description = "Run the distributed Fedora VM Docker/jcode E2E"
+run         = "vm/run.sh"

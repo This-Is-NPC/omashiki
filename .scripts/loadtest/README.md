@@ -13,6 +13,7 @@ provisioning, worktree setup, teardown.
 | --- | --- |
 | `fake_llm.py` | OpenAI-compatible stub. Sleeps `LAT_MS`, optionally returns `TURNS` tool-call turns, reports plausible `usage`. |
 | `drive.py` | Submits N jobs, polls to terminal, reports latency percentiles / error breakdown / peak concurrency. |
+| `test_fake_llm.py` | Stdlib-only unit tests for generic synthesis and the opt-in scenario. |
 
 Both are Python 3 stdlib only — no installs beyond `mise install`, matching
 `.scripts/omashiki.py` and `.scripts/overture_e2e.py`.
@@ -161,6 +162,45 @@ Git-sink jobs also need `payload.title` or `payload.branch` (admission
 
 Exit code is 0 only when every job succeeded, so it drops straight into a
 script.
+
+### Deterministic Python hello scenario
+
+The generic stub remains the default. For an end-to-end jcode smoke test, opt
+into the fake LLM scenario explicitly; it selects jcode's `write` tool and
+returns one schema-valid call whose arguments create `hello.py` with exactly
+`print("Hello, World!")` plus a newline. It stops after jcode reports the tool
+result, regardless of `TURNS`.
+If the request does not expose a compatible `write` schema, the stub returns
+HTTP 500 with `scenario_configuration_error` instead of silently returning
+`stop`.
+
+In one terminal, start the controlled provider:
+
+```bash
+SCENARIO=python-hello LAT_MS=25 JITTER_PCT=0 \
+  python3 .scripts/loadtest/fake_llm.py
+```
+
+In another terminal, run one jcode job through the configured `loadtest`
+environment:
+
+```bash
+python3 .scripts/loadtest/drive.py \
+  --jobs 1 --concurrency 1 --environment loadtest \
+  --instruction 'Create hello.py containing exactly print("Hello, World!") followed by a newline, then commit it.' \
+  --poll-interval 0.2 --sample-interval 0.2
+```
+
+The equivalent flag form is `fake_llm.py --scenario python-hello`. Do not set
+`TURNS` for this scenario: it is intentionally a single write turn followed
+by `stop`. The scenario is opt-in; unset `SCENARIO` to retain the generic
+placeholder behavior and all existing defaults.
+
+Run the local tests with:
+
+```bash
+python3 -m unittest discover -s .scripts/loadtest -p 'test_*.py'
+```
 
 `--concurrency` bounds jobs in flight; `--ramp` spreads *submission* over a
 window. They answer different questions: concurrency asks "can execution hold N

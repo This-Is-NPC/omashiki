@@ -80,13 +80,30 @@ config :omashiki, :dispatch_await_slack_ms, 60_000
 # many DispatchWorkers run at once, so it bounds live attempts regardless of
 # `[limits] max_concurrent_containers` in omashiki.toml. The smaller of the two
 # wins — leave them consistent or the TOML advertises a capacity the queue will
-# never grant.
+# never grant. Set it to 0 to keep HTTP admission enabled without starting a
+# scheduler consumer in this process.
+oban_scheduler_limit =
+  case System.get_env("OBAN_SCHEDULER_LIMIT") do
+    nil ->
+      10
+
+    raw ->
+      case Integer.parse(raw) do
+        {limit, ""} when limit >= 0 -> limit
+        _ -> raise "OBAN_SCHEDULER_LIMIT must be a non-negative integer"
+      end
+  end
+
+oban_queues =
+  if oban_scheduler_limit == 0 do
+    [webhooks: 5]
+  else
+    [scheduler: oban_scheduler_limit, webhooks: 5]
+  end
+
 config :omashiki, Oban,
   repo: Omashiki.Repo,
-  queues: [
-    scheduler: String.to_integer(System.get_env("OBAN_SCHEDULER_LIMIT") || "10"),
-    webhooks: 5
-  ],
+  queues: oban_queues,
   plugins: [
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 30},
     # A node that dies mid-`perform` leaves its dispatch parked in `executing`.
