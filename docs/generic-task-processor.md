@@ -91,8 +91,23 @@ environment's MCP servers — enough for "analyze this and return the verdict".
 This needs no code. It is configuration:
 
 ```toml
+[runtimes.docker.runc.debian.images]
+claude-code = "omashiki/agent-claude:latest"
+
+[presets.contract-review]
+plugin = "claude-code"
+
 [environments.contract-review]
-harness = "claude"
+preset = "contract-review"
+runtime = "docker.runc.debian"
+sink = "git"
+packages = []
+executables = ["git"]
+credentials = []
+caches = []
+mounts = []
+pre_steps = []
+post_steps = []
 capabilities = ["clm__*", "search__query"]
 
 [environments.contract-review.mcp_servers.clm]

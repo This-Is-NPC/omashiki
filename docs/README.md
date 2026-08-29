@@ -16,15 +16,17 @@ documentation.
 
 ## Design Direction
 
-These documents describe work that is designed but not implemented. They are
-grounded in the current code and state what each change actually requires; they
-are not a description of shipped behavior. Anything they contradict in the four
-documents above is aspirational, not current.
+These documents mostly describe work that is designed but not fully deployed.
+They are grounded in the current code and state what each change actually
+requires; individual status notes distinguish implemented seams from pending
+deployment. Anything they contradict in the four documents above is
+aspirational, not current.
 
 - [Distributed execution](distributed-execution.md): running the queue across
   several nodes with PostgreSQL as the coordination authority.
-- [Kata Containers runtime backend](runtime-kata.md): a second execution
-  backend giving each sandbox its own kernel.
+- [Kata Containers runtime handler](runtime-kata.md): Docker API/configuration
+  support plus host deployment and compatibility requirements for per-sandbox
+  kernels.
 - [Generic task processor](generic-task-processor.md): structured non-Git
   results and optional repositories, without weakening the caller boundary.
 - [Plugins and task lifecycle](plugins-e-ciclo-de-vida.md): declarative plugin

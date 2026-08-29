@@ -59,13 +59,15 @@ curl --fail-with-body --silent --show-error \
 ```
 
 Repository entries expose `name` and `base_branch`. Environment entries expose
-safe public metadata such as `name`, `harness`, `runtime`, timeout, network,
-capabilities, and resources. Select only registered names. If multiple choices
-fit and the user did not select one, ask rather than guessing.
+safe public metadata such as `name`, `preset`, `plugin`, `runtime`, timeout,
+network, capabilities, and resources. Select only registered names. If multiple
+choices fit and the user did not select one, ask rather than guessing.
 
-The environment determines the harness, provider configuration, credentials,
-network, mounts, resources, and model policy. A caller cannot override those
-controls in a job.
+The environment determines the preset, plugin, provider configuration, credentials,
+network, mounts, resources, and model policy. Normal environments currently select
+`docker.runc.debian`; `docker.kata.debian` is also represented at the Docker
+API/configuration layer, subject to host/VM installation and compatibility gates.
+A caller cannot override the environment or any other control in a job.
 
 ## Submit A Job
 

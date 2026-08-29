@@ -2,9 +2,13 @@
 
 This document describes the current queue-only system. The executable boundary
 is a Phoenix/OTP service with a durable job store, a governed attempt runner,
-and a small agent image. Declared repositories, environments, credentials,
-caches, and host limits come from `omashiki.toml`; admitted jobs retain the
-resolved repository and environment snapshots.
+and a small Docker agent image. Declared repositories, presets, environments,
+runtime image catalogs, credentials, caches, and host limits come from
+`omashiki.toml`; admitted jobs retain the resolved repository and environment
+snapshots. Docker is the current execution backend. Its `runc` and `kata`
+handlers are implemented at the Docker API/configuration layer. Arch-based agent
+images are not implemented; Kata host/VM installation and compatibility gates
+remain deployment prerequisites.
 
 ## System Shape
 
@@ -78,7 +82,7 @@ flowchart LR
   through its Unix socket and executes slow Docker operations in monitored
   tasks, so independent attempts provision concurrently and cancellation is not
   queued behind another container operation. An atomic allocator leases the
-  localhost ports used by HTTP harnesses. The runtime mounts the captured
+  localhost ports used by HTTP harness transports. The runtime mounts the captured
   worktree, uses the resolved harness launch plan, drops capabilities, disables
   privilege escalation, uses a read-only root filesystem with tmpfs, and
   removes orphan containers at boot.
@@ -111,11 +115,17 @@ flowchart LR
 
 ## Configuration Boundary
 
-`Omashiki.Config` loads the root `omashiki.toml` at boot and stores a validated
-snapshot. Top-level `[harnesses.*]` profiles register the adapter, runtime, and
-image; environments reference one profile and own only job policy, mounts,
-caches, and lifecycle steps. The resolved profile and adapter launch plan are
-included in the immutable environment snapshot and registry digest.
+`Omashiki.Config` loads the root `omashiki.toml` and stores a validated
+execution-registry snapshot. `[presets.*]` profiles select the plugin, while
+`[runtimes.docker.runc.debian.images]` and
+`[runtimes.docker.kata.debian.images]` map plugin keys to Docker image tags.
+Environments reference one preset and select a handler-aware runtime, with
+`runtime = "docker.runc.debian"` as the normal default; they own job policy,
+mounts, caches, and lifecycle steps. The resolved preset, runtime image, and
+adapter launch plan are included in the immutable environment snapshot and
+registry digest. Selecting `docker.kata.debian` additionally requires the Kata
+host/VM installation and compatibility validation; no Kata E2E result is implied
+by the configuration/API support.
 
 Declared host mounts are read-only except for explicit files below the managed
 `/run/omashiki/state` root. That narrow writable boundary supports rotating
@@ -130,7 +140,8 @@ Environments reference gateway credentials and host credentials through one
 
 Public job payloads use the neutral V2 shape: required `instruction` plus
 optional JSON-object `context`. Harness/provider/auth/model control fields are
-not accepted from callers. A restart is required to reload the file.
+not accepted from callers. Execution-registry edits hot-reload and affect only
+work that has not started; infrastructure settings still require a restart.
 
 Authentication is enabled by default in application configuration. The checked-
 in TOML sets `auth.enabled = false` for local use; the endpoint still requires

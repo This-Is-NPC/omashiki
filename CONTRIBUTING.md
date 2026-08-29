@@ -67,9 +67,13 @@ Install the hook once per checkout with `mise run hooks:install`.
 |---------|--------------|
 | `mise run ci:server:fast` | ExUnit excluding `:integration`, `:real_opencode`, `:real_claude`, and `:real_jcode`. |
 | `mise run ci:server:integration` | ExUnit `--only integration` (no real provider). |
-| `mise run e2e:overture:opencode` | Opt-in OpenCode E2E using isolated host snapshots. |
-| `mise run e2e:overture:claude` | Opt-in Claude Code E2E using the isolated credentials snapshot. |
-| `mise run e2e:overture:jcode` | Opt-in jcode E2E against the local model server named by `OMASHIKI_LOCAL_LLM_BASE_URL`. |
+| `mise run e2e:overture` | Standard runc/jcode E2E with an owned deterministic LLM stub. |
+| `mise run e2e:overture:runc:opencode` | Opt-in OpenCode E2E with Docker `runc` using isolated host snapshots. |
+| `mise run e2e:overture:runc:claude` | Opt-in Claude Code E2E with Docker `runc` using the isolated credentials snapshot. |
+| `mise run e2e:overture:jcode:lmstudio` | Opt-in jcode E2E against `OMASHIKI_LOCAL_LLM_BASE_URL`. |
+| `mise run kata:install` | Install pinned Kata 4.1.0 and register it with the host Docker daemon; requires sudo. |
+| `mise run kata:smoke` | Build jcode and validate Kata with exactly one disposable host container. |
+| `mise run e2e:vm` | Distributed two-node VM E2E; VMs are not used by the standard or Kata smoke paths. |
 | `mise run ci:server:assets` | Tailwind + esbuild bundle build in test env. |
 | `mise run ci:server:cover` | `mix test --cover` summary (non-blocking). |
 | `mise run ci:docker:server` | Dry-run build of the server image. |
@@ -80,17 +84,26 @@ Install the hook once per checkout with `mise run hooks:install`.
 | `mise run agent:cache-smoke` | Exercise shared runtime and package-manager caches. |
 
 Coverage is reported but **not** threshold-enforced. The coverage task prints
-line totals so trends stay visible. Real-provider tests stay opt-in: they are
-not part of the local CI script. They
-snapshot provider-specific host files and do not read provider API keys from
-`server/.env`. jcode is the exception that snapshots nothing: it has no
-host-auth route and reaches the model only through the gateway, so its E2E
-needs `OMASHIKI_LOCAL_LLM_BASE_URL` exported and nothing else. OpenCode snapshots and Claude invocations are read-only. Claude
+line totals so trends stay visible. The standard E2E is not part of local CI;
+it starts `.scripts/loadtest/fake_llm.py` on host loopback with the
+`python-hello` scenario, waits for readiness, runs jcode through the Omashiki
+gateway using runc host networking, then stops and verifies cleanup of the
+owned process. Real-provider tests stay opt-in. The LM Studio variant needs
+`OMASHIKI_LOCAL_LLM_BASE_URL`
+exported; jcode snapshots no host credentials. OpenCode snapshots and Claude
+invocations are read-only. Claude
 OAuth uses a single isolated writable file under `.omashiki/e2e` so refresh
 token rotation persists without mounting or modifying the host `~/.claude`
 directory. The first run bootstraps it from `~/.claude/.credentials.json`;
 `python .scripts/overture_e2e.py validate claude` explicitly refreshes that
 snapshot after a new host login.
+
+Kata validation is host-only: `kata:install` reads the version, URL, checksum,
+and paths from `vm/manifest.toml`, validates the candidate Docker configuration,
+and restarts Docker only when needed. `kata:smoke` creates exactly one labelled
+jcode container with `--runtime kata`, verifies exec and runtime selection, and
+removes it. Do not use a VM for this smoke; `e2e:vm:*` is reserved for testing
+distributed execution.
 
 The queue API, runtime claims, authentication, gateway, supply-chain policy,
 and container boundary are covered by the active test suite. Keep provider and

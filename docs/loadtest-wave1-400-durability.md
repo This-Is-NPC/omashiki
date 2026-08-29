@@ -17,10 +17,14 @@ is not bind-mounted; the jcode entrypoint then dies `exit=128`
 (`fatal: not a git repository`).
 **Harness:** `.scripts/loadtest/drive.py` + `.scripts/loadtest/fake_llm.py`
 (`--lat-ms 1500 --turns 2 --port 8787`).
-**Tier:** loadtest stanza pasted into local `omashiki.toml` only (not committed):
-`[harnesses.jcode]`, `[environments.loadtest]` `harness = "jcode"`,
+**Tier (historical pre-runtime-cutover schema):** loadtest stanza pasted into
+local `omashiki.toml` only (not committed): `[harnesses.jcode]`,
+`[environments.loadtest]` `harness = "jcode"`,
 `network = "host"`, `cpus = 0.25` / `memory = "128MB"`,
 `max_concurrent_containers = 400`.
+This declaration records the run and is not a current configuration example;
+current environments select `preset` and `runtime = "docker.runc.debian"`, with
+their plugin image resolved from `[runtimes.docker.runc.debian.images]`.
 **Env:** `POOL_SIZE=200`, `OBAN_SCHEDULER_LIMIT=400`,
 `OMASHIKI_DOCKER_TIMEOUT_MS=90000`,
 `OMASHIKI_LLM_GATEWAY_BASE_URL=http://127.0.0.1:4010`.

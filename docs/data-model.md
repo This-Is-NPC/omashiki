@@ -1,10 +1,11 @@
 # Data Model
 
 The database stores admitted jobs and durable execution effects. The root
-`omashiki.toml` stores the declared repository and environment registry, cache
-definitions, credentials, and host limits. Admission copies the resolved
-repository and environment into the job, so a later configuration change cannot
-change an admitted execution.
+`omashiki.toml` stores the declared repository and environment registry, preset
+definitions, the Docker runtime image catalog, cache definitions, credentials,
+and host limits. The execution registry hot-reloads. Admission copies the
+resolved repository and environment, including the selected runtime image, into
+the job, so a later configuration change cannot change an admitted execution.
 
 ## Persisted Tables
 
@@ -13,7 +14,7 @@ change an admitted execution.
 | `users` | Owner identity: `id`, `email`, `username`, Argon2 `password_hash`, timestamps. |
 | `api_tokens` | Owner token metadata: `id`, `user_id`, `name`, HMAC `token_hash`, lifecycle timestamps, and encrypted terminal-delivery settings. |
 | `jobs` | Immutable admission identity and mutable lifecycle: owner/token, optional `parent_job_id`, schema and idempotency keys, correlation, repository/environment names, neutral V2 payload and hash, captured snapshots and digests, queue/priority, status, attempt number, timestamps, and terminal result/error. |
-| `execution_capacity` | Singleton capacity ledger with configured capacity and active reservations. The checked-in configuration sets capacity to 8. |
+| `execution_capacity` | Singleton capacity ledger with configured capacity and active reservations. The checked-in configuration sets capacity to 100. |
 | `job_attempts` | Numbered attempt state: job, Oban row, runner lease/fence, capacity reservation, timestamps, Git branch/base/head, clean flag, result, and error. |
 | `job_steps` | Ordered attempt steps with key, kind, status, input/output summaries, error, and timestamps. |
 | `job_events` | Append-only per-job observations with event ID, attempt, sequence, type/status/step/outcome, correlation, occurrence/recording timestamps, sanitized data, and schema version. |
@@ -33,7 +34,7 @@ versioned contract and sanitized at their write boundaries.
 | --- | --- | --- |
 | Identity | `id`, `user_id`, `api_token_id`, `parent_job_id`, `schema_version` | The parent and token must belong to the same owner; a job cannot parent itself. |
 | Request | `idempotency_key`, `correlation_id`, `repository`, `environment`, `payload`, `payload_hash` | The V1 envelope carries neutral payload V2 (`instruction` plus optional object `context`), no larger than 1 MiB encoded; the payload hash is SHA-256. |
-| Captured registry | `repository_snapshot`, `repository_digest`, `environment_snapshot`, `environment_digest`, `registry_digest` | Resolved declarations are retained with SHA-256 digests; credential API keys are excluded from snapshots. |
+| Captured registry | `repository_snapshot`, `repository_digest`, `environment_snapshot`, `environment_digest`, `registry_digest` | Resolved declarations, including the preset and Docker runtime image selected from the catalog, are retained with SHA-256 digests; credential API keys are excluded from snapshots. |
 | Scheduling | `queue`, `priority` | The queue defaults to `default`; priority is an integer from 0 through 3. |
 | Lifecycle | `status`, `current_attempt`, `queued_at`, `started_at`, `finished_at` | Status is `blocked`, `queued`, `provisioning`, `running`, `succeeded`, `failed`, or `cancelled`. |
 | Terminal state | `terminal_result`, `terminal_error` | Success has a result and no error; failure/cancellation has an error and no result. |

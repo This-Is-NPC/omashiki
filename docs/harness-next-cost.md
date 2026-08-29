@@ -3,6 +3,12 @@
 Measured at commit on `task/2826` after extracting `Omashiki.Harness.CliJson`.
 Baseline for comparison: task 2821 (`pi` harness) six cost centres.
 
+> **Historical schema note:** This measurement was written before the runtime
+> cutover. Any `[harnesses.*]` or `mix.exs` references below describe the old
+> configuration/tooling and are not current instructions. Current declarations
+> use `[presets.*]`, `[runtimes.docker.runc.debian.images]`, and `runtime` on each
+> environment.
+
 ## Line counts after extraction
 
 | Module | Before (6fe607e) | After |
@@ -29,8 +35,8 @@ Four CLI adapters + shared base: **979 lines** (was **1,092** across the four ad
 | --- | --- | --- | --- |
 | Adapter module | ~298 lines (full module) | ~95–110 lines: `validate_options` + `launch_plan` + `cli_argv` + `decode_output` + `normalize_result` + constants; invoke/prepare delegate to `CliJson` | Yes, but ~65% smaller |
 | Docker image | `agent/Dockerfile.pi` (~100 lines) | Same class of work — tool binary, runner script, mise/OTP if needed | Yes |
-| Registry entry | `omashiki.toml` `[harnesses.pi]` + `[environments.pi]` | One harness stanza + environment block | Yes |
-| CI wiring | `mix.exs` `ci:docker` target, arch-check allowlist | Per-harness docker build + CI alias | Yes |
+| Registry entry | Historical: `omashiki.toml` `[harnesses.pi]` + `[environments.pi]` | Current: `[presets.pi]` + `[environments.pi]`, with `runtime = "docker.runc.debian"` and the image from the runtime catalog | Yes |
+| CI wiring | Historical: `mix.exs` `ci:docker` target, arch-check allowlist | Current: `mise.toml` per-plugin Docker build + CI task | Yes |
 | Tests | `pi_test.exs` 181 lines | ~80–120 lines focused on decode shape, usage keys, launch_plan | Yes, smaller |
 | Merge cycle | Review + cherry-pick to master | Unchanged | Yes |
 
@@ -40,6 +46,9 @@ Four CLI adapters + shared base: **979 lines** (was **1,092** across the four ad
 
 Wave 2 does not start. After `CliJson`, the adapter centre that a declarative manifest would eliminate is already reduced to a thin shell: constants, option validation, `launch_plan`/`cli_argv`, and two callbacks (`decode_output`, `normalize_result`). The measured delta between `jcode` (138 lines) and `pi` (204 lines) is **66 lines**, almost entirely stream-decode folding (`sum_usage`, `assistant_text`) and pi-specific environment — i.e. decode shape plus usage key map. The other five 2821 centres (image, registry, CI, tests, merge) are untouched by either a manifest or this extraction. Building a manifest format to avoid ~100 lines of adapter data would not pay for itself against the remaining ~220 lines of non-adapter work per harness.
 
-## Doc vocabulary gap
+## Doc vocabulary gap (historical)
 
-Nine existing `docs/` files still teach pre-plugin vocabulary. This measurement does not rewrite them; `plugins-e-ciclo-de-vida.md` is the canonical design-direction source for the plugin phase.
+At measurement time, nine existing `docs/` files still taught pre-plugin
+vocabulary. This was an inventory of the pre-cutover tree, not current usage;
+`plugins-e-ciclo-de-vida.md` was the canonical design-direction source for the
+plugin phase.

@@ -8,6 +8,8 @@ builds and container entrypoints.
 ## Build
 
 ```bash
+# Build every missing image declared in the docker.runc.debian runtime catalog:
+mise run images
 mise run agent:build
 mise run agent:claude:build
 # OpenCode directly:
@@ -83,15 +85,16 @@ container, so it is bypassed: Docker is the isolation boundary.
 
 `agent/Dockerfile.jcode` pins jcode `v0.81.1`. jcode is a single static binary
 with no runtime to install, so this image was the first to drop the `omaterm`
-base for `debian:13-slim`; the other three now follow the same recipe. At
+base for `debian:13-slim`; the other agent images now follow the same recipe. At
 ~484MB it stays the smallest of them, and it is the cheapest at runtime — about
 15MiB resident per container against OpenCode's ~675MiB.
 
 Its dependency contract is deliberately narrower than the others': it ships no
-`curl` (no HEALTHCHECK), no `python3` (no supply-chain relay) and no `mise`
-(`omashiki.toml` declares no jcode environment, so nothing runs `mise
-install`). `ci:docker:jcode` asserts that narrower list — do not widen it to
-match the other images.
+`curl` (the build-time downloader is purged), and no `mise` (its environments
+have no mise pre-step or cache). It does ship `python3` because agents may be
+asked to write and run Python files; no supply-chain relay runs in this image.
+`ci:docker:jcode` asserts that narrower list — do not widen it to match the
+other images.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -114,7 +117,7 @@ a JSON parser.
 
 ## Runtime Boundary
 
-Both images run as the repository owner IDs with a read-only root filesystem,
+All images run as the repository owner IDs with a read-only root filesystem,
 bounded tmpfs, dropped capabilities, no privilege escalation, and explicit
 mounts supplied by the orchestrator. Do not add provider selection, credentials,
 or arbitrary shell evaluation to an image entrypoint.

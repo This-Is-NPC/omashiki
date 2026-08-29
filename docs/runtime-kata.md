@@ -1,8 +1,9 @@
-# Kata Containers Runtime Backend
+# Kata Containers Runtime Handler
 
-Design direction for a second execution backend that gives each sandbox its own
-kernel without rewriting the mount and secret boundary. This is a **second
-backend, not a replacement**: Docker stays the default.
+Design and deployment notes for the Docker `kata` runtime handler, which gives
+each sandbox its own kernel without rewriting the mount and secret boundary.
+Docker API/configuration support for both `runc` and `kata` is implemented; the
+normal environment default remains `docker.runc.debian`.
 
 Kata does not solve the microVM gaps in the filesystem and secret boundary — it
 does not create them. It implements the containerd shim v2 interface and
@@ -10,8 +11,12 @@ registers as a Docker runtime class, so bind mounts, the read-only secret file,
 and uid/gid ownership keep working. NFR-004 and NFR-007 survive without a
 rewrite.
 
-Status: **not implemented.** This document records the design, the code change
-it actually requires, and the guarantees that must be re-verified.
+Status: **Docker API/configuration implemented and host smoke passed.** On
+2026-08-28, the manifest-pinned Kata 4.1.0 runtime was installed and registered
+on the development host, then `mise run kata:smoke` started exactly one jcode
+container, verified `HostConfig.Runtime=kata`, executed a command in the guest,
+and removed the container. The broader compatibility gate for mounts,
+networking, credentials, and resource limits remains separate.
 
 ## The Seam Already Exists
 
@@ -20,9 +25,10 @@ it actually requires, and the guarantees that must be re-verified.
   with optional `host`/`port` and a map `transport`.
 - `Omashiki.Runtime.Capability` hands adapters only `transport`, `endpoint`,
   and `exec`. No Docker concept crosses that line.
-- `runtime` is already a field of the harness profile
-  (`harness/types.ex:4`), and `Omashiki.Runtimes.Runtime` already accepts
-  `kata` as a valid kind (`runtimes/runtime.ex:22`).
+- `runtime` belongs to an environment. Normal environments select
+  `runtime = "docker.runc.debian"`; `docker.kata.debian` is also a valid
+  handler-aware selection, and the plugin image is resolved from the matching
+  runtime catalog.
 
 Harness adapters do not change. `ContainerManager` keeps talking the Docker API
 over the same Mint socket; what changes at the wire level is one `HostConfig`
@@ -32,13 +38,18 @@ field.
 
 ### Host
 
-Register the runtime in `daemon.json` in shim v2 form — verify the exact shape
-against the installed Docker version:
+The host installer registers the pinned runtime-rs shim and configuration in
+`daemon.json` without replacing unrelated daemon settings:
 
 ```json
 {
   "runtimes": {
-    "kata": { "runtimeType": "io.containerd.kata.v2" }
+    "kata": {
+      "runtimeType": "/opt/kata/runtime-rs/bin/containerd-shim-kata-v2",
+      "options": {
+        "ConfigPath": "/opt/kata/share/defaults/kata-containers/runtime-rs/configuration-clh-runtime-rs.toml"
+      }
+    }
   }
 }
 ```
@@ -50,52 +61,56 @@ Upstream is the monorepo at
 runtime`, `/agent`, `/proxy`, and `/shim` repositories were archived around
 2020 and still rank high in search results; ignore them.
 
-**Which version.** Release 4.0.0 rewrote the runtime from Go to Rust and made
-`runtime-rs` the default. It is a new implementation, not a continuation of the
-3.x line.
+Release 4.0.0 rewrote the runtime from Go to Rust and made `runtime-rs` the
+default. Omashiki pins **4.1.0**, its archive URL, and SHA-256 in
+`vm/manifest.toml`; the installer rejects a changed release identity or path.
 
-- **3.32.0** — Go runtime, mature. The default choice for a first spike.
-- **4.1.0** — Rust runtime. The better medium-term target, but new enough that
-  it should not be where the project discovers that virtio-fs broke NFR-004.
-
-Validate the whole route on 3.32.0 first, then evaluate 4.x.
-
-**VMM: Cloud Hypervisor**, the Kata default and the better performer. **Do not
+**VMM: Cloud Hypervisor**, the documented Kata default and the better performer.
+**Do not
 use Firecracker as the backend** — it has no virtio-fs, only block devices,
 which removes exactly the bind mounts that motivate this route.
 
 ### Omashiki
 
-The declaration is one field:
+Current configuration declares both Docker handler catalogs and defaults the
+environment to runc:
 
 ```toml
-[harnesses.opencode]
-runtime = "kata"   # was: "docker"
+[runtimes.docker.runc.debian.images]
+opencode = "omashiki/agent:latest"
+
+[runtimes.docker.kata.debian.images]
+opencode = "omashiki/agent:latest"
+
+[environments.opencode]
+runtime = "docker.runc.debian"
 ```
 
-**The code behind that field is not one field.** A kata profile loads clean and
-then fails on the first job:
+Before selecting `docker.kata.debian` for Omashiki jobs on a host:
 
-- `Omashiki.Runtimes.docker_image/1` matches only `kind: "docker"`
-  (`runtimes.ex:9,16`). Every other kind falls through to the catch-all clause
-  that returns `nil` (`runtimes.ex:23`).
-- `ContainerManager.image_of/1` (`container_manager.ex:1320`) raises
-  `ArgumentError` when image resolution yields `nil`, so every kata attempt
-  dies at provision.
-- Nothing catches this earlier. `Runtime.changeset/2` requires an image only
-  when `kind == "docker"` (`runtimes/runtime.ex:44`), and
-  `Harnesses.validate_launch_plan!/2` applies the same conditional
-  (`harnesses.ex:188`). Boot validation passes; the failure surfaces per job.
+1. Run `mise run kata:install` with interactive sudo available.
+2. Run `mise run kata:smoke` to prove Docker advertises and selects `kata`.
+3. Verify the remaining KVM, VMM, kernel, and virtio-fs prerequisites.
+4. Run the compatibility gate for filesystem, credentials, networking, exec,
+   and resource-limit behavior before treating the environment as ready.
 
-The minimum code change before the TOML flag means anything:
+The Kata smoke is intentionally not a VM test. VM tasks are reserved for the
+distributed execution harness.
 
-1. Make image resolution kind-neutral, so a non-Docker kind still yields its
-   OCI image.
-2. Extend `Runtime.changeset/2` and `Harnesses.validate_launch_plan!/2` to
-   require an image for `kata` as well, so a bad profile fails at boot rather
-   than per attempt.
-3. Pass `Runtime: "kata"` in the `HostConfig` map that `ContainerManager`
-   builds.
+### Host smoke evidence
+
+The passing host smoke establishes only this narrow chain:
+
+- Docker advertises the registered `kata` runtime while retaining `runc` as
+  the default.
+- A jcode image starts with `--runtime kata` and reports
+  `HostConfig.Runtime=kata`.
+- `docker exec` succeeds inside the running Kata sandbox.
+- The labelled smoke container is removed and post-cleanup discovery returns
+  no container.
+
+It does not mark the filesystem, credential, network, or resource checks below
+as complete.
 
 ## What Must Be Re-Verified
 
@@ -130,7 +145,7 @@ propagates `CapDrop`, `no-new-privileges`, `ReadonlyRootfs`, and `PidsLimit`
 - [ ] `ExtraHosts` with `host.docker.internal` — traffic now leaves through a
       virtual NIC. This is the network item most likely to break, because the
       LLM gateway and the tool proxy live on the host
-- [ ] Port publishing on 127.0.0.1 for HTTP harnesses
+- [ ] Port publishing on 127.0.0.1 for HTTP harness transports
 - [ ] `NetworkMode: none` still means total isolation
 
 **`network = "host"` has no microVM equivalent.** A guest with its own kernel
@@ -147,8 +162,9 @@ comparison baseline.
 
 ### `exec`
 
-`op_execute` becomes a kata-agent call over vsock. It works, but it is slower —
-check it against the `pre_steps` and `post_steps` timeouts.
+`op_execute` will use the Kata guest transport when the host deployment supports
+it. Validate its behavior and latency against the `pre_steps` and `post_steps`
+timeouts; no passing Kata E2E result is claimed here.
 
 ## Behavior That Changes
 
@@ -222,7 +238,7 @@ strong. Keep any such backend pure I/O; never shell out to a runtime binary.
 - [Runtime capability](../server/lib/omashiki/runtime/capability.ex)
 - [Runtime value helpers](../server/lib/omashiki/runtimes.ex)
 - [Runtime schema](../server/lib/omashiki/runtimes/runtime.ex)
-- [Harness profile registry](../server/lib/omashiki/harnesses.ex)
+- [Preset registry](../server/lib/omashiki/presets.ex)
 - [Harness types](../server/lib/omashiki/harness/types.ex)
 - [Declarative configuration](../omashiki.toml)
 - [Requirements](requirements.md)

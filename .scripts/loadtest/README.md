@@ -81,9 +81,10 @@ anyway: drive without it returned `token_required` even on loopback.
 ## The `omashiki.toml` stanza
 
 Paste this into `omashiki.toml`. **Plugin and model live on a preset.** The
-environment only names that preset (`preset = "lt-stub"`) plus isolation,
-image, sink, packages, and runtime limits. `harness =`, and `adapter` /
-`runtime` on a preset, are boot errors.
+environment only names that preset (`preset = "lt-stub"`) plus the runtime,
+sink, packages, and runtime limits. `harness`, `adapter`, `image`, or `runtime`
+fields on a preset are boot errors. The runtime image is resolved from the
+Docker catalog.
 
 The tracked sample does not ship these tiers: they raise
 `[limits] max_concurrent_containers`, may name `${env:...}` credentials, and
@@ -97,6 +98,20 @@ tiers (OpenCode Go, Codex) put the model on the preset; credentials are
 `[host_credentials.*]` origins.
 
 ```toml
+[runtimes.docker.runc.debian.images]
+opencode = "omashiki/agent:latest"
+claude-code = "omashiki/agent-claude:latest"
+codex = "omashiki/agent-codex:latest"
+pi = "omashiki/agent-pi:latest"
+jcode = "omashiki/agent-jcode:latest"
+
+[runtimes.docker.kata.debian.images]
+opencode = "omashiki/agent:latest"
+claude-code = "omashiki/agent-claude:latest"
+codex = "omashiki/agent-codex:latest"
+pi = "omashiki/agent-pi:latest"
+jcode = "omashiki/agent-jcode:latest"
+
 [presets.lt-stub]
 plugin = "jcode"
 options = { timeout_ms = 120000, model = "fake-model" }
@@ -109,8 +124,7 @@ base_url = "http://127.0.0.1:8787/v1"
 
 [environments.loadtest]
 preset = "lt-stub"
-isolation = "docker"
-image = "omashiki/agent-jcode:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 executables = ["git"]
@@ -366,8 +380,7 @@ config = "~/.config/omashiki/loadtest/opencode-go.json"
 
 [environments.lt-opencode-go]
 preset = "lt-opencode-go"
-isolation = "docker"
-image = "omashiki/agent:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 executables = ["git"]
@@ -407,8 +420,7 @@ api_key = "${env:OPENROUTER_API_KEY}"
 
 [environments.lt-openrouter]
 preset = "lt-openrouter"
-isolation = "docker"
-image = "omashiki/agent:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 executables = ["git"]
@@ -441,8 +453,7 @@ options = { model = "gpt-5.6-luna", reasoning_effort = "low", timeout_ms = 60000
 
 [environments.lt-codex]
 preset = "lt-codex"
-isolation = "docker"
-image = "omashiki/agent-codex:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 executables = ["git"]
@@ -482,8 +493,7 @@ api_key = "unused-by-llama-server"
 
 [environments.lt-qwen]
 preset = "lt-qwen"
-isolation = "docker"
-image = "omashiki/agent:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 executables = ["git"]
@@ -516,8 +526,7 @@ options = { timeout_ms = 600000, model = "qwen/qwen3.5-9b" }
 
 [environments.lt-jcode]
 preset = "lt-jcode"
-isolation = "docker"
-image = "omashiki/agent-jcode:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 executables = ["git"]
@@ -555,8 +564,7 @@ base_url = "http://127.0.0.1:8787/v1"
 
 [environments.loadtest]
 preset = "lt-stub"
-isolation = "docker"
-image = "omashiki/agent-jcode:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 executables = ["git"]

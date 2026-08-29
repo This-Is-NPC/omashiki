@@ -6,8 +6,16 @@
 > `f33b715` promoveu três documentos daqui para `docs/` exatamente por isso, e dois que
 > ficaram foram perdidos. Promova este quando o desenho estabilizar.
 
-Estado: **desenho**, não implementação. Cada afirmação sobre o código atual foi verificada
-contra a árvore em `01ea60b` e está marcada como **hoje**; o resto é proposta.
+Estado: o corte de configuração declarativa está implementado; as extensões de
+plugin e sink descritas como proposta ainda são desenho. Cada afirmação sobre o
+código atual foi verificada contra a árvore em `01ea60b` e está marcada como
+**hoje**; o resto é proposta.
+
+As imagens atuais são mantidas nos catálogos Docker `docker.runc.debian` e
+`docker.kata.debian`. Os handlers `runc` e `kata` estão implementados na camada
+de configuração/API do Docker. A instalação Kata no host/VM e o gate de
+compatibilidade ainda podem estar pendentes; imagens baseadas em Arch não estão
+implementadas.
 
 ---
 
@@ -19,21 +27,16 @@ dentro do container, como sempre.
 
 ### 1.1 Por que
 
-**Hoje** um harness é um módulo Elixir compilado, resolvido por um mapa em
-`harnesses.ex:9-12`:
+**Hoje** o código do plugin é resolvido pelo interpretador declarativo, e os
+presets são carregados pelo registro em `presets.ex`:
 
 ```elixir
-@default_adapters %{
-  "opencode" => Omashiki.Harness.OpenCode,
-  "claude-code" => Omashiki.Harness.ClaudeCode,
-  "codex" => Omashiki.Harness.Codex,
-  "jcode" => Omashiki.Harness.Jcode
-}
+@adapter Omashiki.Plugin.Interpreter
 ```
 
-O registro **já é extensível** — `fetch_adapter!/1` faz
-`Map.merge(@default_adapters, Application.get_env(:omashiki, :harness_adapters, %{}))`. O que
-falta para ser plugin não é abrir o mapa: é **não precisar de código novo**.
+O registro é extensível sem adicionar módulos de ferramenta: um preset declara
+`plugin` e `options`, e o manifesto em `plugins/*.toml` define como a ferramenta
+é dirigida.
 
 Custo atual de adicionar uma ferramenta (medido na task 2821, que adicionou o `pi`): módulo
 com 4 callbacks, imagem Docker, entrada no `omashiki.toml`, fiação no `ci:docker`, suíte
@@ -60,7 +63,7 @@ flowchart TB
         E1["<b>o que tem na caixa</b><br/>image · packages · caches · pre_steps"]
         E2["<b>o que pode rodar</b><br/>executables (allowlist de argv)"]
         E3["<b>o que pode alcançar</b><br/>mcp_servers · credentials · mounts · network"]
-        E4["<b>sob qual isolamento</b><br/>runtime docker|kata · resources · policy"]
+        E4["<b>sob qual isolamento</b><br/>runtime docker.runc.debian · resources · policy"]
         E5["<b>onde o artefato vai parar</b><br/>sink: git | files | none"]
     end
 
@@ -69,12 +72,12 @@ flowchart TB
     L1 -.->|requires × provides<br/>cruzado no boot| E1
 ```
 
-**A camada de preset já existe** — é o que hoje se chama `[harnesses.*]`. Dois perfis do mesmo
+**A camada de preset já existe** — é declarada em `[presets.*]`. Dois perfis do mesmo
 adapter com opções diferentes já funcionam:
 
 ```toml
-[harnesses.codex-luna]
-adapter = "codex"
+[presets.codex-luna]
+plugin = "codex"
 options = { model = "gpt-5.6-luna", reasoning_effort = "low" }
 ```
 
@@ -201,35 +204,43 @@ teto é **por daemon**. Três nós, três daemons, três vezes o teto.
 É por isso que distribuído vem antes de kata. Kata custa 100-150 MB por sandbox e **não move
 esse número** — o ganho dele é fronteira de isolamento, não densidade.
 
-### 2.3 Runtime está na camada errada
+### 2.3 Runtime é política do environment
 
-**Hoje** `runtime` fica no `Spec` do harness:
+**Hoje** o runtime fica no environment, e o catálogo resolve a imagem pelo plugin:
 
 ```toml
-[harnesses.opencode]
-runtime = "docker"      # omashiki.toml:164
+[runtimes.docker.runc.debian.images]
+opencode = "omashiki/agent:latest"
+
+[environments.opencode]
+runtime = "docker.runc.debian"
 ```
 
-Trocar para `kata` **passa no boot e explode no primeiro job**:
+Docker é o backend atual. Os handlers `runc` e `kata` já estão implementados na
+camada de configuração/API do Docker, e `docker.runc.debian` é o padrão. A
+seleção de `docker.kata.debian` ainda depende da instalação Kata no host/VM e do
+gate de compatibilidade; este documento não afirma que o E2E Kata passou. Um
+futuro backend poderá ter a mesma separação:
 
 ```mermaid
 flowchart LR
-    A["runtime = kata"] --> B["@kinds aceita<br/>docker kata firecracker"]
-    B --> C["boot verde"]
-    C --> D["Runtimes.docker_image/1<br/>casa só com kind: docker"]
-    D --> E["retorna nil"]
-    E --> F["ContainerManager.image_of/1<br/>LEVANTA"]
+    A["runtime = docker.runc.debian"] --> B["catálogo de imagens<br/>por plugin"]
+    B --> C["boot valida o registry"]
+    C --> D["ContainerManager<br/>usa a imagem resolvida"]
 ```
 
 Isolamento é garantia de governança, não propriedade da ferramenta. O `pi` não sabe nem se
-importa se roda em docker ou microVM. `runtime` pertence ao environment:
+importa se roda em Docker ou em um futuro microVM backend. `runtime` pertence ao environment:
 
 ```toml
-[environments.dev]     runtime = "docker"   # barato, confiável
-[environments.hostil]  runtime = "kata"     # mesmo preset, isolamento maior
+[environments.dev]
+runtime = "docker.runc.debian"   # handler padrão
+
+# Kata é selecionável na camada Docker/API, mas requer instalação e validação
+# do host/VM antes de ser usado.
 ```
 
-Com `runtime` no plugin, mudar o isolamento obriga a duplicar o perfil inteiro.
+Com `runtime` no plugin, mudar o backend obrigaria a duplicar o perfil inteiro.
 
 ---
 
@@ -396,10 +407,10 @@ runtime é deadlock silencioso, e `blocked` não tem timeout.
 
 | # | lacuna | evidência |
 |---|---|---|
-| 1 | harness exige código; não há manifesto | `harnesses.ex:9-12` |
+| 1 | plugin exige código; não há manifesto | `plugins/*.toml` e `presets.ex` |
 | 2 | preset do opencode vive fora do registro | `[host_credentials.*].config` |
 | 3 | `requires`/`provides` não é cruzado | quebrou 2× hoje: `mise`, `curl` |
-| 4 | `runtime` no plugin; kata explode no primeiro job | `runtimes.ex:9-23` |
+| 4 | runtime e imagem precisam de um catálogo validado | `[runtimes.docker.runc.debian.images]` e `[runtimes.docker.kata.debian.images]` |
 | 5 | `packages[]` não existe | "quero python" não é declarável |
 | 6 | branch por job, não por attempt | `git_artifact.ex:30,262` |
 | 7 | `repository_snapshot` obrigatório | tarefa não-coding impossível |
@@ -421,8 +432,8 @@ leitura documentado nesta sessão, meu ou de um Builder. A coluna **hoje** é o 
 
 | hoje | ambiguidade | revisado | por quê |
 |---|---|---|---|
-| **harness** | é o módulo Elixir *ou* o perfil configurado | **adapter** (código) · **preset** (perfil) | `[harnesses.codex-luna]` não é um harness, é um preset do adapter `codex`. Um termo para duas camadas impede falar da reforma |
-| **runtime** | 3 sentidos: kind docker\|kata · o namespace `Omashiki.Runtime.*` · "em tempo de execução" | **isolation** (docker\|kata) · **Execution** (namespace) · "em execução" (prosa) | `runtime/` e `runtimes/` são dois diretórios a uma letra de distância com significados distintos: `runtime/` supervisiona attempts e containers, `runtimes/` guarda o struct de isolamento **e** o cache |
+| **harness** | é o módulo Elixir *ou* o perfil configurado | **adapter** (código) · **preset** (perfil) | `[presets.codex-luna]` é um preset do plugin `codex`. Um termo para duas camadas impede falar da reforma |
+| **runtime** | o backend selecionado no environment ou o namespace `Omashiki.Runtime.*` | **runtime** (`docker.runc.debian` / `docker.kata.debian`) · **Execution** (namespace) · "em execução" (prosa) | `runtime/` e `runtimes/` são dois diretórios a uma letra de distância com significados distintos: `runtime/` supervisiona attempts e containers, `runtimes/` guarda a configuração do backend |
 | **environment** | ambiente governado `[environments.*]` *ou* variável de ambiente do SO | **environment** (governado) · **os_env** (variável) | `${env:VAR}` e o bloco `env` do manifesto são variáveis do SO; `[environments.*]` é política de execução. Colidem em toda frase |
 | **node** | máquina Omashiki · nó BEAM · nó de grafo | **machine** (Omashiki) · **beam_node** · **vertex** | `Omashiki.Config.Node` literalmente sombreia o `Node` do Elixir — sinalizado pelo Builder da 2797 |
 | **credential** | chave de LLM · arquivo de auth do harness · chave SSH de push | **llm_credential** · **host_credential** · **push_key** | São três coisas com ciclos de vida e fronteiras de segurança diferentes: a primeira vai ao gateway, a segunda entra no container, **a terceira nunca entra** |
@@ -439,7 +450,7 @@ leitura documentado nesta sessão, meu ou de um Builder. A coluna **hoje** é o 
 | termo | definição |
 |---|---|
 | **plugin** | manifesto declarativo em disco que descreve como dirigir uma ferramenta. **Nunca código.** Um adapter genérico o interpreta |
-| **preset** | plugin + valores de opção, nomeado. O que hoje é `[harnesses.*]` |
+| **preset** | plugin + valores de opção, nomeado. Declarado em `[presets.*]` |
 | **sink** | destino do artefato: `git` \| `files` \| `none`. Determina `PROVISION` e `PUBLISH`; os outros quatro estágios não mudam |
 | **task branch** | `feat/hello-world` — ponteiro para o último run bem-sucedido |
 | **run branch** | `feat/hello-world-run-001` — imutável, um por attempt. O traço é imposto pelo git, não é escolha |
