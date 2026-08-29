@@ -9,6 +9,7 @@ defmodule Omashiki.Plugin.Interpreter do
   alias Omashiki.Plugin.Preset
   alias Omashiki.Jobs.Job
   alias Omashiki.Runtime.{Capability, Claims}
+  alias Omashiki.Runtime.Spec
   alias Omashiki.Runtime.HostCredentials
 
   @impl true
@@ -18,7 +19,11 @@ defmodule Omashiki.Plugin.Interpreter do
   def validate_options(_, _), do: {:error, :options_must_be_a_map}
 
   @impl true
-  def launch_plan(%Preset{manifest: %Manifest{} = manifest, isolation: isolation, options: raw}) do
+  def launch_plan(%Preset{
+        manifest: %Manifest{} = manifest,
+        runtime: %Spec{} = runtime,
+        options: raw
+      }) do
     options = merged_options(manifest, raw)
 
     transport =
@@ -42,16 +47,20 @@ defmodule Omashiki.Plugin.Interpreter do
 
     readiness =
       case manifest.readiness do
-        %{"kind" => "none"} -> nil
-        %{"kind" => _kind} = r -> Map.put(r, "argv", substitute_list(Map.get(r, "argv", []), bindings(options, %{})))
+        %{"kind" => "none"} ->
+          nil
+
+        %{"kind" => _kind} = r ->
+          Map.put(r, "argv", substitute_list(Map.get(r, "argv", []), bindings(options, %{})))
       end
 
     {:ok,
      %LaunchPlan{
-       isolation: isolation,
+       runtime: runtime,
        transport: transport,
        startup: nil,
-       readiness: readiness && Map.update!(readiness, "argv", &substitute_list(&1, bindings(options, %{}))),
+       readiness:
+         readiness && Map.update!(readiness, "argv", &substitute_list(&1, bindings(options, %{}))),
        secret: secret_plan(manifest, options),
        environment: static_env(manifest, options),
        llm_egress: manifest.llm_egress
@@ -142,7 +151,9 @@ defmodule Omashiki.Plugin.Interpreter do
               end
             end)
 
-          if events == [], do: {:error, {:non_json_output, CliJson.summarize(stdout)}}, else: {:ok, events}
+          if events == [],
+            do: {:error, {:non_json_output, CliJson.summarize(stdout)}},
+            else: {:ok, events}
 
         _ ->
           case Jason.decode(String.trim(stdout)) do
@@ -161,7 +172,13 @@ defmodule Omashiki.Plugin.Interpreter do
       plan = launch_plan!(spec)
       secret = file_secret(manifest, options, prompt)
       gateway = Map.get(manifest.env, "gateway", %{})
-      gateway_bindings = bindings(options, %{"gateway_base_url" => CliJson.gateway_base_url(context), "gateway_token" => gateway_token, "gateway_model" => credential.model})
+
+      gateway_bindings =
+        bindings(options, %{
+          "gateway_base_url" => CliJson.gateway_base_url(context),
+          "gateway_token" => gateway_token,
+          "gateway_model" => credential.model
+        })
 
       gateway_env =
         Enum.map(gateway, fn {k, v} ->
@@ -181,7 +198,8 @@ defmodule Omashiki.Plugin.Interpreter do
   end
 
   defp prepare_invocation_json(spec, context, _manifest, options) do
-    with :ok <- HostCredentials.validate_mount(context.runtime_mounts, options["credentials_path"]),
+    with :ok <-
+           HostCredentials.validate_mount(context.runtime_mounts, options["credentials_path"]),
          {:ok, payload} <- CliJson.invocation_payload(context.job) do
       plan = launch_plan!(spec)
 
@@ -211,7 +229,8 @@ defmodule Omashiki.Plugin.Interpreter do
          plan
          | secret: %{
              "target" => Map.get(http, "gateway_auth_path", "/run/secrets/opencode-auth.json"),
-             "contents" => Jason.encode!(%{"gateway" => %{"type" => "api", "key" => gateway_token}})
+             "contents" =>
+               Jason.encode!(%{"gateway" => %{"type" => "api", "key" => gateway_token}})
            },
            environment: [
              "OPENCODE_CONFIG_CONTENT=#{config}",
@@ -219,7 +238,7 @@ defmodule Omashiki.Plugin.Interpreter do
              "HOME=/tmp/agent-home"
            ],
            llm_egress: :gateway
-         }}
+       }}
     else
       nil -> {:error, :runtime_job_required}
       {:error, reason} -> {:error, reason}
@@ -252,7 +271,7 @@ defmodule Omashiki.Plugin.Interpreter do
              "HOME=/tmp/agent-home"
            ],
            llm_egress: :engine
-         }}
+       }}
     end
   end
 
@@ -280,7 +299,13 @@ defmodule Omashiki.Plugin.Interpreter do
     servers = Map.get(env, "mcp_servers", %{})
 
     if is_map(servers) and map_size(servers) > 0 do
-      Map.merge(config, Omashiki.Tools.McpConfig.render(env, spec, %{token: tools_token, base_url: context.host_base_url}))
+      Map.merge(
+        config,
+        Omashiki.Tools.McpConfig.render(env, spec, %{
+          token: tools_token,
+          base_url: context.host_base_url
+        })
+      )
     else
       config
     end
@@ -304,7 +329,8 @@ defmodule Omashiki.Plugin.Interpreter do
 
         is_list(val) and val != [] ->
           Enum.reduce(val, acc, fn item, a ->
-            a ++ substitute_list(Map.get(rule, "append", []), bindings(options, %{"item" => item}))
+            a ++
+              substitute_list(Map.get(rule, "append", []), bindings(options, %{"item" => item}))
           end)
 
         true ->
@@ -361,9 +387,14 @@ defmodule Omashiki.Plugin.Interpreter do
     end)
   end
 
-  defp substitute_list(list, bindings) when is_list(list), do: Enum.map(list, &substitute(&1, bindings))
+  defp substitute_list(list, bindings) when is_list(list),
+    do: Enum.map(list, &substitute(&1, bindings))
 
-  defp file_secret(%Manifest{files: %{"invocation" => %{"path" => path_tpl, "body" => body_tpl}}}, options, prompt) do
+  defp file_secret(
+         %Manifest{files: %{"invocation" => %{"path" => path_tpl, "body" => body_tpl}}},
+         options,
+         prompt
+       ) do
     bindings = bindings(options, %{"instruction" => prompt})
 
     %{
@@ -394,8 +425,11 @@ defmodule Omashiki.Plugin.Interpreter do
   defp manifest!(%Preset{manifest: %Manifest{} = m}), do: m
   defp manifest!(%{"manifest" => m}), do: Manifest.from_snapshot(m)
 
-  defp message_payload(%Invocation{instruction: i, context: nil}), do: %{parts: [%{type: "text", text: i}]}
-  defp message_payload(%Invocation{instruction: i, context: c}), do: %{parts: [%{type: "text", text: i <> "\n\nContext:\n" <> Jason.encode!(c)}]}
+  defp message_payload(%Invocation{instruction: i, context: nil}),
+    do: %{parts: [%{type: "text", text: i}]}
+
+  defp message_payload(%Invocation{instruction: i, context: c}),
+    do: %{parts: [%{type: "text", text: i <> "\n\nContext:\n" <> Jason.encode!(c)}]}
 
   defp put_model(payload, credential, :gateway, _manifest, ctx) do
     case gateway_model(credential, ctx) do
@@ -410,7 +444,9 @@ defmodule Omashiki.Plugin.Interpreter do
   defp put_model(payload, credential, _, _manifest, ctx) do
     preset_model = profile_option(ctx.profile, "model")
     fallback = if match?(%Credential{}, credential), do: credential.model
-    provider_fallback = if match?(%Credential{}, credential), do: credential.provider, else: "opencode"
+
+    provider_fallback =
+      if match?(%Credential{}, credential), do: credential.provider, else: "opencode"
 
     case preset_model || fallback do
       model when is_binary(model) and model != "" ->

@@ -1,9 +1,9 @@
-defmodule Omashiki.IsolationTest do
+defmodule Omashiki.Runtimes.RuntimeTest do
   use ExUnit.Case, async: false
 
   alias Omashiki.Config
   alias Omashiki.Config.Error
-  alias Omashiki.Isolation
+  alias Omashiki.Runtime.Spec
 
   setup do
     Config.reset!()
@@ -24,8 +24,17 @@ defmodule Omashiki.IsolationTest do
     %{root: root, mount: mount}
   end
 
-  test "kinds lists only runtimes with an executor today" do
-    assert Isolation.kinds() == ["docker"]
+  test "runtime specs expose the catalog identity and selected image" do
+    spec = %Spec{
+      name: "docker.runc.debian",
+      backend: "docker",
+      handler: "runc",
+      distribution: "debian",
+      plugin: "opencode",
+      image: "agent"
+    }
+
+    assert Omashiki.Runtimes.image(spec) == "agent"
   end
 
   test "rejects runtime= on presets at config load", ctx do
@@ -46,6 +55,13 @@ defmodule Omashiki.IsolationTest do
       "presets" => %{
         "opencode" => %{"plugin" => "opencode", "options" => %{}}
       },
+      "runtimes" => %{
+        "docker" => %{
+          "runc" => %{
+            "debian" => %{"images" => %{"opencode" => "omashiki/agent:latest"}}
+          }
+        }
+      },
       "credentials" => %{
         "provider" => %{
           "provider" => "openai_compat",
@@ -58,8 +74,7 @@ defmodule Omashiki.IsolationTest do
       },
       "environments" => %{
         "opencode" => %{
-          "isolation" => "docker",
-          "image" => "omashiki/agent:latest",
+          "runtime" => "docker.runc.debian",
           "sink" => "git",
           "packages" => [],
           "preset" => "opencode",

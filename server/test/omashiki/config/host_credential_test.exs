@@ -178,6 +178,13 @@ defmodule Omashiki.Config.HostCredentialTest do
       "presets" => %{
         "opencode" => %{"plugin" => "opencode", "options" => %{}}
       },
+      "runtimes" => %{
+        "docker" => %{
+          "runc" => %{
+            "debian" => %{"images" => %{"opencode" => "omashiki/agent:latest"}}
+          }
+        }
+      },
       "host_credentials" => %{
         "opencode-local" => %{
           "kind" => "opencode",
@@ -187,8 +194,7 @@ defmodule Omashiki.Config.HostCredentialTest do
       },
       "environments" => %{
         "opencode" => %{
-          "isolation" => "docker",
-          "image" => "omashiki/agent:latest",
+          "runtime" => "docker.runc.debian",
           "sink" => "git",
           "packages" => [],
           "preset" => "opencode",

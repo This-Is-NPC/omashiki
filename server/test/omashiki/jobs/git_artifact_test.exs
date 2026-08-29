@@ -381,11 +381,15 @@ defmodule Omashiki.Jobs.GitArtifactTest do
             }
           },
           "presets" => %{"opencode" => %{"plugin" => "opencode", "options" => %{}}},
+          "runtimes" => %{
+            "docker" => %{
+              "runc" => %{"debian" => %{"images" => %{"opencode" => "omashiki/agent:latest"}}}
+            }
+          },
           "environments" => %{
             "git" => %{
               "preset" => "opencode",
-              "isolation" => "docker",
-              "image" => "omashiki/agent:latest",
+              "runtime" => "docker.runc.debian",
               "sink" => "git",
               "packages" => [],
               "executables" => ["git"],

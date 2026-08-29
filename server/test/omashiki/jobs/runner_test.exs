@@ -123,10 +123,14 @@ defmodule Omashiki.Jobs.RunnerTest do
         "presets" => %{
           "opencode" => %{"plugin" => "opencode", "options" => %{}}
         },
+        "runtimes" => %{
+          "docker" => %{
+            "runc" => %{"debian" => %{"images" => %{"opencode" => "omashiki/agent:latest"}}}
+          }
+        },
         "environments" => %{
           "safe" => %{
-            "isolation" => "docker",
-            "image" => "omashiki/agent:latest",
+            "runtime" => "docker.runc.debian",
             "sink" => "git",
             "packages" => [],
             "preset" => "opencode",

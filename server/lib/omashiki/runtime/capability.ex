@@ -13,18 +13,18 @@ defmodule Omashiki.Runtime.Capability do
           exec: exec_fun()
         }
 
-  @doc "Build a capability from a provisioned runtime and its injected boundary."
-  @spec from_container(map(), module()) :: t()
-  def from_container(container, boundary) when is_map(container) and is_atom(boundary) do
+  @doc "Build a capability from a provisioned sandbox and its injected boundary."
+  @spec from_sandbox(map(), module()) :: t()
+  def from_sandbox(sandbox, boundary) when is_map(sandbox) and is_atom(boundary) do
     transport =
-      normalize_transport(Map.get(container, :transport, Map.get(container, "transport")))
+      normalize_transport(Map.get(sandbox, :transport, Map.get(sandbox, "transport")))
 
-    endpoint = endpoint_from(container)
+    endpoint = endpoint_from(sandbox)
 
     %__MODULE__{
       transport: transport,
       endpoint: endpoint,
-      exec: fn argv, timeout_ms -> boundary.exec(container, argv, timeout_ms) end
+      exec: fn argv, timeout_ms -> boundary.exec(sandbox, argv, timeout_ms) end
     }
   end
 

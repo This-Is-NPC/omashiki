@@ -16,6 +16,7 @@ defmodule Omashiki.Runtime.ContainerManager do
   alias Omashiki.Jobs.Job
   alias Omashiki.SupplyChain.{Policy, Preflight, Proxy, SocketBridge}
   alias Omashiki.Runtime.HostCredentials
+  alias Omashiki.Runtime.Spec
   alias Omashiki.Runtimes.{CacheMaintenance, CacheSnapshot}
 
   @docker_api_version "v1.43"
@@ -123,21 +124,34 @@ defmodule Omashiki.Runtime.ContainerManager do
     operations = Keyword.get(opts, :operations, __MODULE__)
 
     availability = Keyword.get_lazy(opts, :availability, &docker_ping/0)
+    handler_checker = Keyword.get(opts, :handler_checker, &runtime_handlers_available?/1)
 
     case availability do
       value when value in [:ok, true] ->
-        Logger.info("[ContainerManager] Docker Engine API is reachable")
-        {:ok, %{available: true, operations: operations}}
+        required_handlers = active_runtime_handlers()
+
+        case handler_checker.(required_handlers) do
+          :ok ->
+            Logger.info("[ContainerManager] Docker Engine API is reachable")
+            {:ok, %{available: true, operations: operations, handler_checker: handler_checker}}
+
+          {:error, reason} ->
+            Logger.error(
+              "[ContainerManager] configured Docker runtime handlers unavailable: #{inspect(reason)}"
+            )
+
+            {:stop, {:runtime_handlers_unavailable, reason}}
+        end
 
       {:error, reason} ->
         Logger.warning(
           "[ContainerManager] Docker not available: #{inspect(reason)}. Running in degraded mode."
         )
 
-        {:ok, %{available: false, operations: operations}}
+        {:ok, %{available: false, operations: operations, handler_checker: handler_checker}}
 
       false ->
-        {:ok, %{available: false, operations: operations}}
+        {:ok, %{available: false, operations: operations, handler_checker: handler_checker}}
     end
   end
 
@@ -179,9 +193,20 @@ defmodule Omashiki.Runtime.ContainerManager do
     {:reply, {:error, :docker_unavailable}, state}
   end
 
-  def handle_call({:provision_for_job, job, attempt, environment, opts}, from, state) do
-    async_reply(from, fn -> state.operations.op_provision(job, attempt, environment, opts) end)
-    {:noreply, state}
+  def handle_call(
+        {:provision_for_job, job, attempt, environment, opts},
+        from,
+        %{handler_checker: handler_checker} = state
+      ) do
+    case handler_checker.(runtime_handlers_for(environment)) do
+      :ok ->
+        async_reply(from, fn -> state.operations.op_provision(job, attempt, environment, opts) end)
+
+        {:noreply, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call({:fetch_logs, _id, _opts}, _from, %{available: false} = state),
@@ -858,15 +883,6 @@ defmodule Omashiki.Runtime.ContainerManager do
     end)
   end
 
-  defp isolation_of(%{isolation: %Omashiki.Isolation{} = isolation}), do: isolation
-
-  defp isolation_of(%{isolation: %{"kind" => kind, "config" => config}}),
-    do: %Omashiki.Isolation{kind: kind, config: config, key: nil, status: "active"}
-
-  defp isolation_of(%{isolation: isolation}) when not is_nil(isolation), do: isolation
-
-  defp isolation_of(_), do: nil
-
   defp expand_host_path("~/" <> rest), do: Path.join(System.user_home!(), rest)
   defp expand_host_path("~"), do: System.user_home!()
   defp expand_host_path(path) when is_binary(path), do: path
@@ -1085,8 +1101,7 @@ defmodule Omashiki.Runtime.ContainerManager do
   defp run_launch_startup(container_id, launch_plan) do
     startup = launch_plan_value(launch_plan, :startup)
 
-    command =
-      startup_value(startup, :argv) || Omashiki.Runtimes.bootstrap(isolation_of_launch(launch_plan))
+    command = startup_value(startup, :argv)
 
     case command do
       nil ->
@@ -1094,9 +1109,7 @@ defmodule Omashiki.Runtime.ContainerManager do
 
       command when is_list(command) ->
         timeout_ms =
-          startup_value(startup, :timeout_ms) ||
-            Omashiki.Runtimes.bootstrap_timeout_ms(isolation_of_launch(launch_plan)) ||
-            @default_bootstrap_timeout_ms
+          startup_value(startup, :timeout_ms) || @default_bootstrap_timeout_ms
 
         case do_exec_stream(container_id, command, timeout_ms: timeout_ms) do
           {:ok, %{exit_code: 0}} -> :ok
@@ -1178,10 +1191,6 @@ defmodule Omashiki.Runtime.ContainerManager do
         nil
     end
   end
-
-  defp isolation_of_launch(%{isolation: isolation}), do: isolation_of(%{isolation: isolation})
-  defp isolation_of_launch(%{"isolation" => isolation}), do: isolation_of(%{isolation: isolation})
-  defp isolation_of_launch(_), do: nil
 
   defp launch_plan_value(%{startup: value}, :startup), do: value
   defp launch_plan_value(%{"startup" => value}, :startup), do: value
@@ -1266,6 +1275,7 @@ defmodule Omashiki.Runtime.ContainerManager do
     launch_plan = Keyword.fetch!(opts, :launch_plan)
     job = Keyword.get(opts, :job)
     protocol = transport_kind(launch_plan)
+    runtime = runtime_of(profile)
     image = image_of(profile)
     internal_port = transport_port(launch_plan)
 
@@ -1306,10 +1316,14 @@ defmodule Omashiki.Runtime.ContainerManager do
         @container_label => "true",
         "omashiki.job_scope_id" => job_scope.id,
         "omashiki.protocol" => protocol,
-        "omashiki.isolation" => isolation_kind_of(profile)
+        "omashiki.runtime" => runtime.name,
+        "omashiki.runtime_handler" => runtime.handler,
+        "omashiki.backend" => runtime.backend,
+        "omashiki.distribution" => runtime.distribution
       }
       |> maybe_put_cache_label(cache_groups)
       |> Map.merge(Keyword.get(opts, :supply_chain_labels, %{}))
+      |> maybe_put_correlation_label(job)
 
     base = %{
       "Image" => image,
@@ -1325,7 +1339,8 @@ defmodule Omashiki.Runtime.ContainerManager do
           network_mode: network_mode,
           resource_limits: Keyword.get(opts, :resource_limits),
           extra_binds: Keyword.get(opts, :extra_binds, []),
-          internal_port: internal_port
+          internal_port: internal_port,
+          runtime_handler: runtime.handler
         ),
       "WorkingDir" => worktree_path
     }
@@ -1342,22 +1357,29 @@ defmodule Omashiki.Runtime.ContainerManager do
     end
   end
 
-  defp isolation_kind_of(%{isolation: %{kind: kind}}) when is_binary(kind), do: kind
-  defp isolation_kind_of(%{isolation: %{kind: kind}}) when is_atom(kind), do: to_string(kind)
-  defp isolation_kind_of(%{"isolation" => %{"kind" => kind}}), do: to_string(kind)
+  defp runtime_of(%{runtime: %Spec{backend: "docker", handler: handler} = runtime})
+       when handler in ["runc", "kata"],
+       do: runtime
 
-  defp isolation_kind_of(_), do: "unknown"
+  defp runtime_of(%{runtime: %Spec{backend: backend}}) when backend != "docker",
+    do: raise(ArgumentError, "ContainerManager requires Docker backend, got #{inspect(backend)}")
 
-  defp image_of(profile) do
-    case isolation_image(profile) do
-      image when is_binary(image) and image != "" ->
-        image
+  defp runtime_of(%{runtime: %Spec{handler: handler}}),
+    do: raise(ArgumentError, "unsupported Docker runtime handler #{inspect(handler)}")
 
-      _ ->
-        raise ArgumentError,
-              "preset must provide a Docker isolation image"
-    end
+  defp runtime_of(_),
+    do: raise(ArgumentError, "preset must provide a resolved runtime")
+
+  defp image_of(%{runtime: %Spec{backend: "docker", image: image}})
+       when is_binary(image) and image != "" do
+    image
   end
+
+  defp image_of(%{runtime: %Spec{backend: backend}}),
+    do: raise(ArgumentError, "ContainerManager requires Docker backend, got #{inspect(backend)}")
+
+  defp image_of(_),
+    do: raise(ArgumentError, "preset must provide a resolved Docker runtime image")
 
   defp transport_port_environment(%{transport: transport}, host_port),
     do:
@@ -1382,12 +1404,6 @@ defmodule Omashiki.Runtime.ContainerManager do
   end
 
   defp port_environment(_, _), do: []
-
-  defp isolation_image(%{isolation: isolation}) when not is_nil(isolation) do
-    Omashiki.Runtimes.docker_image(isolation)
-  end
-
-  defp isolation_image(_), do: nil
 
   defp isolated_host_base_url(env) do
     if Enum.any?(env, &String.starts_with?(&1, "OMASHIKI_HOST_SOCKET=")),
@@ -1438,6 +1454,13 @@ defmodule Omashiki.Runtime.ContainerManager do
   defp maybe_put_cache_label(labels, groups) do
     Map.put(labels, "omashiki.cache_groups", Enum.map_join(groups, ",", & &1.name))
   end
+
+  defp maybe_put_correlation_label(labels, %{correlation_id: correlation_id})
+       when is_binary(correlation_id) and correlation_id != "" do
+    Map.put(labels, "omashiki.correlation_id", correlation_id)
+  end
+
+  defp maybe_put_correlation_label(labels, _job), do: labels
 
   # Poll the adapter's readiness endpoint before exposing the engine client.
   defp wait_for_harness(host, port, path, timeout_ms) do
@@ -1764,6 +1787,7 @@ defmodule Omashiki.Runtime.ContainerManager do
     secret_target = Keyword.get(opts, :secret_target)
     extra_binds = Keyword.get(opts, :extra_binds, [])
     internal_port = Keyword.get(opts, :internal_port)
+    runtime_handler = Keyword.get(opts, :runtime_handler)
 
     base_binds = [
       # Parent repo RO so the agent can read sibling code if needed.
@@ -1804,6 +1828,22 @@ defmodule Omashiki.Runtime.ContainerManager do
       "MemorySwap" => limits.memory_swap_bytes,
       "NanoCpus" => limits.nano_cpus
     }
+
+    base =
+      case runtime_handler do
+        nil ->
+          raise ArgumentError, "Docker runtime handler is required"
+
+        "runc" ->
+          base
+
+        "kata" ->
+          Map.put(base, "Runtime", "kata")
+
+        handler ->
+          raise ArgumentError,
+                "unsupported Docker runtime handler #{inspect(handler)}"
+      end
 
     base =
       case network_mode do
@@ -1900,6 +1940,44 @@ defmodule Omashiki.Runtime.ContainerManager do
     end
   rescue
     e -> {:error, e}
+  end
+
+  defp active_runtime_handlers do
+    Omashiki.Config.environments()
+    |> Enum.flat_map(&runtime_handlers_for/1)
+    |> Enum.uniq()
+  end
+
+  defp runtime_handlers_for(%{runtime: %Spec{handler: handler}}) when is_binary(handler),
+    do: [handler]
+
+  defp runtime_handlers_for(%{"runtime" => %{"handler" => handler}}) when is_binary(handler),
+    do: [handler]
+
+  defp runtime_handlers_for(_), do: []
+
+  defp runtime_handlers_available?([]), do: :ok
+
+  defp runtime_handlers_available?(required_handlers) do
+    case docker_get("/info") do
+      {:ok, %{"Runtimes" => runtimes}} when is_map(runtimes) ->
+        available_handlers = Map.keys(runtimes)
+
+        missing_handlers =
+          Enum.reject(required_handlers, fn handler -> handler in available_handlers end)
+
+        if missing_handlers == [] do
+          :ok
+        else
+          {:error, {:missing_runtime_handlers, missing_handlers, Enum.sort(available_handlers)}}
+        end
+
+      {:ok, info} ->
+        {:error, {:invalid_docker_info, info}}
+
+      {:error, reason} ->
+        {:error, {:docker_info_unavailable, reason}}
+    end
   end
 
   defp docker_get(path) do

@@ -182,14 +182,16 @@ defmodule Omashiki.Config.RolloutTest do
     [presets.opencode]
     plugin = "opencode"
 
+     [runtimes.docker.runc.debian.images]
+    opencode = "omashiki/agent:latest"
+
     [credentials.provider]
     provider = "openai_compat"
     model = "#{model}"
     api_key = "plaintext-key"
 
     [environments.opencode]
-    isolation = "docker"
-    image = "omashiki/agent:latest"
+     runtime = "docker.runc.debian"
     sink = "git"
     packages = []
     preset = "opencode"

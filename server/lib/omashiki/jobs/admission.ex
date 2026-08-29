@@ -136,6 +136,20 @@ defmodule Omashiki.Jobs.Admission do
   defp snapshot_value(%Omashiki.Plugin.Manifest{} = manifest),
     do: Omashiki.Plugin.Manifest.snapshot(manifest)
 
+  defp snapshot_value(%Omashiki.Plugin.Preset{} = preset) do
+    preset
+    |> Map.from_struct()
+    |> Map.delete(:adapter)
+    |> Map.update!(:launch_plan, &snapshot_value/1)
+    |> snapshot_value()
+  end
+
+  defp snapshot_value(%Omashiki.Harness.LaunchPlan{} = launch_plan) do
+    launch_plan
+    |> Map.from_struct()
+    |> snapshot_value()
+  end
+
   defp snapshot_value(%_{} = struct) do
     struct
     |> Map.from_struct()
@@ -347,7 +361,7 @@ defmodule Omashiki.Jobs.Admission do
     end)
   end
 
-  defp resolve_depends_on(user_id, request, jobs_by_ref, self_ref \\ nil) do
+  defp resolve_depends_on(user_id, request, jobs_by_ref, self_ref) do
     depends_on = Map.get(request, "depends_on", [])
 
     with {:ok, edges} <- build_depends_on_edges(depends_on, jobs_by_ref),

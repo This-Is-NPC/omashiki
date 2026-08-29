@@ -27,7 +27,7 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
   alias Omashiki.Jobs.Admission
   alias Omashiki.Repo
   alias Omashiki.Runtime.ContainerManager
-  alias Omashiki.Isolation
+  alias Omashiki.Runtime.Spec
 
   # Returns an error so provisioning stops here: what is being tested happened
   # before this was reached.
@@ -120,11 +120,13 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
   end
 
   defp profile do
-    runtime = %Isolation{
-      key: "opencode",
-      kind: "docker",
-      config: %{"image" => "agent:latest"},
-      status: "active"
+    runtime = %Spec{
+      name: "docker.runc.debian",
+      backend: "docker",
+      handler: "runc",
+      distribution: "debian",
+      plugin: "opencode",
+      image: "agent:latest"
     }
 
     %Preset{
@@ -132,11 +134,11 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
       adapter: CapturingAdapter,
       plugin: "opencode",
       options: %{},
-      isolation: runtime,
+      runtime: runtime,
       # "stdio" rather than "http" so provisioning does not reserve a host port
       # on the way to the decision under test.
       launch_plan: %LaunchPlan{
-        isolation: runtime,
+        runtime: runtime,
         transport: %{"kind" => "stdio"},
         startup: nil,
         readiness: nil,
@@ -174,8 +176,7 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
       },
       "environments" => %{
         "safe" => %{
-          "isolation" => "docker",
-          "image" => "omashiki/agent:latest",
+          "runtime" => "docker.runc.debian",
           "sink" => "git",
           "packages" => [],
           "preset" => "opencode",
@@ -189,6 +190,11 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
           "policy" => %{"mode" => "off"},
           "network" => "none",
           "resources" => %{"cpus" => 1, "memory" => "1GB", "pids" => 32}
+        }
+      },
+      "runtimes" => %{
+        "docker" => %{
+          "runc" => %{"debian" => %{"images" => %{"opencode" => "omashiki/agent:latest"}}}
         }
       },
       "limits" => %{}

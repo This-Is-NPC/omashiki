@@ -33,7 +33,7 @@ defmodule Omashiki.Config do
   `load!/1` raises `Omashiki.Config.Error` (never a raw `KeyError`) when:
 
     * the file is missing
-    * a required top-level section is missing (`repositories`, `environments`, `presets`,
+    * a required top-level section is missing (`repositories`, `environments`, `presets`, `runtimes`,
       or `limits`; `credentials`, `host_credentials`, and `caches` are optional)
     * a required field on an entry is missing
   """
@@ -60,7 +60,7 @@ defmodule Omashiki.Config do
   )
   # Domain sections that must appear in a real TOML file. `credentials` is
   # optional when jobs use host-authenticated providers.
-  @required_sections ~w(repositories environments presets limits)
+  @required_sections ~w(repositories environments presets runtimes limits)
 
   # How a hot reload lands. `[limits]` is per-container resource budget and
   # `HostSettings` takes exactly four keys out of it; a rollout strategy is not
@@ -75,6 +75,7 @@ defmodule Omashiki.Config do
     presets: [],
     repositories: [],
     environments: [],
+    runtimes: [],
     nodes: [],
     current_machine: nil,
     registry_digest: nil,
@@ -196,6 +197,7 @@ defmodule Omashiki.Config do
   def presets, do: snapshot().presets
   def repositories, do: snapshot().repositories
   def environments, do: snapshot().environments
+  def runtimes, do: snapshot().runtimes
   def current_digest, do: snapshot().registry_digest
 
   @doc """
@@ -221,9 +223,9 @@ defmodule Omashiki.Config do
   """
   def current_machine, do: snapshot().current_machine || local_machine()
 
-  @doc "Current immutable repository/environment registry snapshot."
+  @doc "Current immutable repository/runtime/environment registry snapshot."
   def current_snapshot do
-    Map.take(snapshot(), [:repositories, :presets, :environments, :registry_digest])
+    Map.take(snapshot(), [:repositories, :presets, :runtimes, :environments, :registry_digest])
   end
 
   @doc "Resolve names to values captured for one admitted job."
@@ -288,6 +290,11 @@ defmodule Omashiki.Config do
 
   def get_environment(_), do: nil
 
+  def get_runtime(name) when is_binary(name),
+    do: Enum.find(runtimes(), &(&1.name == name))
+
+  def get_runtime(_), do: nil
+
   @doc """
   Effective resource limits map.
 
@@ -341,9 +348,11 @@ defmodule Omashiki.Config do
          caches: ca,
          repositories: repositories,
          environments: environments,
+         runtimes: runtimes,
          limits: l
        }) do
-    c != [] or hc != [] or ca != [] or repositories != [] or environments != [] or map_size(l) > 0
+    c != [] or hc != [] or ca != [] or repositories != [] or environments != [] or
+      runtimes != [] or map_size(l) > 0
   end
 
   # Which of the declared nodes is this machine?
@@ -412,6 +421,7 @@ defmodule Omashiki.Config do
         section(map, "repositories"),
         section(map, "environments"),
         section(map, "presets"),
+        section(map, "runtimes"),
         section(map, "nodes"),
         caches,
         credentials,
@@ -428,6 +438,7 @@ defmodule Omashiki.Config do
       host_credentials: host_credentials,
       caches: caches,
       presets: registry.presets,
+      runtimes: registry.runtimes,
       repositories: registry.repositories,
       environments: registry.environments,
       nodes: registry.nodes,
@@ -903,6 +914,7 @@ defmodule Omashiki.Config do
   end
 
   defp memory_to_bytes(_), do: nil
+
   defp plugins_dir_for(base_dir) do
     direct = Path.join(base_dir, "plugins")
     if File.dir?(direct), do: direct, else: repo_plugins_dir()

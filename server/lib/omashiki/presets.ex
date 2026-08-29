@@ -3,20 +3,25 @@ defmodule Omashiki.Presets do
 
   alias Omashiki.Config.Error
   alias Omashiki.Harness.LaunchPlan
-  alias Omashiki.Isolation
   alias Omashiki.Plugin.{Interpreter, Loader, Manifest}
   alias Omashiki.Plugin.Preset
+  alias Omashiki.Runtime.Spec
 
   @adapter Omashiki.Plugin.Interpreter
   @preset_fields ~w(plugin options)
   @legacy_preset_fields ~w(adapter runtime image)
+  @snapshot_fields ~w(name plugin options runtime launch_plan manifest)
+  @launch_plan_fields ~w(runtime transport startup readiness secret environment manifest llm_egress)
 
   def adapter(%Preset{adapter: adapter}), do: adapter
   def adapter(%{adapter: adapter}) when is_atom(adapter), do: adapter
-  def adapter(%{adapter: key}) when is_binary(key), do: @adapter
-  def adapter(%{preset: profile}), do: adapter(profile)
-  def adapter(%{"preset" => profile}), do: profile |> profile_from_snapshot!() |> adapter()
-  def adapter(%{key: _key}), do: @adapter
+  def adapter(%{preset: %Preset{} = profile}), do: adapter(profile)
+
+  def adapter(%{preset: profile, runtime: runtime}) when is_map(profile),
+    do: profile_from_snapshot!(profile, runtime) |> adapter()
+
+  def adapter(%{"preset" => profile, "runtime" => runtime}) when is_map(profile),
+    do: profile_from_snapshot!(profile, runtime) |> adapter()
 
   def adapter(environment),
     do: raise(ArgumentError, "environment has no resolved plugin: #{inspect(environment)}")
@@ -24,8 +29,13 @@ defmodule Omashiki.Presets do
   def plugin(%Preset{plugin: key}), do: key
 
   def profile(%{preset: %Preset{} = profile}), do: profile
-  def profile(%{preset: profile}) when is_map(profile), do: profile_from_snapshot!(profile)
-  def profile(%{"preset" => profile}) when is_map(profile), do: profile_from_snapshot!(profile)
+
+  def profile(%{preset: profile, runtime: runtime}) when is_map(profile),
+    do: profile_from_snapshot!(profile, runtime)
+
+  def profile(%{"preset" => profile, "runtime" => runtime}) when is_map(profile),
+    do: profile_from_snapshot!(profile, runtime)
+
   def profile(_), do: raise(ArgumentError, "environment has no resolved preset")
 
   def build!(section, plugins) when is_map(section) do
@@ -36,14 +46,13 @@ defmodule Omashiki.Presets do
 
   def build!(_, _), do: raise(Error, "presets must be a table")
 
-  def finalize_preset!(%Preset{} = base, isolation_kind, image, where) do
-    isolation = %Isolation{key: base.name, kind: isolation_kind, config: %{"image" => image}, status: "active"}
-    preset = %{base | isolation: isolation, launch_plan: nil}
+  def finalize_preset!(%Preset{} = base, %Spec{} = runtime, where) do
+    preset = %{base | runtime: runtime, launch_plan: nil}
 
     launch_plan =
       case Interpreter.launch_plan(preset) do
         {:ok, %LaunchPlan{} = plan} ->
-          validate_launch_plan!(plan, where)
+          validate_launch_plan!(plan, runtime, where)
           plan
 
         {:ok, other} ->
@@ -78,7 +87,7 @@ defmodule Omashiki.Presets do
       adapter: @adapter,
       plugin: plugin,
       options: options,
-      isolation: nil,
+      runtime: nil,
       launch_plan: nil,
       manifest: manifest
     }
@@ -91,7 +100,9 @@ defmodule Omashiki.Presets do
     unless is_map(options), do: raise(Error, "#{where}.options must be a table")
 
     case @adapter.validate_options(manifest, options) do
-      :ok -> :ok
+      :ok ->
+        :ok
+
       {:error, {:unknown_options, keys}} ->
         raise Error, "#{where}.options unknown field #{inspect(hd(keys))}"
 
@@ -103,9 +114,29 @@ defmodule Omashiki.Presets do
     end
   end
 
-  defp profile_from_snapshot!(%{"name" => name, "plugin" => plugin, "options" => options} = profile) do
-    isolation = isolation_from_snapshot(Map.get(profile, "isolation"))
-    launch_plan = launch_plan_from_snapshot(Map.get(profile, "launch_plan"), isolation)
+  defp profile_from_snapshot!(
+         %{
+           "name" => name,
+           "plugin" => plugin,
+           "options" => options,
+           "runtime" => snapshot_runtime
+         } = profile,
+         runtime
+       ) do
+    unknown = Map.keys(profile) -- @snapshot_fields
+
+    if unknown != [] do
+      raise ArgumentError, "invalid resolved preset #{inspect(profile)}"
+    end
+
+    runtime = runtime_from_snapshot(runtime)
+    snapshot_runtime = runtime_from_snapshot(snapshot_runtime)
+
+    if snapshot_runtime != runtime do
+      raise ArgumentError, "resolved preset runtime does not match environment runtime"
+    end
+
+    launch_plan = launch_plan_from_snapshot(Map.get(profile, "launch_plan"), runtime)
     manifest = manifest_from_snapshot(Map.get(profile, "manifest"))
 
     %Preset{
@@ -113,50 +144,107 @@ defmodule Omashiki.Presets do
       adapter: @adapter,
       plugin: plugin,
       options: options,
-      isolation: isolation,
+      runtime: runtime,
       launch_plan: launch_plan,
       manifest: manifest
     }
   end
 
-  defp profile_from_snapshot!(profile), do: raise(ArgumentError, "invalid resolved preset #{inspect(profile)}")
+  defp profile_from_snapshot!(profile, _runtime),
+    do: raise(ArgumentError, "invalid resolved preset #{inspect(profile)}")
 
   defp manifest_from_snapshot(nil), do: nil
   defp manifest_from_snapshot(%Manifest{} = manifest), do: manifest
   defp manifest_from_snapshot(map) when is_map(map), do: Manifest.from_snapshot(map)
 
-  defp isolation_from_snapshot(%Isolation{} = isolation), do: isolation
+  defp runtime_from_snapshot(%Spec{handler: handler} = runtime) when is_binary(handler),
+    do: runtime
 
-  defp isolation_from_snapshot(%{"kind" => kind, "config" => config}),
-    do: %Isolation{key: nil, kind: kind, config: config, status: "active"}
+  defp runtime_from_snapshot(
+         %{
+           "name" => name,
+           "backend" => backend,
+           "handler" => handler,
+           "distribution" => distribution,
+           "plugin" => plugin,
+           "image" => image
+         } = runtime
+       ) do
+    if Map.keys(runtime) |> Enum.sort() != ~w(backend distribution handler image name plugin) do
+      raise ArgumentError, "invalid resolved runtime #{inspect(runtime)}"
+    end
 
-  defp isolation_from_snapshot(isolation), do: isolation
+    %Spec{
+      name: name,
+      backend: backend,
+      handler: handler,
+      distribution: distribution,
+      plugin: plugin,
+      image: image
+    }
+  end
 
-  defp launch_plan_from_snapshot(%LaunchPlan{} = plan, _isolation), do: plan
+  defp runtime_from_snapshot(runtime),
+    do: raise(ArgumentError, "invalid resolved runtime #{inspect(runtime)}")
 
-  defp launch_plan_from_snapshot(%{} = plan, isolation) do
+  defp launch_plan_from_snapshot(%LaunchPlan{runtime: runtime} = plan, runtime), do: plan
+
+  defp launch_plan_from_snapshot(%{"runtime" => snapshot_runtime} = plan, runtime) do
+    unknown = Map.keys(plan) -- @launch_plan_fields
+
+    if unknown != [] do
+      raise ArgumentError, "invalid resolved launch plan #{inspect(plan)}"
+    end
+
+    snapshot_runtime = runtime_from_snapshot(snapshot_runtime)
+
+    if snapshot_runtime != runtime do
+      raise ArgumentError, "resolved launch plan runtime does not match environment runtime"
+    end
+
     %LaunchPlan{
-      isolation: isolation,
+      runtime: runtime,
       transport: Map.get(plan, "transport", %{}),
       startup: Map.get(plan, "startup"),
       readiness: Map.get(plan, "readiness"),
       secret: Map.get(plan, "secret"),
       environment: Map.get(plan, "environment", []),
+      manifest: Map.get(plan, "manifest"),
       llm_egress: normalize_egress(Map.get(plan, "llm_egress"))
     }
   end
 
-  defp launch_plan_from_snapshot(_, _), do: nil
+  defp launch_plan_from_snapshot(plan, _),
+    do: raise(ArgumentError, "invalid resolved launch plan #{inspect(plan)}")
 
   defp normalize_egress("gateway"), do: :gateway
   defp normalize_egress("engine"), do: :engine
   defp normalize_egress(value), do: value
 
-  defp validate_launch_plan!(%LaunchPlan{isolation: isolation, transport: transport}, where) do
-    unless isolation.kind in Isolation.kinds(),
-      do: raise(Error, "#{where}: plugin launch plan has unsupported isolation #{inspect(isolation.kind)}")
+  defp validate_launch_plan!(
+         %LaunchPlan{runtime: plan_runtime, transport: transport},
+         runtime,
+         where
+       ) do
+    unless plan_runtime == runtime do
+      raise Error, "#{where}: plugin launch plan runtime does not match selected runtime"
+    end
 
-    if isolation.kind == "docker" and not is_binary(Omashiki.Runtimes.docker_image(isolation)) do
+    unless runtime.backend == "docker",
+      do:
+        raise(
+          Error,
+          "#{where}: plugin launch plan has unsupported backend #{inspect(runtime.backend)}"
+        )
+
+    unless runtime.handler in ["runc", "kata"],
+      do:
+        raise(
+          Error,
+          "#{where}: plugin launch plan has unsupported Docker runtime handler #{inspect(runtime.handler)}"
+        )
+
+    if not is_binary(Omashiki.Runtimes.image(runtime)) do
       raise Error, "#{where}: Docker launch plan requires an image"
     end
 

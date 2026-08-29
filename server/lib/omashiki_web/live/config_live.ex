@@ -21,7 +21,15 @@ defmodule OmashikiWeb.ConfigLive do
 
   @impl true
   def handle_event("reload_config", _params, socket) do
-    {:noreply, assign(socket, :reload_result, Rollout.reload())}
+    result = Rollout.reload()
+
+    socket =
+      case result do
+        {:ok, _info} -> assign_config(socket)
+        _ -> socket
+      end
+
+    {:noreply, assign(socket, :reload_result, result)}
   end
 
   @impl true
@@ -162,11 +170,20 @@ defmodule OmashikiWeb.ConfigLive do
               <h3 class="font-headline italic text-xl text-on-surface">{environment.name}</h3><span class="font-mono text-xs text-status-succeeded">read-only</span>
             </div>
             <dl class="mt-4 grid gap-2 font-mono text-xs sm:grid-cols-[8rem_1fr]">
-              <dt class="text-on-surface-variant">isolation</dt><dd class="text-on-surface">
-                {environment.isolation}
+              <dt class="text-on-surface-variant">runtime</dt><dd class="text-on-surface">
+                {environment.runtime.name}
+              </dd>
+              <dt class="text-on-surface-variant">handler</dt><dd class="text-on-surface">
+                {environment.runtime.handler}
+              </dd>
+              <dt class="text-on-surface-variant">backend</dt><dd class="text-on-surface">
+                {environment.runtime.backend}
+              </dd>
+              <dt class="text-on-surface-variant">distribution</dt><dd class="text-on-surface">
+                {environment.runtime.distribution}
               </dd>
               <dt class="text-on-surface-variant">image</dt><dd class="break-all text-on-surface">
-                {Omashiki.Runtimes.docker_image(environment.preset.isolation)}
+                {environment.runtime.image}
               </dd>
               <dt class="text-on-surface-variant">preset</dt><dd class="text-on-surface">
                 {environment.preset.name}

@@ -12,7 +12,7 @@ defmodule Omashiki.Runtime.CapabilityTest do
 
   test "adapts the injected container boundary without exposing ContainerManager" do
     container = %{id: "sandbox", transport: %{"kind" => "cli"}}
-    capability = Capability.from_container(container, Boundary)
+    capability = Capability.from_sandbox(container, Boundary)
 
     assert {:ok, _} = Capability.exec(capability, ["runner", "/tmp/input"], 5_000)
     assert_receive {:exec, ^container, ["runner", "/tmp/input"], 5_000}

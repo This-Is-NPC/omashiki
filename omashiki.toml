@@ -79,6 +79,23 @@ pids_limit = 256
 # global_budget_tokens = 1000000
 # global_budget_window_hours = 24
 
+# Docker runtime handlers share the Debian agent image family. Environments
+# default to runc; kata also has a catalog so its handler can be selected after
+# the host runtime and compatibility prerequisites are installed.
+[runtimes.docker.runc.debian.images]
+opencode = "omashiki/agent:latest"
+claude-code = "omashiki/agent-claude:latest"
+codex = "omashiki/agent-codex:latest"
+pi = "omashiki/agent-pi:latest"
+jcode = "omashiki/agent-jcode:latest"
+
+[runtimes.docker.kata.debian.images]
+opencode = "omashiki/agent:latest"
+claude-code = "omashiki/agent-claude:latest"
+codex = "omashiki/agent-codex:latest"
+pi = "omashiki/agent-pi:latest"
+jcode = "omashiki/agent-jcode:latest"
+
 [caches.global]
 host = "~/.cache/omashiki/global"
 max_size_mb = 8192
@@ -173,8 +190,7 @@ plugin = "claude-code"
 
 [environments.opencode]
 
-isolation = "docker"
-image = "omashiki/agent:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 preset = "opencode"
@@ -237,8 +253,7 @@ pids = 256
 ## network must not be "none" and the credential must be a gateway credential.
 #[environments.jcode]
 #preset = "jcode"
-#isolation = "docker"
-#image = "omashiki/agent-jcode:latest"
+#runtime = "docker.runc.debian"
 #sink = "git"
 #packages = []
 #executables = ["git"]
@@ -283,8 +298,7 @@ plugin = "codex"
 
 [environments.codex]
 
-isolation = "docker"
-image = "omashiki/agent-codex:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 preset = "codex"
@@ -413,8 +427,7 @@ config = "~/.config/omashiki/loadtest/opencode-go.json"
 
 [environments.loadtest]
 preset = "lt-stub"
-isolation = "docker"
-image = "omashiki/agent-jcode:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 executables = ["git"]
@@ -436,8 +449,7 @@ pids = 128
 
 [environments.lt-opencode-go]
 preset = "lt-opencode-go"
-isolation = "docker"
-image = "omashiki/agent:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 executables = ["git"]
@@ -459,8 +471,7 @@ pids = 256
 
 [environments.lt-openrouter]
 preset = "lt-openrouter"
-isolation = "docker"
-image = "omashiki/agent:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 executables = ["git"]
@@ -482,8 +493,7 @@ pids = 256
 
 [environments.lt-codex]
 preset = "lt-codex"
-isolation = "docker"
-image = "omashiki/agent-codex:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 executables = ["git"]
@@ -505,8 +515,7 @@ pids = 256
 
 [environments.lt-qwen]
 preset = "lt-qwen"
-isolation = "docker"
-image = "omashiki/agent:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 executables = ["git"]
@@ -528,8 +537,7 @@ pids = 256
 
 [environments.lt-jcode]
 preset = "lt-jcode"
-isolation = "docker"
-image = "omashiki/agent-jcode:latest"
+runtime = "docker.runc.debian"
 sink = "git"
 packages = []
 executables = ["git"]

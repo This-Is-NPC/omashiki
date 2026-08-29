@@ -21,11 +21,13 @@ defmodule Omashiki.Jobs.AdmissionTest do
     state_path = Path.join(root, "provider-state.json")
     File.write!(state_path, "{}")
 
-    load_config = fn model ->
-      Config.load_map!(config_map(state_path, model), path: Path.join(root, "omashiki.toml"))
+    load_config = fn model, image ->
+      Config.load_map!(config_map(state_path, model, image),
+        path: Path.join(root, "omashiki.toml")
+      )
     end
 
-    load_config.("test")
+    load_config.("test", "omashiki/agent:latest")
 
     user = user_fixture()
     {token, plaintext} = api_token_fixture(user)
@@ -34,7 +36,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
     {:ok, token: token, plaintext: plaintext, load_config: load_config}
   end
 
-  defp config_map(state_path, model) do
+  defp config_map(state_path, model, image) do
     %{
       "repositories" => %{
         "app" => %{
@@ -48,6 +50,11 @@ defmodule Omashiki.Jobs.AdmissionTest do
       "presets" => %{
         "opencode" => %{"plugin" => "opencode", "options" => %{}}
       },
+        "runtimes" => %{
+          "docker" => %{
+            "runc" => %{"debian" => %{"images" => %{"opencode" => image}}}
+          }
+        },
       "credentials" => %{
         "secret" => %{
           "provider" => "anthropic",
@@ -57,8 +64,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
       },
       "environments" => %{
         "safe" => %{
-          "isolation" => "docker",
-          "image" => "omashiki/agent:latest",
+          "runtime" => "docker.runc.debian",
           "sink" => "git",
           "packages" => [],
           "preset" => "opencode",
@@ -122,6 +128,16 @@ defmodule Omashiki.Jobs.AdmissionTest do
     refute inspect(job) =~ "OMASHIKI_TEST_GIT_KEY_PASSPHRASE"
 
     assert job.admitted_environment["name"] == "safe"
+
+    assert job.admitted_environment["runtime"] == %{
+             "name" => "docker.runc.debian",
+             "handler" => "runc",
+             "backend" => "docker",
+             "distribution" => "debian",
+             "plugin" => "opencode",
+             "image" => "omashiki/agent:latest"
+           }
+
     assert [%{"read_only" => false}] = job.admitted_environment["mounts"]
     refute inspect(job.admitted_environment) =~ "do-not-persist"
 
@@ -183,9 +199,11 @@ defmodule Omashiki.Jobs.AdmissionTest do
     assert {:ok, job} = Admission.admit(token, single_request())
     assert [%{"name" => "secret", "model" => "test"}] = job.admitted_environment["credentials"]
 
-    load_config.("swapped-after-admission")
+    load_config.("swapped-after-admission", "omashiki/agent:swapped")
 
     assert %{model: "swapped-after-admission"} = Config.get_credential("secret")
+    assert Config.get_environment("safe").runtime.image == "omashiki/agent:swapped"
+    assert job.admitted_environment["runtime"]["image"] == "omashiki/agent:latest"
 
     pinned = Credentials.admitted(job.admitted_environment, "secret")
     assert pinned.model == "test"
@@ -201,6 +219,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
              Admission.admit(token, single_request(%{"idempotency_key" => "request-2"}))
 
     assert [%{"model" => "swapped-after-admission"}] = next.admitted_environment["credentials"]
+    assert next.admitted_environment["runtime"]["image"] == "omashiki/agent:swapped"
   end
 
   @doc false

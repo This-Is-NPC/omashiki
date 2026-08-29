@@ -44,8 +44,7 @@ defmodule Omashiki.Config.Environment do
   @enforce_keys [
     :name,
     :preset,
-    :isolation,
-    :image,
+    :runtime,
     :sink,
     :executables,
     :credentials,
@@ -65,6 +64,13 @@ defmodule Omashiki.Config.Environment do
   defstruct @enforce_keys
 end
 
+defmodule Omashiki.Config.Runtime do
+  @moduledoc "Declarative runtime catalog entry and its plugin image bindings."
+
+  @enforce_keys [:name, :backend, :handler, :distribution, :images]
+  defstruct @enforce_keys
+end
+
 defmodule Omashiki.Config.ResolvedJob do
   @moduledoc "Repository and environment values captured at job admission."
   @enforce_keys [:environment, :digest]
@@ -74,9 +80,10 @@ end
 defmodule Omashiki.Config.Registry do
   @moduledoc false
 
-  alias Omashiki.Config.{Environment, Error, Mount, Machine, Repository, Step}
+  alias Omashiki.Config.{Environment, Error, Mount, Machine, Repository, Runtime, Step}
   alias Omashiki.Plugin.ImageProvides
   alias Omashiki.SupplyChain.Policy
+  alias Omashiki.Runtime.Spec
 
   @name ~r/^[a-z0-9]+(?:-[a-z0-9]+)*$/
   @branch ~r/^[A-Za-z0-9][A-Za-z0-9._\/-]*$/
@@ -91,11 +98,16 @@ defmodule Omashiki.Config.Registry do
   @max_timeout_ms 24 * 60 * 60 * 1_000
   @max_memory_bytes 1024 * 1024 * 1024 * 1024
   @env_reference ~r/^\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/
+  @image_component ~r/\A[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*\z/
+  @image_tag ~r/\A[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\z/
+  @image_digest ~r/\Asha256:[0-9a-f]{64}\z/
+  @runtime_handlers ~w(runc kata)
 
   def build!(
         repository_section,
         environment_section,
         preset_section,
+        runtime_section,
         node_section,
         caches,
         credentials,
@@ -109,23 +121,26 @@ defmodule Omashiki.Config.Registry do
 
     repositories = build_repositories!(repository_section, base_dir)
     presets = Omashiki.Presets.build!(preset_section, plugins)
+    runtimes = build_runtimes!(runtime_section, Map.keys(plugins))
     nodes = build_nodes!(node_section)
 
     environments =
       build_environments!(
         environment_section,
         presets,
+        runtimes,
         caches,
         credentials,
         host_credentials,
         base_dir
       )
 
-    digest = digest(repositories, presets, environments)
+    digest = digest(repositories, presets, environments, runtimes)
 
     %{
       repositories: repositories,
       presets: presets,
+      runtimes: runtimes,
       environments: environments,
       nodes: nodes,
       registry_digest: digest
@@ -147,11 +162,12 @@ defmodule Omashiki.Config.Registry do
   # divergence that does not exist. Divergence stays loud where it is actually
   # checkable: a machine absent from a declared `[nodes]` list fails config load
   # outright rather than claiming work under a node id nothing else knows about.
-  def digest(repositories, presets, environments) do
+  def digest(repositories, presets, environments, runtimes) do
     canonical = %{
       repositories: Enum.map(repositories, &digest_repository/1),
       presets: presets,
-      environments: Enum.map(environments, &digest_environment/1)
+      environments: Enum.map(environments, &digest_environment/1),
+      runtimes: Enum.map(runtimes, &digest_runtime/1)
     }
 
     canonical
@@ -163,6 +179,8 @@ defmodule Omashiki.Config.Registry do
   defp digest_repository(%Repository{} = repo) do
     %{name: repo.name, remote: repo.remote, base_branch: repo.base_branch}
   end
+
+  defp digest_runtime(%Runtime{} = runtime), do: Map.from_struct(runtime)
 
   # A node declares a name and nothing else today. The fields a distributed
   # deployment needs — per-node capacity, per-node Docker endpoint — are added by
@@ -359,8 +377,159 @@ defmodule Omashiki.Config.Registry do
   defp expand_host_path("~/" <> rest), do: Path.join(System.user_home!(), rest)
   defp expand_host_path(path), do: Path.expand(path)
 
-  defp build_environments!(section, presets, caches, credentials, host_credentials, base_dir) do
+  defp build_runtimes!(section, plugin_names) do
+    section
+    |> require_section_table!("runtimes")
+    |> Enum.map(fn {backend, distributions} ->
+      backend_where = "runtimes.#{backend}"
+      validate_supported_runtime!(backend, "backend", backend_where, "docker")
+      handlers = require_table!(distributions, backend_where)
+
+      Enum.map(handlers, fn {handler, distributions} ->
+        handler_where = "#{backend_where}.#{handler}"
+        validate_runtime_handler!(handler, handler_where)
+        distributions = require_table!(distributions, handler_where)
+
+        Enum.map(distributions, fn {distribution, attrs} ->
+          where = "#{handler_where}.#{distribution}"
+          validate_supported_runtime!(distribution, "distribution", where, "debian")
+          attrs = require_table!(attrs, where)
+          reject_unknown!(attrs, ["images"], where)
+          images = runtime_images!(Map.get(attrs, "images"), "#{where}.images", plugin_names)
+
+          %Runtime{
+            name: "#{backend}.#{handler}.#{distribution}",
+            backend: backend,
+            handler: handler,
+            distribution: distribution,
+            images: images
+          }
+        end)
+      end)
+    end)
+    |> List.flatten()
+    |> Enum.sort_by(& &1.name)
+  end
+
+  defp validate_runtime_handler!(handler, where) do
+    unless handler in @runtime_handlers do
+      raise Error,
+            "#{where}.handler must be one of #{Enum.join(@runtime_handlers, ", ")}, got #{inspect(handler)}"
+    end
+  end
+
+  defp validate_supported_runtime!(value, field, where, expected) do
+    unless value == expected do
+      raise Error,
+            "#{where}.#{field} must be #{inspect(expected)}, got #{inspect(value)}"
+    end
+  end
+
+  defp runtime_images!(%{} = images, where, plugin_names) do
+    images =
+      images
+      |> stringify_keys()
+      |> Enum.map(fn {plugin, image} ->
+        unless is_binary(plugin) and plugin != "" do
+          raise Error, "#{where}: plugin names must be non-empty strings"
+        end
+
+        unless plugin in plugin_names do
+          raise Error, "#{where}: unknown plugin #{inspect(plugin)}"
+        end
+
+        unless valid_runtime_image?(image) do
+          raise Error,
+                "#{where}.#{plugin} must be a valid Docker/OCI image reference"
+        end
+
+        {plugin, image}
+      end)
+      |> Map.new()
+
+    if map_size(images) == 0 do
+      raise Error, "#{where} must declare at least one plugin image"
+    end
+
+    images
+  end
+
+  defp runtime_images!(nil, where, _plugin_names), do: raise(Error, "#{where} is required")
+  defp runtime_images!(_, where, _plugin_names), do: raise(Error, "#{where} must be a table")
+
+  defp valid_runtime_image?(image) when is_binary(image) do
+    String.valid?(image) and byte_size(image) <= 255 and
+      not Regex.match?(~r/\s/u, image) and
+      not Enum.any?(String.to_charlist(image), &(&1 < 0x20 or &1 in 0x7F..0x9F)) and
+      valid_runtime_image_reference?(image)
+  end
+
+  defp valid_runtime_image?(_), do: false
+
+  defp valid_runtime_image_reference?(image) do
+    {image_name, digest} = split_image_digest(image)
+    {repository, tag} = split_image_tag(image_name)
+
+    valid_runtime_repository?(repository) and valid_runtime_tag?(tag) and
+      valid_runtime_digest?(digest)
+  end
+
+  defp split_image_digest(image) do
+    case String.split(image, "@", parts: 2) do
+      [image_name] -> {image_name, nil}
+      [image_name, digest] -> {image_name, digest}
+    end
+  end
+
+  defp split_image_tag(image_name) do
+    case Regex.run(~r/\A(.+):([A-Za-z0-9_][A-Za-z0-9_.-]{0,127})\z/, image_name) do
+      [_, repository, tag] -> {repository, tag}
+      _ -> {image_name, nil}
+    end
+  end
+
+  defp valid_runtime_repository?(repository) when is_binary(repository) do
+    parts = String.split(repository, "/")
+
+    byte_size(repository) > 0 and byte_size(repository) <= 255 and
+      valid_runtime_registry_component?(hd(parts)) and
+      Enum.all?(tl(parts), &Regex.match?(@image_component, &1))
+  end
+
+  defp valid_runtime_repository?(_), do: false
+
+  defp valid_runtime_registry_component?(component) do
+    case String.split(component, ":", parts: 2) do
+      [host] -> Regex.match?(@image_component, host)
+      [host, port] -> Regex.match?(@image_component, host) and valid_runtime_port?(port)
+      _ -> false
+    end
+  end
+
+  defp valid_runtime_port?(port) do
+    case Integer.parse(port) do
+      {value, ""} -> value in 1..65_535
+      _ -> false
+    end
+  end
+
+  defp valid_runtime_tag?(nil), do: true
+  defp valid_runtime_tag?(tag), do: Regex.match?(@image_tag, tag)
+
+  defp valid_runtime_digest?(nil), do: true
+  defp valid_runtime_digest?(digest), do: Regex.match?(@image_digest, digest)
+
+  defp build_environments!(
+         section,
+         presets,
+         runtimes,
+         caches,
+         credentials,
+         host_credentials,
+         base_dir
+       ) do
     presets_by_name = Map.new(presets, &{&1.name, &1})
+    runtimes_by_name = Map.new(runtimes, &{&1.name, &1})
     caches_by_name = Map.new(caches, &{&1.name, &1})
     credentials_by_name = Map.new(credentials, &{&1.name, &1})
     host_credentials_by_name = Map.new(host_credentials, &{&1.name, &1})
@@ -387,14 +556,13 @@ defmodule Omashiki.Config.Registry do
 
       reject_unknown!(
         attrs,
-        ~w(preset isolation image sink packages executables credentials capabilities mcp_servers pre_steps post_steps timeout_ms caches mounts policy network resources),
+        ~w(preset runtime sink packages executables credentials capabilities mcp_servers pre_steps post_steps timeout_ms caches mounts policy network resources),
         where
       )
 
       timeout_ms = positive_integer!(attrs, "timeout_ms", where, @max_timeout_ms)
       preset_name = require_string!(attrs, "preset", where)
-      isolation = require_string!(attrs, "isolation", where)
-      image = require_string!(attrs, "image", where)
+      runtime_name = require_string!(attrs, "runtime", where)
       sink = require_string!(attrs, "sink", where)
       packages = packages_list!(attrs, "packages", where)
 
@@ -419,9 +587,18 @@ defmodule Omashiki.Config.Registry do
           profile -> profile
         end
 
-      preset = Omashiki.Presets.finalize_preset!(base_preset, isolation, image, where)
+      runtime =
+        case Map.get(runtimes_by_name, runtime_name) do
+          nil ->
+            raise Error, "#{where}.runtime references unknown runtime #{inspect(runtime_name)}"
 
-      validate_requires!(preset.manifest, image, packages, where)
+          runtime ->
+            resolve_runtime!(runtime, base_preset.plugin, where)
+        end
+
+      preset = Omashiki.Presets.finalize_preset!(base_preset, runtime, where)
+
+      validate_requires!(preset.manifest, runtime.image, packages, where)
 
       {resolved_credentials, resolved_host_credentials} =
         attrs
@@ -455,8 +632,7 @@ defmodule Omashiki.Config.Registry do
       %Environment{
         name: name,
         preset: preset,
-        isolation: isolation,
-        image: image,
+        runtime: runtime,
         sink: sink,
         packages: packages,
         executables: executables,
@@ -475,6 +651,24 @@ defmodule Omashiki.Config.Registry do
       }
     end)
     |> Enum.sort_by(& &1.name)
+  end
+
+  defp resolve_runtime!(%Runtime{} = runtime, plugin, where) do
+    case Map.get(runtime.images, plugin) do
+      image when is_binary(image) and image != "" ->
+        %Spec{
+          name: runtime.name,
+          backend: runtime.backend,
+          handler: runtime.handler,
+          distribution: runtime.distribution,
+          plugin: plugin,
+          image: image
+        }
+
+      _ ->
+        raise Error,
+              "#{where}.runtime has no image for preset plugin #{inspect(plugin)} in #{runtime.name}"
+    end
   end
 
   defp build_steps!(steps, phase, environment_timeout_ms, executables, where)

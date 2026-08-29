@@ -21,10 +21,14 @@ defmodule Omashiki.Jobs.OrderingTest do
         "presets" => %{
           "opencode" => %{"plugin" => "opencode", "options" => %{}}
         },
+        "runtimes" => %{
+          "docker" => %{
+            "runc" => %{"debian" => %{"images" => %{"opencode" => "omashiki/agent:latest"}}}
+          }
+        },
         "environments" => %{
           "safe" => %{
-            "isolation" => "docker",
-            "image" => "omashiki/agent:latest",
+            "runtime" => "docker.runc.debian",
             "sink" => "git",
             "packages" => [],
             "preset" => "opencode",
@@ -132,7 +136,10 @@ defmodule Omashiki.Jobs.OrderingTest do
     assert {:ok, [failed_root, failed_child]} =
              Jobs.Admission.admit_batch(
                token,
-               batch_request([{"failed-root", [], 0}, {"failed-child", [%{"ref" => "failed-root"}], 0}])
+               batch_request([
+                 {"failed-root", [], 0},
+                 {"failed-child", [%{"ref" => "failed-root"}], 0}
+               ])
              )
 
     assert {:ok, _running} = Jobs.start(failed_root)

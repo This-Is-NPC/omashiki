@@ -30,10 +30,14 @@ defmodule Omashiki.Integration.QueueLoadTest do
         "presets" => %{
           "opencode" => %{"plugin" => "opencode", "options" => %{}}
         },
+        "runtimes" => %{
+          "docker" => %{
+            "runc" => %{"debian" => %{"images" => %{"opencode" => "omashiki/agent:latest"}}}
+          }
+        },
         "environments" => %{
           "none" => %{
-            "isolation" => "docker",
-            "image" => "omashiki/agent:latest",
+            "runtime" => "docker.runc.debian",
             "sink" => "git",
             "packages" => [],
             "preset" => "opencode",

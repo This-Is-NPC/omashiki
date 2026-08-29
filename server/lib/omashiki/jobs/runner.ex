@@ -673,7 +673,7 @@ defmodule Omashiki.Jobs.Runner do
   defp harness_context(state) do
     container = state.container || %{}
     profile = Omashiki.Presets.profile(state.environment)
-    capability = Omashiki.Runtime.Capability.from_container(container, container_mod(state))
+    capability = Omashiki.Runtime.Capability.from_sandbox(container, container_mod(state))
 
     %Omashiki.Harness.Context{
       job: state.job,

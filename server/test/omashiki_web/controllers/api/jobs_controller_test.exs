@@ -17,10 +17,16 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
         "presets" => %{
           "opencode" => %{"plugin" => "opencode", "options" => %{}}
         },
+        "runtimes" => %{
+          "docker" => %{
+            "runc" => %{
+              "debian" => %{"images" => %{"opencode" => "omashiki/agent:latest"}}
+            }
+          }
+        },
         "environments" => %{
           "safe" => %{
-            "isolation" => "docker",
-            "image" => "omashiki/agent:latest",
+            "runtime" => "docker.runc.debian",
             "sink" => "git",
             "packages" => [],
             "preset" => "opencode",
@@ -142,6 +148,12 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     refute repositories.resp_body =~ root
     assert environments.status == 200
     refute environments.resp_body =~ "credentials"
+    environment = json_response(environments, 200)["data"] |> List.first()
+    assert environment["runtime"] == "docker.runc.debian"
+    assert environment["handler"] == "runc"
+    assert environment["backend"] == "docker"
+    assert environment["distribution"] == "debian"
+    assert environment["image"] == "omashiki/agent:latest"
   end
 
   defp request(overrides \\ %{}) do

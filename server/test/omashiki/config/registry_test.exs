@@ -2,9 +2,10 @@ defmodule Omashiki.Config.RegistryTest do
   use ExUnit.Case, async: false
 
   alias Omashiki.Config
-  alias Omashiki.Config.{Environment, Error, Machine, Repository, ResolvedJob, Step}
+  alias Omashiki.Config.{Environment, Error, Machine, Repository, ResolvedJob, Runtime, Step}
   alias Omashiki.Credentials.Credential
   alias Omashiki.Plugin.Preset
+  alias Omashiki.Runtime.Spec
   import Omashiki.Fixtures
 
   setup do
@@ -51,11 +52,21 @@ defmodule Omashiki.Config.RegistryTest do
     end
   end
 
-  test "requires isolation, image, and sink on environments", ctx do
-    for field <- ["isolation", "image", "sink"] do
+  test "requires runtime and sink on environments", ctx do
+    for field <- ["runtime", "sink"] do
       invalid = update_in(fixture(ctx), ["environments", "opencode"], &Map.delete(&1, field))
 
       assert_raise Error, fn ->
+        Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+      end
+    end
+  end
+
+  test "rejects legacy isolation and image fields on environments", ctx do
+    for field <- ["isolation", "image"] do
+      invalid = put_in(fixture(ctx), ["environments", "opencode", field], "docker")
+
+      assert_raise Error, ~r/unknown fields?/, fn ->
         Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
       end
     end
@@ -95,9 +106,12 @@ defmodule Omashiki.Config.RegistryTest do
     end)
   end
 
-  test "tracked omashiki.toml boots and pins OpenCode Go GLM-5.3-Flash" do
-    path = Path.expand("../../../../omashiki.toml", __DIR__)
-    assert :ok = Config.load!(path)
+  test "a complete runtime config boots and pins the selected plugin model", ctx do
+    configured =
+      fixture(ctx)
+      |> put_in(["presets", "opencode", "options", "model"], "opencode-go/glm-5.3-flash")
+
+    assert :ok = Config.load_map!(configured, path: Path.join(ctx.root, "omashiki.toml"))
 
     preset = Enum.find(Config.presets(), &(&1.name == "opencode"))
     environment = Enum.find(Config.environments(), &(&1.name == "opencode"))
@@ -119,8 +133,14 @@ defmodule Omashiki.Config.RegistryTest do
              %Environment{
                name: "opencode",
                preset: %Preset{name: "opencode"},
-               isolation: "docker",
-               image: "omashiki/agent:latest",
+               runtime: %Spec{
+                 name: "docker.runc.debian",
+                 backend: "docker",
+                 handler: "runc",
+                 distribution: "debian",
+                 plugin: "opencode",
+                 image: "omashiki/agent:latest"
+               },
                sink: "git",
                packages: [],
                executables: ["mise", "git"],
@@ -136,6 +156,7 @@ defmodule Omashiki.Config.RegistryTest do
     assert {:ok, %ResolvedJob{} = resolved} = Config.resolve_job("app", "opencode")
     assert resolved.repository.path == ctx.repo
     assert resolved.environment.name == "opencode"
+    assert resolved.environment.runtime.image == "omashiki/agent:latest"
     assert resolved.environment.preset.adapter == Omashiki.Plugin.Interpreter
     assert resolved.environment.preset.launch_plan.transport["kind"] == "http"
     assert resolved.digest == Config.current_digest()
@@ -154,6 +175,153 @@ defmodule Omashiki.Config.RegistryTest do
     changed = put_in(fixture(ctx), ["presets", "opencode", "options", "internal_port"], 4097)
     Config.load_map!(changed, path: Path.join(ctx.root, "omashiki.toml"))
     refute Config.current_digest() == first
+  end
+
+  test "runtime catalog is included in the immutable snapshot and digest", ctx do
+    assert :ok = Config.load_map!(fixture(ctx), path: Path.join(ctx.root, "omashiki.toml"))
+
+    assert [
+             %Runtime{
+               name: "docker.runc.debian",
+               handler: "runc",
+               images: %{"opencode" => "omashiki/agent:latest"}
+             }
+           ] =
+             Config.runtimes()
+
+    assert [%Runtime{}] = Config.current_snapshot().runtimes
+
+    first = Config.current_digest()
+
+    changed =
+      put_in(
+        fixture(ctx),
+        ["runtimes", "docker", "runc", "debian", "images", "opencode"],
+        "other/image"
+      )
+
+    Config.load_map!(changed, path: Path.join(ctx.root, "omashiki.toml"))
+    refute Config.current_digest() == first
+  end
+
+  test "accepts valid Docker and OCI runtime image references", ctx do
+    for image <- [
+          "registry.example:5000/team/agent:stable",
+          "ghcr.io/team/agent:v1.2.3",
+          "team/agent@sha256:#{String.duplicate("a", 64)}"
+        ] do
+      configured =
+        put_in(
+          fixture(ctx),
+          ["runtimes", "docker", "runc", "debian", "images", "opencode"],
+          image
+        )
+
+      assert :ok = Config.load_map!(configured, path: Path.join(ctx.root, "omashiki.toml"))
+      assert hd(Config.environments()).runtime.image == image
+    end
+  end
+
+  test "rejects malformed runtime image references at config load", ctx do
+    for image <- [
+          "   ",
+          " omashiki/agent:latest",
+          "omashiki/agent:latest ",
+          "omashiki/agent:la test",
+          "omashiki/agent\n:latest",
+          "omashiki/agent\u0001:latest",
+          "omashiki..agent:latest",
+          "omashiki//agent:latest",
+          "omashiki/agent:",
+          "omashiki/agent@sha256:abc",
+          "registry.example:bad/team/agent:latest",
+          "registry.example/team:5000/agent:latest",
+          "https://registry.example/team/agent:latest"
+        ] do
+      invalid =
+        put_in(
+          fixture(ctx),
+          ["runtimes", "docker", "runc", "debian", "images", "opencode"],
+          image
+        )
+
+      assert_raise Error, ~r/must be a valid Docker\/OCI image reference/, fn ->
+        Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+      end
+    end
+  end
+
+  test "rejects a runtime without an image for the preset plugin", ctx do
+    invalid =
+      put_in(fixture(ctx), ["runtimes", "docker", "runc", "debian", "images"], %{
+        "jcode" => "omashiki/agent-jcode:latest"
+      })
+
+    assert_raise Error, ~r/no image for preset plugin "opencode"/, fn ->
+      Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+  end
+
+  test "rejects image mappings for unknown plugins", ctx do
+    invalid =
+      put_in(
+        fixture(ctx),
+        ["runtimes", "docker", "runc", "debian", "images", "open-code"],
+        "omashiki/agent:latest"
+      )
+
+    assert_raise Error, ~r/unknown plugin "open-code"/, fn ->
+      Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+  end
+
+  test "supports only Docker runc and kata handlers on the debian catalog", ctx do
+    invalid_backend = put_in(fixture(ctx), ["runtimes", "podman"], %{"runc" => %{}})
+    invalid_distribution = put_in(fixture(ctx), ["runtimes", "docker", "runc", "alpine"], %{})
+    invalid_handler = put_in(fixture(ctx), ["runtimes", "docker", "gvisor"], %{"debian" => %{}})
+
+    assert_raise Error, ~r/must be "docker"/, fn ->
+      Config.load_map!(invalid_backend, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+
+    assert_raise Error, ~r/must be "debian"/, fn ->
+      Config.load_map!(invalid_distribution, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+
+    assert_raise Error, ~r/handler must be one of runc, kata/, fn ->
+      Config.load_map!(invalid_handler, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+  end
+
+  test "runc and kata runtimes can coexist and environments select either", ctx do
+    assert :ok = Config.load_map!(fixture(ctx), path: Path.join(ctx.root, "omashiki.toml"))
+    runc_digest = Config.current_digest()
+
+    kata_only =
+      fixture(ctx)
+      |> update_in(["runtimes", "docker"], fn runtimes ->
+        %{"kata" => runtimes["runc"]}
+      end)
+      |> put_in(["environments", "opencode", "runtime"], "docker.kata.debian")
+
+    assert :ok = Config.load_map!(kata_only, path: Path.join(ctx.root, "omashiki.toml"))
+    refute Config.current_digest() == runc_digest
+
+    configured =
+      fixture(ctx)
+      |> update_in(["runtimes", "docker"], fn runtimes ->
+        Map.put(runtimes, "kata", %{
+          "debian" => %{"images" => %{"opencode" => "omashiki/agent:kata"}}
+        })
+      end)
+      |> put_in(["environments", "opencode", "runtime"], "docker.kata.debian")
+
+    assert :ok = Config.load_map!(configured, path: Path.join(ctx.root, "omashiki.toml"))
+
+    assert Enum.map(Config.runtimes(), & &1.name) == ["docker.kata.debian", "docker.runc.debian"]
+
+    assert %Spec{handler: "kata", image: "omashiki/agent:kata"} =
+             hd(Config.environments()).runtime
   end
 
   test "a reload cannot mutate an admitted job snapshot", ctx do
@@ -428,11 +596,11 @@ defmodule Omashiki.Config.RegistryTest do
 
     c = %Repository{name: "app", path: "/one", base_branch: "next", remote: "git@h:a.git"}
 
-    assert Omashiki.Config.Registry.digest([a], [], []) ==
-             Omashiki.Config.Registry.digest([b], [], [])
+    assert Omashiki.Config.Registry.digest([a], [], [], []) ==
+             Omashiki.Config.Registry.digest([b], [], [], [])
 
-    refute Omashiki.Config.Registry.digest([a], [], []) ==
-             Omashiki.Config.Registry.digest([c], [], [])
+    refute Omashiki.Config.Registry.digest([a], [], [], []) ==
+             Omashiki.Config.Registry.digest([c], [], [], [])
   end
 
   test "ssh_key requires remote and a safe absolute path", ctx do
@@ -874,6 +1042,13 @@ defmodule Omashiki.Config.RegistryTest do
           "options" => %{}
         }
       },
+      "runtimes" => %{
+        "docker" => %{
+          "runc" => %{
+            "debian" => %{"images" => %{"opencode" => "omashiki/agent:latest"}}
+          }
+        }
+      },
       "credentials" => %{
         "provider" => %{
           "provider" => "openai_compat",
@@ -887,8 +1062,7 @@ defmodule Omashiki.Config.RegistryTest do
       "environments" => %{
         "opencode" => %{
           "preset" => "opencode",
-          "isolation" => "docker",
-          "image" => "omashiki/agent:latest",
+          "runtime" => "docker.runc.debian",
           "sink" => "git",
           "packages" => [],
           "executables" => ["mise", "git"],

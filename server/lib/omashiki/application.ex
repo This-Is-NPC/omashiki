@@ -10,6 +10,7 @@ defmodule Omashiki.Application do
     install_logger_filter()
     OmashikiWeb.RateLimiter.ensure_table()
     OmashikiWeb.AuthMode.assert_boot_safe!()
+    load_declared_config()
 
     recovery_children =
       if Application.get_env(:omashiki, :enable_job_recovery, true),
@@ -38,8 +39,8 @@ defmodule Omashiki.Application do
         Omashiki.Runtime.LeaseRenewer,
         Omashiki.Runtime.ContainerManager,
         Omashiki.Runtime.Inspector,
-        # Owns the hot swap. Boot still loads the file below — this is the
-        # supervised path that can load it *again* without a restart.
+        # Owns the hot swap. Boot has already loaded the initial generation;
+        # this is the supervised path that can load it again without a restart.
         Omashiki.Config.Rollout,
         Omashiki.Runtimes.CacheMaintenance,
         {Oban, Application.fetch_env!(:omashiki, Oban)},
@@ -52,7 +53,6 @@ defmodule Omashiki.Application do
     opts = [strategy: :one_for_one, name: Omashiki.Supervisor]
     {:ok, sup_pid} = Supervisor.start_link(children, opts)
 
-    load_declared_config()
     sync_execution_capacity()
     run_orphan_cleanup()
 

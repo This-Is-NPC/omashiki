@@ -5,7 +5,7 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
   alias Omashiki.Harness.Context
   alias Omashiki.Plugin.{Interpreter, Loader, Preset}
   alias Omashiki.Runtime.HostCredentials
-  alias Omashiki.Isolation
+  alias Omashiki.Runtime.Spec
 
   setup do
     origins =
@@ -163,11 +163,13 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
       adapter: Interpreter,
       plugin: "claude-code",
       options: %{},
-      isolation: %Isolation{
-        key: "claude-code",
-        kind: "docker",
-        config: %{"image" => "agent"},
-        status: "active"
+      runtime: %Spec{
+        name: "docker.runc.debian",
+        backend: "docker",
+        handler: "runc",
+        distribution: "debian",
+        plugin: "claude-code",
+        image: "agent"
       },
       launch_plan: nil,
       manifest: manifest

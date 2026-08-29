@@ -142,6 +142,11 @@ defmodule Omashiki.Jobs.SinkTest do
         "app" => %{"path" => "repo", "base_branch" => "main"}
       },
       "presets" => %{"opencode" => %{"plugin" => "opencode", "options" => %{}}},
+      "runtimes" => %{
+        "docker" => %{
+          "runc" => %{"debian" => %{"images" => %{"opencode" => "omashiki/agent:latest"}}}
+        }
+      },
       "credentials" => %{
         "secret" => %{
           "provider" => "anthropic",
@@ -160,8 +165,7 @@ defmodule Omashiki.Jobs.SinkTest do
 
   defp env(sink, state_path) do
     %{
-      "isolation" => "docker",
-      "image" => "omashiki/agent:latest",
+      "runtime" => "docker.runc.debian",
       "sink" => sink,
       "packages" => [],
       "preset" => "opencode",

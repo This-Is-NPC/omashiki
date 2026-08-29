@@ -4,8 +4,8 @@ defmodule Omashiki.Plugin.InterpreterTest do
   alias Omashiki.Credentials.Credential
   alias Omashiki.Harness.{Context, Invocation}
   alias Omashiki.Plugin.{Interpreter, Loader, Manifest, Preset}
-  alias Omashiki.Isolation
   alias Omashiki.Runtime.Capability
+  alias Omashiki.Runtime.Spec
 
   @plugins_dir Path.expand("../../../../plugins", __DIR__)
 
@@ -271,11 +271,13 @@ defmodule Omashiki.Plugin.InterpreterTest do
   end
 
   defp preset(manifest, options) do
-    runtime = %Isolation{
-      key: manifest.name,
-      kind: "docker",
-      config: %{"image" => "agent"},
-      status: "active"
+    runtime = %Spec{
+      name: "docker.runc.debian",
+      backend: "docker",
+      handler: "runc",
+      distribution: "debian",
+      plugin: manifest.name,
+      image: "agent"
     }
 
     base = %Preset{
@@ -283,7 +285,7 @@ defmodule Omashiki.Plugin.InterpreterTest do
       adapter: Interpreter,
       plugin: manifest.name,
       options: options,
-      isolation: runtime,
+      runtime: runtime,
       launch_plan: nil,
       manifest: manifest
     }

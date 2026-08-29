@@ -81,6 +81,26 @@ defmodule OmashikiWeb.ConfigLiveTest do
       refute is_nil(path)
     end
 
+    test "successful reload refreshes the rendered runtime image", %{conn: conn} do
+      write_toml(model: "initial-model", image: "omashiki/agent:initial")
+      assert {:ok, _info} = Omashiki.Config.reload(toml_path())
+
+      {:ok, lv, html} = live(conn, ~p"/config")
+      assert html =~ "omashiki/agent:initial"
+      assert html =~ "runc"
+
+      write_toml(model: "reloaded-model", image: "omashiki/agent:reloaded")
+
+      html =
+        lv
+        |> element("button", "Reload configuration")
+        |> render_click()
+
+      assert html =~ "Applied generation"
+      assert html =~ "omashiki/agent:reloaded"
+      refute html =~ "omashiki/agent:initial"
+    end
+
     test "a reload that fails on an unset ${env:VAR} says the previous config still serves",
          %{conn: conn} do
       System.put_env("OMASHIKI_TEST_LIVE_KEY", "set-for-now")
@@ -113,6 +133,7 @@ defmodule OmashikiWeb.ConfigLiveTest do
   defp write_toml(opts) do
     model = Keyword.fetch!(opts, :model)
     api_key = Keyword.get(opts, :api_key, "plaintext-key")
+    image = Keyword.get(opts, :image, "omashiki/agent:latest")
     path = toml_path()
 
     File.write!(path, """
@@ -126,14 +147,16 @@ defmodule OmashikiWeb.ConfigLiveTest do
     [presets.opencode]
     plugin = "opencode"
 
+     [runtimes.docker.runc.debian.images]
+    opencode = "#{image}"
+
     [credentials.provider]
     provider = "openai_compat"
     model = "#{model}"
     api_key = "#{api_key}"
 
     [environments.opencode]
-    isolation = "docker"
-    image = "omashiki/agent:latest"
+     runtime = "docker.runc.debian"
     sink = "git"
     packages = []
     preset = "opencode"
