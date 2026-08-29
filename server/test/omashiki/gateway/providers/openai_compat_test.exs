@@ -8,7 +8,7 @@ defmodule Omashiki.Gateway.Providers.OpenaiCompatTest do
   `0` invents spend that never happened (banned in Fase 0).
   """
 
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Omashiki.Credentials.Credential
   alias Omashiki.Gateway.Providers.OpenaiCompat
