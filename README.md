@@ -107,6 +107,9 @@ harness-neutral V2 payload contract:
 `instruction` is required and `context` is an optional JSON object. Provider,
 harness, model, and authentication controls are rejected from the payload.
 
+The full HTTP surface is specified in
+[`docs/api/jobs-openapi.json`](docs/api/jobs-openapi.json).
+
 ## Validation
 
 Install the versioned hook once per checkout:

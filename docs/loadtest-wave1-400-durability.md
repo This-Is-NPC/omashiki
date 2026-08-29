@@ -11,7 +11,7 @@ This file records the jcode retake.
 **Taken:** 2026-08-27
 **Baseline commit:** `e9368a5` (worktree `task/2809` for docs; runtime on main tree)
 **Host:** single developer workstation. Postgres in `server-db-1` on port 5442.
-**Runtime repo:** `/home/howl/Projects/person/omashiki` (main tree). Mix started
+**Runtime repo:** the checkout's main tree, not a worktree. Mix started
 from a git worktree makes job `.git` pointers resolve to the main repo, which
 is not bind-mounted; the jcode entrypoint then dies `exit=128`
 (`fatal: not a git repository`).

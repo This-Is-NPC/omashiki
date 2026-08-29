@@ -14,6 +14,26 @@ documentation.
 4. [Data model](data-model.md): persisted entities, invariants, and lifecycle
    relationships.
 
+## Contracts
+
+- [Jobs OpenAPI](api/jobs-openapi.json): the public HTTP surface — admission,
+  inspection, lifecycle control, events, and delivery status. Kept in step with
+  `server/lib/omashiki_web/router.ex`.
+
+## Component Documentation
+
+Owned by the component, listed here so it is findable. See Documentation
+Ownership below for what each may and may not describe.
+
+- [Agent images](../agent/README.md): building and maintaining the sandbox images.
+- [Example configurations](../examples/README.md): single-node and multi-node
+  `omashiki.toml` starting points, and the secret model.
+- [Load test harness](../.scripts/loadtest/README.md): prerequisites, tier
+  stanzas, and how to drive a run. The recorded results live in the engineering
+  record below, not there.
+- [VM orchestration](../vm/README.md): the disposable VMs used for distributed
+  execution tests.
+
 ## Design Direction
 
 These documents mostly describe work that is designed but not fully deployed.
@@ -36,6 +56,8 @@ aspirational, not current.
 
 ## Engineering Records
 
+- [Load test, wave 1](loadtest-wave1-400-durability.md): the 400-job durability
+  run, its recorded failure modes, and what they proved about NFR-001.
 - [CI baseline](ci-baseline.md): the recorded exit code and headline result of
   every local CI target at a named commit, plus the standing gaps that run
   exposed. Later changes claiming "CI is still green" compare against it.
