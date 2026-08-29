@@ -1,0 +1,19 @@
+{
+  "_comment": [
+    "NOT LIVE CONFIG. Omashiki exposes no MCP endpoint today — there is no",
+    "/api/v1/mcp route in server/lib/omashiki_web/router.ex. This file records",
+    "the shape a project-scoped MCP config would take if one is ever added.",
+    "The supported agent integration today is the Agent Skill: mise run skill:install.",
+    "Do not copy this to .mcp.json at the repository root: coding agents",
+    "auto-discover that filename and will try to connect on every session."
+  ],
+  "mcpServers": {
+    "omashiki": {
+      "type": "http",
+      "url": "http://127.0.0.1:4010/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer ${OMASHIKI_TOKEN}"
+      }
+    }
+  }
+}
