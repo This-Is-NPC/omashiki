@@ -1,0 +1,87 @@
+[project]
+slug = "omashiki"
+purpose = "vm-e2e"
+ownership_marker = "project=omashiki;purpose=vm-e2e"
+
+[base]
+qemu_uri = "qemu:///system"
+pool = "images"
+volume = "fedora44-base.qcow2"
+path = "~/vms/base/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2"
+format = "qcow2"
+sha256 = "28680fe5b371a5a82ebf43a31926e086a168e59949d03969c5093e7071f90b7f"
+
+[prepared]
+directory = "~/vms/base/omashiki-e2e"
+pointer = "~/.cache/omashiki/vm-e2e/prepared.json"
+pending = "~/.cache/omashiki/vm-e2e/prepared-pending.json"
+volume_prefix = "omashiki-fedora44-e2e"
+cloud_init = "vm/prepare-cloud-init.yaml"
+
+[topology]
+variant = "service-node"
+core = "host"
+domain_prefix = "omashiki"
+guest_user = "fedora"
+nodes = ["node-1", "node-2"]
+
+[vm]
+memory_mib = 8192
+vcpus = 4
+disk_gib = 40
+network = "default"
+bridge_interface = "virbr0"
+cloud_init = "vm/cloud-init.yaml"
+
+[services]
+core_port = 4010
+worker_port = 4011
+fake_provider_port = 8787
+database_internal_port = 5432
+tunnel_port_base = 15000
+database_image = "postgres:15-alpine"
+
+[workload]
+count = 4
+per_node_capacity = 2
+fake_latency_ms = 10000
+jitter_pct = 0
+job_timeout_ms = 300000
+expected_file = "hello.py"
+expected_content = "print(\"Hello, World!\")\n"
+expected_output = "Hello, World!\n"
+repository = "fixture"
+environment = "lt-jcode"
+fake_scenario = "python-hello"
+
+[resources]
+max_concurrent_containers = 2
+cpu_per_container = 0.25
+memory_per_container = "128MB"
+pids_limit = 128
+
+[artifact]
+image_repository = "omashiki/agent-jcode"
+image_key = "jcode"
+dockerfile = "agent/Dockerfile.jcode"
+build_context = "agent"
+source_excludes = [".git", ".temp", "deps", "_build", "node_modules", "server/tmp", "vm/__pycache__"]
+delivery = "docker-save-load"
+
+[runtime]
+backend = "docker"
+variant = "runc"
+distribution = "debian"
+runc_id = "docker.runc.debian"
+kata_id = "docker.kata.debian"
+
+[runtime.kata]
+version = "4.1.0"
+archive = "kata-static-4.1.0-amd64.tar.zst"
+url = "https://github.com/kata-containers/kata-containers/releases/download/4.1.0/kata-static-4.1.0-amd64.tar.zst"
+sha256 = "3dc6b69c4acb787b967b04b64599a20d02a8beb1a8eaab3084110df9d0b08c96"
+install_root = "/opt/kata"
+runtime_path = "/opt/kata/runtime-rs/bin/containerd-shim-kata-v2"
+hypervisor_path = "/opt/kata/bin/cloud-hypervisor"
+daemon_config = "/etc/docker/daemon.json"
+config_path = "/opt/kata/share/defaults/kata-containers/runtime-rs/configuration-clh-runtime-rs.toml"

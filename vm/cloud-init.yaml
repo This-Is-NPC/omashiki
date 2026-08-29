@@ -1,24 +1,5 @@
-# This file is a template reference. run.sh renders the per-run user-data so
-# the VM SSH key never becomes a tracked project file.
 #cloud-config
-hostname: omashiki-node-N
-package_update: true
-packages:
-  - git
-  - openssh-clients
-  - python3
-  - gcc
-  - gcc-c++
-  - make
-  - pkgconf-pkg-config
-  - openssl-devel
-  - libffi-devel
-  - ncurses-devel
-  - tar
-  - gzip
-  - curl
-  - erlang
-  - elixir
-runcmd:
-  - [bash, -lc, "dnf install -y moby-engine docker-cli || dnf install -y docker"]
-  - [bash, -lc, "systemctl enable --now docker && usermod -aG docker fedora"]
+hostname: "{{HOSTNAME}}"
+manage_etc_hosts: true
+ssh_authorized_keys:
+  - "{{SSH_PUBLIC_KEY}}"

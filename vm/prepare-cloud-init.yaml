@@ -1,0 +1,28 @@
+#cloud-config
+hostname: "{{HOSTNAME}}"
+manage_etc_hosts: true
+ssh_authorized_keys:
+  - "{{SSH_PUBLIC_KEY}}"
+package_update: true
+packages:
+  - git
+  - openssh-clients
+  - python3
+  - gcc
+  - gcc-c++
+  - make
+  - pkgconf-pkg-config
+  - openssl-devel
+  - libffi-devel
+  - ncurses-devel
+  - tar
+  - zstd
+  - gzip
+  - curl
+  - rsync
+  - iproute
+  - erlang
+  - elixir
+runcmd:
+  - [bash, -lc, "dnf install -y moby-engine docker-cli || dnf install -y docker"]
+  - [bash, -lc, "systemctl enable --now docker && usermod -aG docker {{GUEST_USER}}"]
