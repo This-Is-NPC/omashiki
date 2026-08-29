@@ -13,3 +13,6 @@ mise run ci:server:assets
 mise run ci:docker:server
 mise run ci:docker:agent
 mise run ci:docker:claude
+mise run ci:docker:codex
+mise run ci:docker:jcode
+mise run ci:docker:pi

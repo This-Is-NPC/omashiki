@@ -17,13 +17,21 @@ SERVER = ROOT / "server"
 ASSETS = SERVER / "assets"
 CONFIG_FILE = ROOT / "omashiki.toml"
 
-# Images the orchestrator provisions sandboxes from, and where each is built.
-# Both runtimes ship active, so a working checkout needs both: an active
-# runtime with no image fails when someone starts a task rather than at boot,
-# which is the worse place to find out.
-AGENT_IMAGES = {
-    "omashiki/agent:latest": ["agent/"],
-    "omashiki/agent-claude:latest": ["-f", "agent/Dockerfile.claude", "agent/"],
+# Build recipes are keyed by plugin; image tags come from the runtime catalog.
+AGENT_IMAGE_REPOSITORIES = {
+    "opencode": "omashiki/agent",
+    "claude-code": "omashiki/agent-claude",
+    "codex": "omashiki/agent-codex",
+    "pi": "omashiki/agent-pi",
+    "jcode": "omashiki/agent-jcode",
+}
+
+AGENT_IMAGE_BUILDS = {
+    "opencode": ["-f", "agent/Dockerfile", "agent/"],
+    "claude-code": ["-f", "agent/Dockerfile.claude", "agent/"],
+    "codex": ["-f", "agent/Dockerfile.codex", "agent/"],
+    "pi": ["-f", "agent/Dockerfile.pi", "agent/"],
+    "jcode": ["-f", "agent/Dockerfile.jcode", "agent/"],
 }
 
 
@@ -34,6 +42,34 @@ def config() -> dict:
         return {}
     with CONFIG_FILE.open("rb") as fh:
         return tomllib.load(fh)
+
+
+def configured_agent_images() -> list[tuple[str, str]]:
+    """Return unique (plugin, image) pairs from every declared runtime."""
+    images: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for handlers in config().get("runtimes", {}).values():
+        for distributions in handlers.values():
+            for runtime in distributions.values():
+                for plugin, image in runtime.get("images", {}).items():
+                    pair = (plugin, image)
+                    if pair not in seen:
+                        seen.add(pair)
+                        images.append(pair)
+
+    return images
+
+
+def configured_agent_image(plugin: str) -> str:
+    """Return the single configured image for a plugin."""
+    images = {image for configured_plugin, image in configured_agent_images()
+              if configured_plugin == plugin}
+    if len(images) != 1:
+        raise RuntimeError(
+            f"expected one configured image for {plugin}, found {len(images)}"
+        )
+    return images.pop()
 
 
 def task_env() -> dict:

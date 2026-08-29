@@ -1,13 +1,51 @@
 #!/usr/bin/env python3
-#MISE description="Build any sandbox image that is missing locally"
+#MISE description="Build or pull any sandbox image that is missing locally"
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / ".scripts"))
-from omashiki import AGENT_IMAGES, ROOT, image_exists, run
+from omashiki import (
+    AGENT_IMAGE_BUILDS,
+    AGENT_IMAGE_REPOSITORIES,
+    ROOT,
+    configured_agent_images,
+    image_exists,
+    run,
+)
 
-# Rebuilds after a code change stay deliberate. This only fills in images that
-# are absent locally.
-for tag, build_args in AGENT_IMAGES.items():
-    if image_exists(tag):
-        continue
-    print(f"\n⏳ Building {tag} (missing locally)...", flush=True)
-    run(["docker", "build", "-t", tag, *build_args], cwd=ROOT)
+
+def main(argv):
+    force_plugin = None
+    if argv:
+        if len(argv) != 2 or argv[0] != "--force":
+            raise SystemExit("usage: images [--force PLUGIN]")
+        force_plugin = argv[1]
+
+    matched = False
+    for plugin, tag in configured_agent_images():
+        if force_plugin and plugin != force_plugin:
+            continue
+        matched = True
+
+        if not force_plugin and image_exists(tag):
+            continue
+
+        repository = AGENT_IMAGE_REPOSITORIES.get(plugin)
+        local_image = repository and (tag == repository or tag.startswith(repository + ":"))
+
+        if "@" in tag or not local_image:
+            print(f"\n⏳ Pulling {tag}...", flush=True)
+            run(["docker", "pull", tag], cwd=ROOT)
+            continue
+
+        try:
+            build_args = AGENT_IMAGE_BUILDS[plugin]
+        except KeyError:
+            raise SystemExit(f"no local image build recipe for plugin {plugin}") from None
+        print(f"\n⏳ Building {tag}...", flush=True)
+        run(["docker", "build", "-t", tag, *build_args], cwd=ROOT)
+
+    if force_plugin and not matched:
+        raise SystemExit(f"plugin {force_plugin!r} has no configured runtime image")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
