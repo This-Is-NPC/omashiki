@@ -1,19 +1,33 @@
+# --- Operator environment -------------------------------------------------
+# Secrets referenced from omashiki.toml as ${env:VAR}. `.env.example` is the
+# tracked template; the real file never is.
+/.env
 
-.workflow/
-
-.opencode
-.claude
-.crush
-opencode.json
-
-# Local secrets generated on first boot — never commit.
+# --- Generated at runtime or on first boot --------------------------------
+# Local secrets and lock files, generated on first boot.
 .omashiki/
+# Per-attempt Git worktrees.
 .omashiki-worktrees/
-.temp/
+# Disposable nested repository, rebuilt by .scripts/overture_e2e.py.
 /overture/
+# Generated per run as omashiki.toml plus E2E additions. Never hand-edited:
+# see examples/README.md.
 /omashiki.e2e.toml
+# Scratch.
+.temp/
 
-# Python bytecode from the mise task scripts
+# --- Build output ----------------------------------------------------------
 __pycache__/
 *.pyc
-vm/__pycache__/
+
+# --- Local tooling, per developer -----------------------------------------
+# Coding-agent state and per-developer editor config. These are personal rather
+# than project files: prefer moving them to a global excludes file
+# (`git config --global core.excludesFile ~/.config/git/ignore`) and deleting
+# them from here. They stay for now so a fresh checkout is quiet by default.
+.claude
+.crush
+.mcp.json
+.opencode
+.workflow/
+opencode.json
