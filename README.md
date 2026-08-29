@@ -17,19 +17,32 @@ Kata host installation and compatibility validation remain deployment
 prerequisites; VMs are reserved for distributed execution tests. Callers cannot
 select providers or inject authentication through a job payload.
 
-## How It Runs
+## Where The Work Comes From
+
+Omashiki has no tracker integration of its own, and it does not need one. It
+exposes a single admission contract, so any system that emits an event — a Jira
+transition, a labelled GitHub issue, an Azure DevOps work item, a ServiceNow
+incident — becomes a work source once your handler maps that event to one
+`POST /api/v1/jobs` envelope. The envelope selects a registered repository and
+environment; the payload carries the instruction and the ticket context, and
+nothing else. Every job ends in a signed terminal webhook, so the same handler
+can post the resulting branch back onto the ticket.
+
+![A Jira transition becoming an envelope, an admitted job in the durable queue, a node claim, and a signed webhook back onto the ticket](docs/assets/event-driven-intake.gif)
+
+In both diagrams the neon green is Omashiki and the grey is yours. Omashiki starts at admission and ends at the signed webhook; the two arrows that cross the boundary are the whole integration surface.
+
+## How The Work Is Processed
 
 Jobs enter one durable PostgreSQL queue. Healthy nodes claim work under row
-locks, attempt leases, and local capacity limits, so an attempt has one owner
-even when execution is distributed.
+locks, fencing leases, and local capacity limits, so an attempt has exactly one
+owner even when execution is distributed. Each admitted job carries an immutable
+environment snapshot: the claiming node prepares a clean worktree and runs the
+selected plugin inside the selected Docker runtime, then returns a committed
+branch or a durable failure record. Nothing the container may touch — runtime,
+image, plugin, mounts, credentials, egress — comes from the caller's payload.
 
-![Jobs distributed from one durable queue across healthy Omashiki nodes](docs/assets/distributed-execution.gif)
-
-Each admitted job carries an immutable environment snapshot. The claiming node
-prepares a clean worktree and runs the selected plugin inside the selected
-Docker runtime before returning a committed branch or durable failure.
-
-![A job moving through admission, claim, worktree preparation, Docker execution, and durable return](docs/assets/governed-job-lifecycle.gif)
+![The six stages of one attempt: claim, snapshot, worktree preparation, the governed container run, commit verification, and the durable result](docs/assets/governed-job-lifecycle.gif)
 
 ## Quick Start
 
