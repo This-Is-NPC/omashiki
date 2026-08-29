@@ -1,3 +1,20 @@
+# Task entrypoints for the whole project. `mise tasks` lists them.
+#
+# Tasks live in two places, and the split is deliberate:
+#
+#   .mise/tasks/*   Python tasks that need real logic — reading ports out of
+#                   omashiki.toml through .scripts/omashiki.py, waiting for
+#                   Postgres to accept connections, fingerprinting inputs with
+#                   `sources`/`outputs`, probing a port before binding it.
+#                   Metadata is declared in `#MISE` header comments.
+#
+#   this file       Shell tasks: a command line, a `depends` chain, or a block
+#                   of shell that reads top to bottom (the E2E targets and
+#                   their flock guard).
+#
+# A task that needs to parse configuration or make a decision belongs in
+# .mise/tasks/. A task that is a sequence of commands belongs here.
+
 [tools]
 elixir = "1.17.3-otp-27"
 erlang  = "27.2"
@@ -6,6 +23,11 @@ rebar   = "3.27.0"
 
 [env]
 MIX_REBAR3 = "rebar3"
+
+# Operator secrets and per-machine overrides. Optional: a missing .env is not
+# an error, and values are redacted from task output. `${env:VAR}` references
+# in omashiki.toml resolve against this.
+_.file = { path = ".env", redact = true }
 
 [tasks.up]
 description = "Start db + migrate + assets + images, then run Phoenix (foreground)"

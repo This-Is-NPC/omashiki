@@ -67,6 +67,20 @@ Edit `omashiki.toml` to register repositories, presets, environments, runtime
 handler catalogs, credentials, caches, and limits. The execution registry
 hot-reloads; changes to infrastructure settings still require a restart.
 
+Two starting points live in [`examples/`](examples/README.md):
+
+```bash
+cp examples/single-node.omashiki.toml omashiki.toml   # one machine
+cp examples/multi-node.omashiki.toml omashiki.toml    # several nodes, one queue
+cp .env.example .env
+```
+
+Secrets never go in `omashiki.toml`, which is tracked by git. `api_key`,
+`base_url`, and `ssh_key_passphrase` accept `${env:VAR}`, resolved from the
+environment when the config loads; `mise` loads the gitignored `.env` for every
+task. An unset reference aborts the boot naming the variable rather than
+degrading into a runtime 401.
+
 Install the bundled Agent Skill for compatible coding agents:
 
 ```bash
@@ -132,6 +146,7 @@ and credential-rotation details.
 - [Data model](docs/data-model.md)
 - [Contributing](CONTRIBUTING.md)
 - [Agent images](agent/README.md)
+- [Example configurations](examples/README.md)
 
 Canonical product and system documentation lives under `docs/`. Files next to
 components document only how to build, operate, or maintain that component.

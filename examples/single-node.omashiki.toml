@@ -1,0 +1,230 @@
+# Omashiki — single node.
+#
+# One machine runs everything: PostgreSQL, the HTTP API, the operator UI, and
+# every container. This is the default shape and the one `mise run up` expects.
+#
+#   cp examples/single-node.omashiki.toml omashiki.toml
+#   cp .env.example .env          # only if you enable a gateway credential
+#   mise run up
+#
+# Secrets never belong in this file: it is tracked by git. Anything sensitive
+# is written as `${env:VAR}`, resolved at load from the process environment,
+# and `mise` loads `.env` (gitignored) into that environment for you. A
+# `${env:VAR}` whose variable is unset or empty aborts the boot naming the
+# variable — it never degrades into a runtime 401.
+
+# ---------------------------------------------------------------------------
+# Infrastructure — read before the core is up, so changes need a restart
+# ---------------------------------------------------------------------------
+# Precedence: environment variable > this file > code default.
+
+[app]
+# Phoenix HTTP port. PORT overrides it.
+port = 4010
+
+# Containers reach the gateway through the Docker bridge, so binding to
+# loopback only would leave agents with no route. Restrict access with a
+# firewall on shared networks.
+host = "0.0.0.0"
+
+[db]
+# External PostgreSQL port. The container always listens on 5432 internally.
+# OMASHIKI_DB_PORT overrides it.
+port = 5442
+
+[auth]
+# false uses the local operator for LiveView and API requests. Turn it on for
+# anything reachable beyond this machine.
+enabled = false
+
+# ---------------------------------------------------------------------------
+# Execution registry — hot-reloaded, no restart
+# ---------------------------------------------------------------------------
+
+# gradual swaps immediately and lets running attempts finish on the config they
+# were admitted with. drain_all closes admission and waits instead.
+[reload]
+mode = "gradual"
+drain_timeout_ms = 300000
+
+# This machine's container budget. Each node reconciles its own capacity row
+# from this value at boot, so it stays a per-machine number even in a cluster.
+[limits]
+max_concurrent_containers = 8
+cpu_per_container = 2.0
+memory_per_container = "2GB"
+pids_limit = 256
+
+# Runtime image catalog, keyed by Docker handler. An environment picks a
+# `docker.<handler>.debian` runtime and the plugin name resolves an image here.
+[runtimes.docker.runc.debian.images]
+opencode = "omashiki/agent:latest"
+claude-code = "omashiki/agent-claude:latest"
+codex = "omashiki/agent-codex:latest"
+pi = "omashiki/agent-pi:latest"
+jcode = "omashiki/agent-jcode:latest"
+
+# A shared toolchain cache. [caches.global.env] redirects every package manager
+# into the mount, so a toolchain built once is reused by later attempts instead
+# of being rebuilt in each container.
+[caches.global]
+host = "~/.cache/omashiki/global"
+max_size_mb = 8192
+
+[caches.global.env]
+MISE_DATA_DIR = "/omashiki-cache/global/mise/data"
+MISE_CACHE_DIR = "/omashiki-cache/global/mise/cache"
+XDG_CACHE_HOME = "/omashiki-cache/global/xdg"
+npm_config_cache = "/omashiki-cache/global/npm"
+CARGO_HOME = "/omashiki-cache/global/cargo"
+GOMODCACHE = "/omashiki-cache/global/go/mod"
+UV_CACHE_DIR = "/omashiki-cache/global/uv"
+PIP_CACHE_DIR = "/omashiki-cache/global/pip"
+MIX_HOME = "/omashiki-cache/global/mix"
+HEX_HOME = "/omashiki-cache/global/hex"
+
+# ---------------------------------------------------------------------------
+# Repositories
+# ---------------------------------------------------------------------------
+# On one node a local `path` is enough: the result branch lives in this clone
+# and the only machine that could be asked for it is the one that wrote it.
+# Add `remote` the moment a second machine exists — see the multi-node example.
+#
+# `path` is validated at load and is deliberately confined: it must resolve
+# inside the configuration root (the directory holding this file) or into
+# ~/.cache/omashiki/mirrors, must not traverse a symlink, and must already be a
+# real Git repository. An arbitrary path like ~/code/my-service is rejected.
+# To register a repository that lives elsewhere, give it a `remote` and omit
+# `path` — Omashiki clones into the mirror root and bind-mounts that copy.
+[repositories.omashiki]
+path = "."
+base_branch = "master"
+
+# The mirrored form, for any repository outside this checkout. `path` is
+# omitted on purpose so it defaults to ~/.cache/omashiki/mirrors/my-service.
+#
+# [repositories.my-service]
+# remote = "git@github.com:example/my-service.git"
+# base_branch = "main"
+
+# ---------------------------------------------------------------------------
+# Presets — which harness runs the turn
+# ---------------------------------------------------------------------------
+
+[presets.opencode]
+plugin = "opencode"
+options = { model = "opencode-go/glm-5.3-flash", auth_path = "/run/omashiki/state/auth.json", config_path = "/run/omashiki/state/opencode.json" }
+
+[presets.claude-code]
+plugin = "claude-code"
+
+# ---------------------------------------------------------------------------
+# Environments — the only thing a caller may select
+# ---------------------------------------------------------------------------
+# An environment fixes the runtime, the harness, the credential, the mounts,
+# the network policy, and the resource ceiling. A job names one; it cannot
+# override any part of it.
+
+[environments.opencode]
+preset = "opencode"
+runtime = "docker.runc.debian"
+sink = "git"
+packages = []
+executables = ["mise", "git"]
+credentials = ["opencode-local"]
+caches = ["global"]
+timeout_ms = 1800000
+network = "restricted"
+mounts = []
+post_steps = []
+pre_steps = [{ argv = ["mise", "install", "--yes"], condition = "always", timeout_ms = 600000 }]
+
+[environments.opencode.policy]
+mode = "off" # off | audit | allowlist
+
+[environments.opencode.resources]
+cpus = 2.0
+memory = "2GB"
+pids = 256
+
+[environments.claude-code]
+preset = "claude-code"
+runtime = "docker.runc.debian"
+sink = "git"
+packages = []
+executables = ["mise", "git"]
+credentials = ["claude-local"]
+caches = ["global"]
+timeout_ms = 1800000
+network = "restricted"
+mounts = []
+post_steps = []
+pre_steps = [{ argv = ["mise", "install", "--yes"], condition = "always", timeout_ms = 600000 }]
+
+[environments.claude-code.policy]
+mode = "off"
+
+[environments.claude-code.resources]
+cpus = 2.0
+memory = "2GB"
+pids = 256
+
+# ---------------------------------------------------------------------------
+# Host credential origins
+# ---------------------------------------------------------------------------
+# Read fresh at every attempt and copied into a private per-attempt directory
+# mounted at /run/omashiki/state. These are paths, not secrets, so they stay in
+# this file; the files they point at never enter git.
+[host_credentials.opencode-local]
+kind = "opencode"
+auth = "~/.local/share/opencode/auth.json"
+config = "~/.config/opencode/opencode.json"
+
+[host_credentials.claude-local]
+kind = "claude-code"
+credentials = "~/.claude/.credentials.json"
+
+# ---------------------------------------------------------------------------
+# Gateway credentials — the `.env` path
+# ---------------------------------------------------------------------------
+# Reached by the gateway on the host. The container is handed a job-bound token
+# and the gateway's own base URL, never these values.
+#
+# Uncomment together with an environment that names it, and put the matching
+# variables in `.env` first: `${env:VAR}` resolves at load, so uncommenting it
+# with the variable unset aborts every entrypoint that reads this file.
+#
+# [credentials.openrouter]
+# provider = "openrouter"
+# model = "z-ai/glm-5.3-flash"
+# base_url = "https://openrouter.ai/api/v1"
+# api_key = "${env:OPENROUTER_API_KEY}"
+#
+# [presets.jcode]
+# plugin = "jcode"
+# options = { timeout_ms = 1800000 }
+#
+# # jcode is a single static binary with no host-auth route: it always reaches
+# # the model through the gateway, so the network must not be "none" and the
+# # credential must be a gateway credential.
+# [environments.jcode]
+# preset = "jcode"
+# runtime = "docker.runc.debian"
+# sink = "git"
+# packages = []
+# executables = ["git"]
+# credentials = ["openrouter"]
+# caches = []
+# timeout_ms = 1800000
+# network = "restricted"
+# mounts = []
+# post_steps = []
+# pre_steps = []
+#
+# [environments.jcode.policy]
+# mode = "off"
+#
+# [environments.jcode.resources]
+# cpus = 1.0
+# memory = "1GB"
+# pids = 256

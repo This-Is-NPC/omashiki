@@ -1,0 +1,210 @@
+# Omashiki — several nodes on one queue.
+#
+# One PostgreSQL is the coordination authority. Every machine runs the same
+# release and the same registry, claims from the same queue under row locks and
+# fencing leases, and reserves capacity against its own row. There is no
+# distributed Erlang and no libcluster.
+#
+#   # on every machine
+#   cp examples/multi-node.omashiki.toml omashiki.toml
+#   cp .env.example .env      # then edit: OMASHIKI_NODE differs per machine
+#   mise run up
+#
+# This file is identical on every node except [limits], which is that machine's
+# own container budget. Keep the rest byte-identical: an environment digest
+# that differs between machines means two jobs admitted against "the same"
+# environment did not run the same thing.
+#
+# --- What works today, and what does not ------------------------------------
+#
+# Implemented: the canonical remote, node identity, and per-node capacity
+# (docs/distributed-execution.md phases 1-3).
+#
+# Not implemented (phase 4): there is no worker-only role yet, so every machine
+# starts the full release including HTTP and LiveView — give the extra nodes a
+# distinct [app].port or a firewall. `docker_socket_path` is still compile-time,
+# so every node must reach Docker at the default socket. Cross-node registry
+# digest verification is not automatic either: divergence is silent today.
+
+# ---------------------------------------------------------------------------
+# Infrastructure
+# ---------------------------------------------------------------------------
+
+[app]
+port = 4010
+host = "0.0.0.0"
+
+[db]
+# Only the port. The host, user, password, and database name come from the
+# environment so this file stays identical across machines and holds no
+# credentials — see OMASHIKI_DB_* in .env.example. Exactly one machine runs
+# PostgreSQL (or it is managed); the others point at it over the network.
+port = 5442
+
+[auth]
+# Turn this on. A multi-node install is reachable over the network by
+# definition, and `false` hands every request the local operator.
+enabled = true
+
+# ---------------------------------------------------------------------------
+# Execution nodes
+# ---------------------------------------------------------------------------
+# A name is the whole declaration. Capacity is deliberately not an option here:
+# a machine's budget is [limits].max_concurrent_containers in that machine's
+# own file, which is where the rest of its host limits already live. Declaring
+# it centrally too would give one fact two sources that can disagree.
+#
+# A process picks its own node from OMASHIKI_NODE, falling back to the
+# hostname, so a machine named after its host needs no variable. Booting on a
+# machine that is in none of these fails config load rather than letting it
+# claim work under a node id nothing else has heard of.
+#
+# The node list is outside the registry digest on purpose: adding or draining a
+# machine is a deployment, not configuration drift, and must not invalidate the
+# digest every in-flight job was admitted under.
+[nodes.builder-01]
+[nodes.builder-02]
+[nodes.builder-03]
+
+[reload]
+# drain_all across a fleet costs the queueing time of the longest attempt on
+# the slowest machine. gradual is usually right: a running attempt always
+# finishes on the configuration it was admitted with either way.
+mode = "gradual"
+drain_timeout_ms = 300000
+
+# THIS MACHINE'S BUDGET — the one value that legitimately differs per node.
+# Two nodes at 8 give the cluster 16 simultaneous attempts; killing one leaves
+# the other's 8 untouched.
+[limits]
+max_concurrent_containers = 8
+cpu_per_container = 2.0
+memory_per_container = "2GB"
+pids_limit = 256
+
+# Every node must be able to pull every image it might be asked to run.
+[runtimes.docker.runc.debian.images]
+opencode = "omashiki/agent:latest"
+claude-code = "omashiki/agent-claude:latest"
+codex = "omashiki/agent-codex:latest"
+pi = "omashiki/agent-pi:latest"
+jcode = "omashiki/agent-jcode:latest"
+
+[caches.global]
+host = "~/.cache/omashiki/global"
+max_size_mb = 8192
+
+[caches.global.env]
+MISE_DATA_DIR = "/omashiki-cache/global/mise/data"
+MISE_CACHE_DIR = "/omashiki-cache/global/mise/cache"
+XDG_CACHE_HOME = "/omashiki-cache/global/xdg"
+npm_config_cache = "/omashiki-cache/global/npm"
+CARGO_HOME = "/omashiki-cache/global/cargo"
+GOMODCACHE = "/omashiki-cache/global/go/mod"
+UV_CACHE_DIR = "/omashiki-cache/global/uv"
+PIP_CACHE_DIR = "/omashiki-cache/global/pip"
+MIX_HOME = "/omashiki-cache/global/mix"
+HEX_HOME = "/omashiki-cache/global/hex"
+
+# ---------------------------------------------------------------------------
+# Repositories — the remote is mandatory here
+# ---------------------------------------------------------------------------
+# With one node a result branch could stay on local disk. With several it
+# cannot: if the node that ran the attempt dies, or the client asks a different
+# node, the deliverable would be gone. Finalization pushes to this remote, and
+# collision detection becomes `--force-with-lease` against it, so the arbiter
+# is the one repository every machine shares.
+#
+# `path` is omitted on purpose: Omashiki clones into
+# ~/.cache/omashiki/mirrors/<name> on each machine and bind-mounts that copy.
+# The agent never sees the remote or the key.
+#
+# ssh_key is host-side fetch/push only — never [host_credentials.*], which
+# copies into the container, which is precisely where a push credential must
+# not be. The passphrase must be a `${env:VAR}` reference; plaintext is
+# rejected at load.
+[repositories.my-service]
+remote = "git@github.com:example/my-service.git"
+base_branch = "main"
+ssh_key = "~/.ssh/omashiki_deploy"
+ssh_key_passphrase = "${env:OMASHIKI_GIT_KEY_PASSPHRASE}"
+
+# ---------------------------------------------------------------------------
+# Presets and environments — byte-identical on every node
+# ---------------------------------------------------------------------------
+
+[presets.opencode]
+plugin = "opencode"
+options = { model = "opencode-go/glm-5.3-flash", auth_path = "/run/omashiki/state/auth.json", config_path = "/run/omashiki/state/opencode.json" }
+
+[presets.jcode]
+plugin = "jcode"
+options = { timeout_ms = 1800000 }
+
+[environments.opencode]
+preset = "opencode"
+runtime = "docker.runc.debian"
+sink = "git"
+packages = []
+executables = ["mise", "git"]
+credentials = ["opencode-local"]
+caches = ["global"]
+timeout_ms = 1800000
+network = "restricted"
+mounts = []
+post_steps = []
+pre_steps = [{ argv = ["mise", "install", "--yes"], condition = "always", timeout_ms = 600000 }]
+
+[environments.opencode.policy]
+mode = "off"
+
+[environments.opencode.resources]
+cpus = 2.0
+memory = "2GB"
+pids = 256
+
+# A gateway-credential environment. Prefer these in a fleet: a host credential
+# has to exist as a file on every machine that might claim the job, while a
+# gateway credential is reached by whichever node is running the attempt.
+[environments.jcode]
+preset = "jcode"
+runtime = "docker.runc.debian"
+sink = "git"
+packages = []
+executables = ["git"]
+credentials = ["shared-llm"]
+caches = []
+timeout_ms = 1800000
+network = "restricted"
+mounts = []
+post_steps = []
+pre_steps = []
+
+[environments.jcode.policy]
+mode = "off"
+
+[environments.jcode.resources]
+cpus = 1.0
+memory = "1GB"
+pids = 256
+
+# ---------------------------------------------------------------------------
+# Credentials
+# ---------------------------------------------------------------------------
+# Both values are `${env:VAR}`: the key is a secret, and the base URL is a
+# private LAN address that has no business in a tracked file. Both resolve at
+# load and fail the boot naming the variable.
+[credentials.shared-llm]
+provider = "openrouter"
+model = "z-ai/glm-5.3-flash"
+base_url = "${env:OMASHIKI_LLM_BASE_URL}"
+api_key = "${env:OPENROUTER_API_KEY}"
+
+# A host credential must exist as a file at this path on every node that may
+# claim work for [environments.opencode]. That is the operational cost of host
+# credentials in a fleet, and the reason the jcode environment above uses a
+# gateway credential instead.
+[host_credentials.opencode-local]
+kind = "opencode"
+auth = "~/.local/share/opencode/auth.json"
+config = "~/.config/opencode/opencode.json"

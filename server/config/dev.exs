@@ -1,12 +1,16 @@
 import Config
 
 # Configure your database
+# Host, user, password and database name are environment-overridable for the
+# same reason the port already was: a multi-node install points every machine at
+# one PostgreSQL, and only one of them has it on localhost. Defaults are the
+# single-node Compose values, so nothing changes without the variables.
 config :omashiki, Omashiki.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
+  username: System.get_env("OMASHIKI_DB_USER") || "postgres",
+  password: System.get_env("OMASHIKI_DB_PASSWORD") || "postgres",
+  hostname: System.get_env("OMASHIKI_DB_HOST") || "localhost",
   port: String.to_integer(System.get_env("OMASHIKI_DB_PORT") || "5432"),
-  database: "omashiki_dev",
+  database: System.get_env("OMASHIKI_DB_NAME") || "omashiki_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   # Tunable for load testing: the default pool of 10 is exhausted well before
