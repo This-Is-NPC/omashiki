@@ -10,9 +10,22 @@ defmodule Omashiki.Plugin.Manifest do
   @prepare_modes ~w(gateway_prompt invocation_json opencode_gateway opencode_host none)
 
   defstruct [
-    :name, :path, :contents, :digest, :transport, :readiness, :prepare,
-    :argv, :env, :files, :output, :options, :requires, :llm_egress,
-    http: nil, option_argv: []
+    :name,
+    :path,
+    :contents,
+    :digest,
+    :transport,
+    :readiness,
+    :prepare,
+    :argv,
+    :env,
+    :files,
+    :output,
+    :options,
+    :requires,
+    :llm_egress,
+    http: nil,
+    option_argv: []
   ]
 
   def parse!(name, path, contents) do
@@ -24,12 +37,22 @@ defmodule Omashiki.Plugin.Manifest do
 
   def snapshot(%__MODULE__{} = m) do
     Map.new([
-      {"name", m.name}, {"path", m.path}, {"contents", m.contents}, {"digest", m.digest},
-      {"transport", m.transport}, {"readiness", m.readiness}, {"prepare", m.prepare},
-      {"argv", m.argv}, {"env", m.env}, {"files", m.files}, {"output", m.output},
-      {"options", m.options}, {"requires", m.requires},
+      {"name", m.name},
+      {"path", m.path},
+      {"contents", m.contents},
+      {"digest", m.digest},
+      {"transport", m.transport},
+      {"readiness", m.readiness},
+      {"prepare", m.prepare},
+      {"argv", m.argv},
+      {"env", m.env},
+      {"files", m.files},
+      {"output", m.output},
+      {"options", m.options},
+      {"requires", m.requires},
       {"llm_egress", m.llm_egress && Atom.to_string(m.llm_egress)},
-      {"http", m.http}, {"option_argv", m.option_argv}
+      {"http", m.http},
+      {"option_argv", m.option_argv}
     ])
   end
 
@@ -75,6 +98,7 @@ defmodule Omashiki.Plugin.Manifest do
 
     options = options!(Map.get(attrs, "options", %{}), where)
     files = files!(Map.get(attrs, "files", %{}), where)
+
     manifest = %__MODULE__{
       name: name,
       path: path,
@@ -88,7 +112,9 @@ defmodule Omashiki.Plugin.Manifest do
       files: files,
       output: output,
       options: options,
-      requires: %{"binaries" => Map.get(stringify(Map.get(attrs, "requires", %{})), "binaries", [])},
+      requires: %{
+        "binaries" => Map.get(stringify(Map.get(attrs, "requires", %{})), "binaries", [])
+      },
       llm_egress: egress(Map.get(attrs, "llm_egress")),
       http: if(transport == "http", do: stringify(Map.get(attrs, "http", %{}))),
       option_argv: option_argv!(Map.get(attrs, "option_argv", []), where)
@@ -97,7 +123,6 @@ defmodule Omashiki.Plugin.Manifest do
     OptionSchema.validate_schema!(manifest, where)
     manifest
   end
-
 
   defp options!(table, w) when is_map(table) do
     table
@@ -135,6 +160,7 @@ defmodule Omashiki.Plugin.Manifest do
   defp files!(_, w), do: raise(Error, w <> ".files must be a table")
 
   defp output!(nil, w), do: raise(Error, "#{w}.output required")
+
   defp output!(table, w) do
     table = stringify(table)
     shape = req!(table, "shape", w <> ".output")
@@ -144,15 +170,24 @@ defmodule Omashiki.Plugin.Manifest do
 
   defp readiness!("none", _), do: %{"kind" => "none"}
   defp readiness!(bin, w) when is_binary(bin), do: readiness!(%{"kind" => bin}, w)
+
   defp readiness!(%{"kind" => "exec"} = t, w) do
     argv = Map.get(t, "argv") || raise(Error, "#{w}.readiness.argv required")
     check_templates!(argv, w <> ".readiness.argv")
     %{"kind" => "exec", "argv" => argv, "timeout_ms" => Map.get(t, "timeout_ms", 10_000)}
   end
+
   defp readiness!(%{"kind" => "http"} = t, w) do
-    %{"kind" => "http", "path" => req!(t, "path", w), "timeout_ms" => Map.get(t, "timeout_ms", 60_000)}
+    %{
+      "kind" => "http",
+      "path" => req!(t, "path", w),
+      "timeout_ms" => Map.get(t, "timeout_ms", 60_000)
+    }
   end
-  defp readiness!(%{"kind" => kind}, _) when kind in ["none", "exec", "http"], do: %{"kind" => kind}
+
+  defp readiness!(%{"kind" => kind}, _) when kind in ["none", "exec", "http"],
+    do: %{"kind" => kind}
+
   defp readiness!(other, w), do: raise(Error, "#{w}.readiness invalid: #{inspect(other)}")
 
   defp env!(table, w) do
@@ -161,6 +196,7 @@ defmodule Omashiki.Plugin.Manifest do
       {k, v} when is_binary(v) ->
         check_template!(v, w <> ".env." <> k)
         {k, v}
+
       {k, nested} when is_map(nested) ->
         nested =
           stringify(nested)
@@ -169,8 +205,11 @@ defmodule Omashiki.Plugin.Manifest do
             {nk, nv}
           end)
           |> Map.new()
+
         {k, nested}
-      {k, _} -> raise Error, "#{w}.env." <> k <> " must be string or table"
+
+      {k, _} ->
+        raise Error, "#{w}.env." <> k <> " must be string or table"
     end)
     |> Map.new()
   end
@@ -182,6 +221,7 @@ defmodule Omashiki.Plugin.Manifest do
       entry
     end)
   end
+
   defp option_argv!(_, w), do: raise(Error, "#{w}.option_argv must be array")
 
   defp check_templates!(list, w) when is_list(list), do: Enum.each(list, &check_template!(&1, w))

@@ -201,7 +201,6 @@ defmodule Omashiki.Jobs.Contract.V1Test do
     unlock =
       transition("dependency_satisfied", "blocked", "queued")
       |> Map.put("depends_on", [@parent_job_id])
-      
       |> Map.put("unlock_event_id", @event_id)
 
     assert {:ok, ^unlock} = V1.validate_transition(unlock)
@@ -211,7 +210,6 @@ defmodule Omashiki.Jobs.Contract.V1Test do
     unlock =
       transition("dependency_satisfied", "blocked", "queued")
       |> Map.put("depends_on", [@parent_job_id])
-      
       |> Map.put("unlock_event_id", @event_id)
 
     assert {:error, errors} = V1.validate_transition_stream([unlock, unlock])

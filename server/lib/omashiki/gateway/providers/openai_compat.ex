@@ -205,7 +205,11 @@ defmodule Omashiki.Gateway.Providers.OpenaiCompat do
   end
 
   defp provider_request_timeout_ms do
-    Application.get_env(:omashiki, :gateway_provider_request_timeout_ms, @default_request_timeout_ms)
+    Application.get_env(
+      :omashiki,
+      :gateway_provider_request_timeout_ms,
+      @default_request_timeout_ms
+    )
   end
 
   defp receive_http(conn, ref, body, status, deadline) do

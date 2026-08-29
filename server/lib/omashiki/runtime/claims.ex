@@ -169,8 +169,10 @@ defmodule Omashiki.Runtime.Claims do
   defp match_owner(%Job{user_id: owner}, %{"token_owner" => owner}), do: :ok
   defp match_owner(_, _), do: {:error, :owner_mismatch}
 
-  defp match_environment(%Job{admitted_environment_digest: digest}, %{"admitted_environment_digest" => digest}),
-    do: :ok
+  defp match_environment(%Job{admitted_environment_digest: digest}, %{
+         "admitted_environment_digest" => digest
+       }),
+       do: :ok
 
   defp match_environment(_, _), do: {:error, :environment_changed}
 

@@ -145,7 +145,12 @@ defmodule Omashiki.Runtime.Attempt do
   end
 
   defp runner_module(opts),
-    do: Keyword.get(opts, :runner, Application.get_env(:omashiki, :jobs_runner, Omashiki.Jobs.Runner))
+    do:
+      Keyword.get(
+        opts,
+        :runner,
+        Application.get_env(:omashiki, :jobs_runner, Omashiki.Jobs.Runner)
+      )
 
   defp schedule_heartbeat(%{heartbeat_interval_ms: interval} = state)
        when is_integer(interval) and interval > 0 do

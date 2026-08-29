@@ -13,10 +13,14 @@ defmodule Omashiki.Plugin.OptionSchema do
       spec = stringify(spec)
 
       unknown = Map.keys(spec) -- @option_spec_keys
-      if unknown != [], do: raise(ArgumentError, "#{spec_where}: unknown field #{inspect(hd(unknown))}")
+
+      if unknown != [],
+        do: raise(ArgumentError, "#{spec_where}: unknown field #{inspect(hd(unknown))}")
 
       type = Map.fetch!(spec, "type")
-      if type not in @types, do: raise(ArgumentError, "#{spec_where}.type invalid: #{inspect(type)}")
+
+      if type not in @types,
+        do: raise(ArgumentError, "#{spec_where}.type invalid: #{inspect(type)}")
 
       case type do
         "enum" ->
@@ -116,7 +120,9 @@ defmodule Omashiki.Plugin.OptionSchema do
   end
 
   defp validate_value(_name, %{"type" => "string_list"}, value) do
-    if is_list(value) and Enum.all?(value, &is_binary/1), do: :ok, else: {:error, :invalid_string_list}
+    if is_list(value) and Enum.all?(value, &is_binary/1),
+      do: :ok,
+      else: {:error, :invalid_string_list}
   end
 
   defp validate_value(_name, %{"type" => "enum", "optional" => true}, nil), do: :ok

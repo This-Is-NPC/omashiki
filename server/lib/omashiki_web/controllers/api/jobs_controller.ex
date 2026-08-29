@@ -187,7 +187,6 @@ defmodule OmashikiWeb.Api.JobsController do
 
   defp depends_on_ids(%Job{id: job_id}) do
     alias Omashiki.Jobs.JobDependency
-    alias Omashiki.Repo
     import Ecto.Query
 
     from(d in JobDependency, where: d.job_id == ^job_id, select: d.depends_on_job_id)

@@ -418,10 +418,17 @@ defmodule Omashiki.Jobs.Contract.V1 do
         else
           Enum.flat_map(depends_on, fn dep_id ->
             cond do
-              not is_binary(dep_id) -> [error("jobs.depends_on", "uuid_required")]
-              dep_id == job_id -> [error("jobs.depends_on", "self_dependency")]
-              not MapSet.member?(job_id_set, dep_id) -> [error("jobs.depends_on", "unknown_job_id")]
-              true -> []
+              not is_binary(dep_id) ->
+                [error("jobs.depends_on", "uuid_required")]
+
+              dep_id == job_id ->
+                [error("jobs.depends_on", "self_dependency")]
+
+              not MapSet.member?(job_id_set, dep_id) ->
+                [error("jobs.depends_on", "unknown_job_id")]
+
+              true ->
+                []
             end
           end)
         end
@@ -558,7 +565,6 @@ defmodule Omashiki.Jobs.Contract.V1 do
     end
   end
 
-
   defp validate_depends_on(errors, job) do
     case Map.fetch(job, "depends_on") do
       :error ->
@@ -622,10 +628,6 @@ defmodule Omashiki.Jobs.Contract.V1 do
     end
   end
 
-  defp validate_optional_uuid(errors, attrs, key) do
-    if Map.has_key?(attrs, key), do: validate_uuid(errors, attrs, key), else: errors
-  end
-
   defp validate_positive_integer(errors, attrs, key) do
     case Map.fetch(attrs, key) do
       {:ok, value} when is_integer(value) and value > 0 -> errors
@@ -674,9 +676,14 @@ defmodule Omashiki.Jobs.Contract.V1 do
 
   defp validate_blocked_status_shape(errors, attrs) do
     case {Map.get(attrs, "status"), Map.get(attrs, "depends_on") || []} do
-      {"blocked", []} -> [error("depends_on", "required_when_blocked") | errors]
-      {"queued", deps} when deps != [] -> [error("depends_on", "not_allowed_when_queued") | errors]
-      _ -> errors
+      {"blocked", []} ->
+        [error("depends_on", "required_when_blocked") | errors]
+
+      {"queued", deps} when deps != [] ->
+        [error("depends_on", "not_allowed_when_queued") | errors]
+
+      _ ->
+        errors
     end
   end
 
@@ -845,7 +852,6 @@ defmodule Omashiki.Jobs.Contract.V1 do
         errors
     end
   end
-
 
   defp validate_depends_on_ids(errors, attrs, key) do
     case Map.fetch(attrs, key) do

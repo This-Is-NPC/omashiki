@@ -42,22 +42,24 @@ defmodule Omashiki.Jobs.SchemaTest do
 
     assert token_owner_changeset.errors[:api_token_id]
     parent = persist_job(owner, token)
+
     other_token =
-             %Token{}
-             |> Token.create_changeset(%{
-               user_id: other.id,
-               name: "other",
-               token_hash: String.duplicate("c", 64) <> Integer.to_string(System.unique_integer([:positive]))
-             })
-             |> Repo.insert!()
+      %Token{}
+      |> Token.create_changeset(%{
+        user_id: other.id,
+        name: "other",
+        token_hash:
+          String.duplicate("c", 64) <> Integer.to_string(System.unique_integer([:positive]))
+      })
+      |> Repo.insert!()
 
     child =
-             %Job{}
-             |> Job.changeset(
-               job_attrs(other, other_token)
-               |> Map.put(:idempotency_key, "other-child-request")
-             )
-             |> Repo.insert!()
+      %Job{}
+      |> Job.changeset(
+        job_attrs(other, other_token)
+        |> Map.put(:idempotency_key, "other-child-request")
+      )
+      |> Repo.insert!()
 
     assert {:error, dep_changeset} =
              %JobDependency{}
@@ -78,7 +80,6 @@ defmodule Omashiki.Jobs.SchemaTest do
       |> job_attrs(token)
       |> Map.merge(%{
         idempotency_key: "blocked-request",
-        
         status: "blocked",
         queued_at: nil
       })

@@ -2,7 +2,8 @@ defmodule Omashiki.Plugin.Shapes do
   @moduledoc false
   alias Omashiki.Harness.{CliJson, Result}
 
-  def decode_exec_output(output, prefix, decode_stdout), do: CliJson.decode_exec_output(output, prefix, decode_stdout)
+  def decode_exec_output(output, prefix, decode_stdout),
+    do: CliJson.decode_exec_output(output, prefix, decode_stdout)
 
   def normalize(%{"shape" => "object"} = output, decoded) when is_map(decoded) do
     text = get_path(decoded, Map.get(output, "text", "text"))
@@ -64,11 +65,22 @@ defmodule Omashiki.Plugin.Shapes do
         {:ok,
          %Result{
            assistant_text: Map.get(d, "result", ""),
-           input_tokens: int(get_usage(usage, um, "input") || usage["input_tokens"] || usage["inputTokens"]),
-           output_tokens: int(get_usage(usage, um, "output") || usage["output_tokens"] || usage["outputTokens"]),
-           cached_input_tokens: int(get_usage(usage, um, "cached_input") || usage["cached_input_tokens"] || usage["cacheReadInputTokens"]),
+           input_tokens:
+             int(get_usage(usage, um, "input") || usage["input_tokens"] || usage["inputTokens"]),
+           output_tokens:
+             int(
+               get_usage(usage, um, "output") || usage["output_tokens"] || usage["outputTokens"]
+             ),
+           cached_input_tokens:
+             int(
+               get_usage(usage, um, "cached_input") || usage["cached_input_tokens"] ||
+                 usage["cacheReadInputTokens"]
+             ),
            cache_write_tokens:
-             int(get_usage(usage, um, "cache_write") || usage["cache_creation_input_tokens"] || usage["cacheWriteInputTokens"] || usage["cache_write_input_tokens"]),
+             int(
+               get_usage(usage, um, "cache_write") || usage["cache_creation_input_tokens"] ||
+                 usage["cacheWriteInputTokens"] || usage["cache_write_input_tokens"]
+             ),
            model_resolved: str(Map.get(d, "model") || first_model(mu)),
            provider: str(Map.get(output, "provider_default")),
            raw: decoded
@@ -82,7 +94,8 @@ defmodule Omashiki.Plugin.Shapes do
     end
   end
 
-  def normalize(%{"shape" => shape}, decoded), do: {:error, {:unknown_shape, shape, CliJson.summarize(decoded)}}
+  def normalize(%{"shape" => shape}, decoded),
+    do: {:error, {:unknown_shape, shape, CliJson.summarize(decoded)}}
 
   defp get_path(map, path) when is_map(map) and is_binary(path) do
     Enum.reduce(String.split(path, "."), map, fn key, current ->
@@ -109,7 +122,9 @@ defmodule Omashiki.Plugin.Shapes do
 
   defp sum_usage(_, acc), do: acc
 
-  defp add(acc, key, value) when is_integer(value) and value >= 0, do: Map.update(acc, key, value, &(&1 + value))
+  defp add(acc, key, value) when is_integer(value) and value >= 0,
+    do: Map.update(acc, key, value, &(&1 + value))
+
   defp add(acc, _, _), do: acc
 
   defp assistant_text(%{"content" => content}) when is_list(content) do

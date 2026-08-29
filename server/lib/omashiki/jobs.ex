@@ -357,7 +357,6 @@ defmodule Omashiki.Jobs do
     |> Repo.delete_all()
   end
 
-
   defp claim_locked(%Job{} = job, runner_id, now, lease_ms) do
     # One read of this host's identity feeds both the reservation and the stamp,
     # so the row that was decremented is always the row the attempt names.
@@ -842,7 +841,8 @@ defmodule Omashiki.Jobs do
   defp release_capacity_if_reserved!(_), do: :ok
 
   defp release_capacity!(machine) do
-    case Repo.update_all(from(c in ExecutionCapacity, where: c.machine_id == ^machine and c.active > 0),
+    case Repo.update_all(
+           from(c in ExecutionCapacity, where: c.machine_id == ^machine and c.active > 0),
            inc: [active: -1]
          ) do
       {1, _} -> :ok

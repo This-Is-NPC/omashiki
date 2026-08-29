@@ -141,11 +141,16 @@ defmodule Omashiki.Jobs.Job do
       is_nil(repository) and is_nil(admitted_repository) and is_nil(admitted_repository_digest) ->
         changeset
 
-      is_binary(repository) and is_map(admitted_repository) and is_binary(admitted_repository_digest) ->
+      is_binary(repository) and is_map(admitted_repository) and
+          is_binary(admitted_repository_digest) ->
         changeset
 
       true ->
-        add_error(changeset, :repository, "repository snapshot must be present or absent together")
+        add_error(
+          changeset,
+          :repository,
+          "repository snapshot must be present or absent together"
+        )
     end
   end
 end
