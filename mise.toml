@@ -127,7 +127,7 @@ docker build -t omashiki/agent:ci-check agent/
 """
 
 # No agent_toolchain_check.sh here on purpose: omashiki.toml declares
-# [harnesses.claude-code] but no [environments.claude-code], so nothing ever
+# [presets.claude-code] but no [environments.claude-code], so nothing ever
 # runs `mise install` against this image and it ships no C toolchain. Adding
 # the check would spend two minutes asserting a capability the image is not
 # meant to have.
@@ -146,11 +146,12 @@ docker build -t omashiki/agent-codex:ci-check -f agent/Dockerfile.codex agent/
 .scripts/agent_toolchain_check.sh omashiki/agent-codex:ci-check
 """
 
-# jcode deliberately ships neither curl, python3 nor mise: it has no
-# HEALTHCHECK and runs no supply-chain relay, and the jcode environments in
-# omashiki.toml declare empty `pre_steps` and no caches, so nothing ever
-# invokes `mise install` for it. Its contract is correspondingly narrower — do
-# not copy the list above onto it, and keep those `pre_steps` empty.
+# jcode deliberately ships no curl or mise: curl is purged after the build, and
+# it has no HEALTHCHECK or mise pre_step. It does ship python3 because agents may
+# write and run Python files; no supply-chain relay runs in this image. The
+# jcode environments in omashiki.toml have no caches, so nothing invokes `mise
+# install` for them. Its contract is correspondingly narrower — do not copy the
+# list above onto it, and keep those `pre_steps` empty.
 [tasks."ci:docker:jcode"]
 description = "Build pinned jcode agent Docker image (dry-run, no push)"
 run         = """
@@ -218,81 +219,107 @@ description = "Install the Omashiki Agent Skill in ~/.agents/skills"
 run         = "install -Dm0644 .agents/skills/omashiki/SKILL.md \"${HOME:?HOME must be set}/.agents/skills/omashiki/SKILL.md\""
 
 [tasks."agent:build"]
-description = "Build omashiki/agent:latest from agent/ (idempotent — Docker caches layers)"
-run         = "docker build -t omashiki/agent:latest agent/"
+description = "Build the configured OpenCode image (idempotent — Docker caches layers)"
+run         = "python .mise/tasks/images --force opencode"
 
 [tasks."agent:claude:build"]
-description = "Build omashiki/agent-claude:latest with Claude Code 2.1.240"
-run         = "docker build -t omashiki/agent-claude:latest -f agent/Dockerfile.claude agent/"
+description = "Build the configured Claude Code image"
+run         = "python .mise/tasks/images --force claude-code"
+
+[tasks."agent:codex:build"]
+description = "Build the configured Codex image"
+run         = "python .mise/tasks/images --force codex"
 
 [tasks."agent:jcode:build"]
-description = "Build omashiki/agent-jcode:latest from agent/Dockerfile.jcode"
-run         = "docker build -t omashiki/agent-jcode:latest -f agent/Dockerfile.jcode agent/"
+description = "Build the configured jcode image"
+run         = "python .mise/tasks/images --force jcode"
 
 [tasks."agent:pi:build"]
-description = "Build omashiki/agent-pi:latest from agent/Dockerfile.pi"
-run         = "docker build -t omashiki/agent-pi:latest -f agent/Dockerfile.pi agent/"
+description = "Build the configured Pi image"
+run         = "python .mise/tasks/images --force pi"
 
 [tasks."agent:cache-smoke"]
 description = "Validate cold/warm/offline and concurrent mise/npm cache use"
 depends     = ["agent:build"]
-run         = "bash agent/test-cache.sh"
+run         = """
+AGENT_IMAGE="$(python -c 'import sys; sys.path.insert(0, ".scripts"); from omashiki import configured_agent_image; print(configured_agent_image("opencode"))')" bash agent/test-cache.sh
+"""
 
 [tasks."overture:wipe"]
 description = "Recreate the ignored overture Git fixture safely"
 run         = "python .scripts/overture_e2e.py wipe"
 
 [tasks."e2e:prepare"]
-description = "Prepare overture, every provider snapshot and the database for E2E"
+description = "Prepare the standard runc/jcode fixture with the deterministic LLM stub"
+run         = "mise run e2e:prepare:runc:jcode-stub"
+
+[tasks."e2e:prepare:runc"]
+description = "Alias for the standard runc/jcode-stub fixture"
+run         = "mise run e2e:prepare:runc:jcode-stub"
+
+[tasks."e2e:prepare:runc:jcode-stub"]
+description = "Prepare isolated runc jcode fixture for the deterministic LLM stub"
 run         = """
 mise run overture:wipe
-python .scripts/overture_e2e.py prepare all
+python .scripts/overture_e2e.py prepare runc jcode-stub
 mise run deps
 mise run db-up
 cd server
 MIX_ENV=test mix ecto.reset
 """
 
-[tasks."e2e:prepare:opencode"]
-description = "Prepare isolated OpenCode overture fixture"
+[tasks."e2e:prepare:runc:opencode"]
+description = "Prepare isolated runc OpenCode overture fixture"
 run         = """
 mise run overture:wipe
-python .scripts/overture_e2e.py prepare opencode
+python .scripts/overture_e2e.py prepare runc opencode
 mise run deps
 mise run db-up
 cd server
 MIX_ENV=test mix ecto.reset
 """
 
-[tasks."e2e:prepare:claude"]
-description = "Prepare isolated Claude Code overture fixture"
+[tasks."e2e:prepare:runc:claude"]
+description = "Prepare isolated runc Claude Code overture fixture"
 run         = """
 mise run overture:wipe
-python .scripts/overture_e2e.py prepare claude
+python .scripts/overture_e2e.py prepare runc claude
 mise run deps
 mise run db-up
 cd server
 MIX_ENV=test mix ecto.reset
 """
 
-# jcode stages no host credential snapshot: it reaches the model only through
-# the gateway, which resolves the local server address from
-# OMASHIKI_LOCAL_LLM_BASE_URL. The prepare step fails early when it is unset.
-[tasks."e2e:prepare:jcode"]
-description = "Prepare isolated jcode overture fixture against the local model server"
+[tasks."e2e:prepare:runc:jcode"]
+description = "Prepare isolated runc jcode overture fixture against the local model server"
 run         = """
 mise run overture:wipe
-python .scripts/overture_e2e.py prepare jcode
+python .scripts/overture_e2e.py prepare runc jcode
 mise run deps
 mise run db-up
 cd server
 MIX_ENV=test mix ecto.reset
 """
 
-[tasks."e2e:overture:opencode"]
-description = "Run the real queue-only Docker/OpenCode E2E against overture"
+# Each leaf takes the same nonblocking lock around preparation, image build, and
+# test because preparation writes the shared ignored `omashiki.e2e.toml`.
+[tasks."e2e:overture:runc:opencode"]
+description = "Run the real queue-only Docker/OpenCode E2E with runc"
 run         = """
-mise run e2e:prepare:opencode
+set -e
+umask 077
+if [ -L .omashiki ] || { [ -e .omashiki ] && [ ! -d .omashiki ]; }; then
+  echo "refusing unsafe .omashiki lock directory" >&2
+  exit 1
+fi
+mkdir -p .omashiki
+exec 9>.omashiki/e2e.lock
+if ! flock -n 9; then
+  echo "another overture E2E is already running" >&2
+  exit 1
+fi
+export OMASHIKI_E2E_LOCK_HELD=1
+mise run e2e:prepare:runc:opencode
 mise run agent:build
 cd server
 OMASHIKI_REAL_PROVIDER_E2E=1 \
@@ -301,10 +328,23 @@ MIX_ENV=test \
 mix test test/integration/queue_real_provider_e2e_test.exs --include real_opencode --exclude real_claude --exclude real_jcode
 """
 
-[tasks."e2e:overture:claude"]
-description = "Run the real queue-only Docker/Claude Code E2E against overture"
+[tasks."e2e:overture:runc:claude"]
+description = "Run the real queue-only Docker/Claude Code E2E with runc"
 run         = """
-mise run e2e:prepare:claude
+set -e
+umask 077
+if [ -L .omashiki ] || { [ -e .omashiki ] && [ ! -d .omashiki ]; }; then
+  echo "refusing unsafe .omashiki lock directory" >&2
+  exit 1
+fi
+mkdir -p .omashiki
+exec 9>.omashiki/e2e.lock
+if ! flock -n 9; then
+  echo "another overture E2E is already running" >&2
+  exit 1
+fi
+export OMASHIKI_E2E_LOCK_HELD=1
+mise run e2e:prepare:runc:claude
 mise run agent:claude:build
 cd server
 OMASHIKI_REAL_PROVIDER_E2E=1 \
@@ -313,16 +353,23 @@ MIX_ENV=test \
 mix test test/integration/queue_real_provider_e2e_test.exs --include real_claude --exclude real_opencode --exclude real_jcode
 """
 
-# `agent:jcode:build` and not `agent:build`: omashiki/agent:latest is the
-# OpenCode image and overwriting it here would silently retag it.
-#
-# Host networking, not bridge: jcode's only model path is the host LLM
-# gateway. Docker bridge on this machine cannot hairpin to Phoenix, while
-# host mode uses 127.0.0.1 which jcode also accepts as a local base URL.
-[tasks."e2e:overture:jcode"]
-description = "Run the real queue-only Docker/jcode E2E against overture and the local model server"
+[tasks."e2e:overture:runc:jcode"]
+description = "Run the real queue-only Docker/jcode E2E with runc and the local model server"
 run         = """
-mise run e2e:prepare:jcode
+set -e
+umask 077
+if [ -L .omashiki ] || { [ -e .omashiki ] && [ ! -d .omashiki ]; }; then
+  echo "refusing unsafe .omashiki lock directory" >&2
+  exit 1
+fi
+mkdir -p .omashiki
+exec 9>.omashiki/e2e.lock
+if ! flock -n 9; then
+  echo "another overture E2E is already running" >&2
+  exit 1
+fi
+export OMASHIKI_E2E_LOCK_HELD=1
+mise run e2e:prepare:runc:jcode
 mise run agent:jcode:build
 cd server
 OMASHIKI_REAL_PROVIDER_E2E=1 \
@@ -331,14 +378,80 @@ MIX_ENV=test \
 mix test test/integration/queue_real_provider_e2e_test.exs --include real_jcode --exclude real_opencode --exclude real_claude
 """
 
+[tasks."e2e:overture:runc"]
+description = "Run the standard runc/jcode E2E against the deterministic LLM stub"
+run         = ".scripts/jcode_stub_e2e.sh"
+
+# Short provider aliases select runc. jcode selects the deterministic stub;
+# real provider and LM Studio tasks remain explicit opt-ins.
+[tasks."e2e:prepare:opencode"]
+description = "Alias for e2e:prepare:runc:opencode"
+run         = "mise run e2e:prepare:runc:opencode"
+
+[tasks."e2e:prepare:claude"]
+description = "Alias for e2e:prepare:runc:claude"
+run         = "mise run e2e:prepare:runc:claude"
+
+[tasks."e2e:prepare:jcode"]
+description = "Alias for the standard runc/jcode-stub fixture"
+run         = "mise run e2e:prepare:runc:jcode-stub"
+
+[tasks."e2e:prepare:jcode:lmstudio"]
+description = "Prepare the optional runc/jcode fixture against LM Studio"
+run         = "mise run e2e:prepare:runc:jcode"
+
+[tasks."e2e:overture:opencode"]
+description = "Alias for e2e:overture:runc:opencode"
+run         = "mise run e2e:overture:runc:opencode"
+
+[tasks."e2e:overture:claude"]
+description = "Alias for e2e:overture:runc:claude"
+run         = "mise run e2e:overture:runc:claude"
+
+[tasks."e2e:overture:jcode"]
+description = "Alias for the standard runc/jcode-stub E2E"
+run         = "mise run e2e:overture:runc"
+
+[tasks."e2e:overture:jcode:lmstudio"]
+description = "Run the optional runc/jcode E2E against LM Studio"
+run         = "mise run e2e:overture:runc:jcode"
+
 [tasks."e2e:overture"]
-description = "Run every real provider E2E sequentially with isolated fixture preparation"
+description = "Run the standard runc/jcode E2E against the deterministic LLM stub"
+run         = "mise run e2e:overture:runc"
+
+[tasks."kata:install"]
+description = "Install pinned Kata on the host and register Docker runtime kata"
+run         = "sudo .scripts/kata_install.sh"
+
+[tasks."kata:smoke"]
+description = "Build jcode and prove Kata with one disposable host Docker container"
+depends     = ["ci:docker:jcode"]
+run         = ".scripts/kata_smoke.sh"
+
+[tasks."e2e:vm:prepare"]
+description = "Build or reuse the content-addressed Fedora VM E2E base"
+run         = "python vm/prepare.py"
+
+[tasks."e2e:vm:prepare:verify"]
+description = "Verify the prepared Fedora VM E2E base without changing it"
+run         = "python vm/prepare.py --verify"
+
+[tasks."e2e:vm:runc"]
+description = "Run the prepared distributed Fedora VM Docker/jcode E2E with runc (10 minute SLA)"
+run         = "vm/run.sh --runtime runc"
+
+[tasks."e2e:vm:kata"]
+description = "Run the prepared distributed Fedora VM Docker/jcode E2E with Kata (10 minute SLA)"
+run         = "vm/run.sh --runtime kata"
+
+[tasks."e2e:vm:matrix"]
+description = "Run the distributed Fedora VM runc and Kata E2Es sequentially"
 run         = """
-mise run e2e:overture:opencode
-mise run e2e:overture:claude
-mise run e2e:overture:jcode
+mise run e2e:vm:runc
+mise run e2e:vm:kata
 """
 
 [tasks."e2e:vm"]
-description = "Run the distributed Fedora VM Docker/jcode E2E"
-run         = "vm/run.sh"
+description = "Alias for the distributed Fedora VM runc E2E"
+run         = "mise run e2e:vm:runc"

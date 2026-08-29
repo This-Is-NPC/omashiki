@@ -24,6 +24,20 @@ OPENCODE_AUTH = Path.home() / ".local" / "share" / "opencode" / "auth.json"
 CLAUDE_CREDENTIALS = Path.home() / ".claude" / ".credentials.json"
 LOCAL_LLM_BASE_URL_VAR = "OMASHIKI_LOCAL_LLM_BASE_URL"
 LOCAL_LLM_MODEL = "qwen/qwen3.5-9b"
+JCODE_STUB_BASE_URL = "http://127.0.0.1:8787/v1"
+JCODE_STUB_MODEL = "fake-model"
+JCODE_STUB_SCENARIO = "python-hello"
+RUNTIME_HANDLERS = ("runc", "kata")
+PROVIDERS = ("all", "opencode", "claude", "jcode", "jcode-stub")
+PROVIDER_PLUGINS = {
+    "opencode": "opencode",
+    "claude": "claude-code",
+    "jcode": "jcode",
+}
+RUNTIME_SETTINGS = {
+    "runc": {"memory": "2GB", "timeout_ms": 900000, "tmpfs_size_mb": 512},
+    "kata": {"memory": "4GB", "timeout_ms": 1800000, "tmpfs_size_mb": 1024},
+}
 
 
 def run(*argv: str, cwd: Path | None = None, capture: bool = False) -> str:
@@ -77,8 +91,11 @@ def fixture_lock():
 
 
 def wipe() -> None:
-    with fixture_lock():
+    if os.environ.get("OMASHIKI_E2E_LOCK_HELD") == "1":
         wipe_locked()
+    else:
+        with fixture_lock():
+            wipe_locked()
 
 
 def wipe_locked() -> None:
@@ -121,31 +138,150 @@ def _toml_str(value: str) -> str:
     return json.dumps(value)
 
 
+def _runtime_settings(runtime_handler: str) -> dict[str, int | str]:
+    try:
+        return RUNTIME_SETTINGS[runtime_handler]
+    except KeyError:
+        raise SystemExit(
+            f"unknown runtime handler: {runtime_handler}; choose one of {', '.join(RUNTIME_HANDLERS)}"
+        ) from None
+
+
+def _normalize_base_runtime(base: str) -> str:
+    """Make the checked-in legacy Docker runtime explicit runc for E2E loads."""
+    return base.replace(
+        "[runtimes.docker.debian.images]", "[runtimes.docker.runc.debian.images]"
+    ).replace('runtime = "docker.debian"', 'runtime = "docker.runc.debian"')
+
+
+def _strip_loadtest_local(base: str) -> str:
+    """Exclude unrelated machine-local credentials from the isolated E2E config."""
+    begin = "# >>> loadtest-local begin (do not commit)"
+    end = "# <<< loadtest-local end"
+    begin_at = base.find(begin)
+    end_at = base.find(end)
+    if begin_at == -1 and end_at == -1:
+        return base
+    if begin_at == -1 or end_at < begin_at:
+        raise SystemExit("malformed loadtest-local marker block in omashiki.toml")
+    suffix_at = end_at + len(end)
+    return base[:begin_at].rstrip() + "\n" + base[suffix_at:].lstrip("\n")
+
+
+def _strip_toml_table(base: str, header: str) -> str:
+    """Remove one top-level TOML table and its body without parsing secrets."""
+    lines = base.splitlines(keepends=True)
+    start = next((index for index, line in enumerate(lines) if line.strip() == header), None)
+    if start is None:
+        return base
+    finish = next(
+        (index for index in range(start + 1, len(lines)) if lines[index].startswith("[")),
+        len(lines),
+    )
+    return "".join(lines[:start] + lines[finish:]).rstrip()
+
+
+def _runtime_catalog_stanza(runtime_handler: str, plugins: list[str]) -> str:
+    images = {
+        "opencode": "omashiki/agent:latest",
+        "claude-code": "omashiki/agent-claude:latest",
+        "jcode": "omashiki/agent-jcode:latest",
+    }
+    entries = "\n".join(
+        f"{plugin} = {_toml_str(images[plugin])}" for plugin in plugins
+    )
+    return f"""
+
+[runtimes.docker.{runtime_handler}.debian.images]
+{entries}
+"""
+
+
+def _jcode_configuration(provider: str) -> dict[str, str]:
+    if provider == "jcode":
+        base_url = os.environ.get(LOCAL_LLM_BASE_URL_VAR)
+        if not base_url:
+            raise SystemExit(
+                f"{LOCAL_LLM_BASE_URL_VAR} is unset; jcode needs the local model server, "
+                f"for example {LOCAL_LLM_BASE_URL_VAR}=http://<host>:8080/v1"
+            )
+        return {
+            "credential": "local-llm",
+            "provider": "llamacpp",
+            "model": LOCAL_LLM_MODEL,
+            "base_url": base_url,
+            "preset": "jcode",
+        }
+    if provider == "jcode-stub":
+        # The gateway runs on the host, so its upstream is the host loopback,
+        # not an address reachable from the agent container.
+        return {
+            "credential": "jcode-stub",
+            "provider": "openai",
+            "model": JCODE_STUB_MODEL,
+            "base_url": JCODE_STUB_BASE_URL,
+            "preset": "jcode-stub",
+        }
+    raise SystemExit(f"unknown jcode configuration target: {provider}")
+
+
+def _jcode_stanza(runtime_handler: str, provider: str) -> str:
+    target = _jcode_configuration(provider)
+    settings = _runtime_settings(runtime_handler)
+    api_key = (
+        "unused-by-the-stub"
+        if target["provider"] == "openai"
+        else "unused-by-llama-server"
+    )
+    return f"""
+[credentials.{target["credential"]}]
+provider = {_toml_str(target["provider"])}
+model = {_toml_str(target["model"])}
+base_url = {_toml_str(target["base_url"])}
+api_key = {_toml_str(api_key)}
+
+[presets.{target["preset"]}]
+plugin = "jcode"
+options = {{ timeout_ms = {settings["timeout_ms"]}, model = {_toml_str(target["model"])} }}
+""" + _environment_stanza(
+        name="e2e-jcode",
+        preset=target["preset"],
+        runtime_handler=runtime_handler,
+        credentials=[target["credential"]],
+        caches=[],
+        cpus=1.0,
+        memory="2GB" if runtime_handler == "kata" else "1GB",
+        pids=256,
+        timeout_ms=settings["timeout_ms"],
+    )
+
+
 def _environment_stanza(
     *,
     name: str,
     preset: str,
-    image: str,
+    runtime_handler: str = "runc",
     credentials: list[str],
     caches: list[str],
     cpus: float,
     memory: str,
     pids: int,
+    timeout_ms: int = 900000,
+    network: str = "restricted",
 ) -> str:
     creds = ", ".join(_toml_str(item) for item in credentials)
     cache_items = ", ".join(_toml_str(item) for item in caches)
     return f"""
 [environments.{name}]
 preset = {_toml_str(preset)}
-isolation = "docker"
-image = {_toml_str(image)}
+runtime = {_toml_str(f"docker.{runtime_handler}.debian")}
 sink = "git"
 packages = []
 executables = ["git"]
 credentials = [{creds}]
 caches = [{cache_items}]
-timeout_ms = 900000
-network = "restricted"
+timeout_ms = {timeout_ms}
+network = {_toml_str(network)}
 mounts = []
 pre_steps = []
 post_steps = []
@@ -160,13 +296,33 @@ pids = {pids}
 """
 
 
-def prepare(provider: str) -> None:
-    with fixture_lock():
-        prepare_locked(provider)
+def prepare(runtime_handler: str = "runc", provider: str = "all") -> None:
+    # A one-argument provider invocation was the original interface. Keep it
+    # usable while requiring every matrix task to pass the handler explicitly.
+    if runtime_handler in PROVIDERS and provider == "all":
+        provider = runtime_handler
+        runtime_handler = "runc"
+    elif runtime_handler in PROVIDERS and provider in RUNTIME_HANDLERS:
+        # Also accept the provider-first spelling while callers migrate from
+        # `prepare <provider>` to the explicit two-argument form.
+        runtime_handler, provider = provider, runtime_handler
+
+    if os.environ.get("OMASHIKI_E2E_LOCK_HELD") == "1":
+        prepare_locked(runtime_handler, provider)
+    else:
+        with fixture_lock():
+            prepare_locked(runtime_handler, provider)
 
 
-def prepare_locked(provider: str) -> None:
-    if provider not in ("all", "opencode", "claude", "jcode"):
+def prepare_locked(runtime_handler: str, provider: str = "all") -> None:
+    if runtime_handler in PROVIDERS and provider == "all":
+        provider = runtime_handler
+        runtime_handler = "runc"
+    elif runtime_handler in PROVIDERS and provider in RUNTIME_HANDLERS:
+        runtime_handler, provider = provider, runtime_handler
+
+    _runtime_settings(runtime_handler)
+    if provider not in PROVIDERS:
         raise SystemExit(f"unknown provider preparation target: {provider}")
 
     assert_safe_existing_repo()
@@ -190,25 +346,28 @@ def prepare_locked(provider: str) -> None:
         )
         claude_ready = True
 
-    # jcode stages no host credential: it has no host-auth route and reaches the
-    # model only through the gateway, which resolves the local server's address
-    # from the environment. Fail here rather than at Config.load! in the test.
-    if provider in ("all", "jcode"):
-        if not os.environ.get(LOCAL_LLM_BASE_URL_VAR):
-            raise SystemExit(
-                f"{LOCAL_LLM_BASE_URL_VAR} is unset; jcode needs the local model server, "
-                f"for example {LOCAL_LLM_BASE_URL_VAR}=http://<host>:8080/v1"
-            )
+    # Both jcode targets use the gateway; only the real local-model target needs
+    # a caller-supplied upstream URL. The stub URL is deliberately host-local.
+    if provider in ("all", "jcode", "jcode-stub"):
+        _jcode_configuration("jcode" if provider == "all" else provider)
         jcode_ready = True
 
-    base = (ROOT / "omashiki.toml").read_text(encoding="utf-8").rstrip()
+    base = _normalize_base_runtime(
+        _strip_loadtest_local(
+            (ROOT / "omashiki.toml").read_text(encoding="utf-8").rstrip()
+        )
+    )
+    if runtime_handler == "runc":
+        base = _strip_toml_table(base, "[runtimes.docker.kata.debian.images]")
     additions = """
 
 [repositories.overture]
 path = "overture"
 base_branch = "main"
 """
+    runtime_plugins = []
     if opencode_ready:
+        runtime_plugins.append(PROVIDER_PLUGINS["opencode"])
         auth = SNAPSHOT_ROOT / "auth.json"
         config = SNAPSHOT_ROOT / "opencode.json"
         additions += f"""
@@ -220,14 +379,16 @@ config = {_toml_str(str(config))}
         additions += _environment_stanza(
             name="e2e-opencode",
             preset="opencode",
-            image="omashiki/agent:latest",
+            runtime_handler=runtime_handler,
             credentials=["e2e-opencode"],
             caches=["global"],
             cpus=2.0,
-            memory="2GB",
+            memory=_runtime_settings(runtime_handler)["memory"],
             pids=256,
+            timeout_ms=_runtime_settings(runtime_handler)["timeout_ms"],
         )
     if claude_ready:
+        runtime_plugins.append(PROVIDER_PLUGINS["claude"])
         credentials = SNAPSHOT_ROOT / "claude-credentials.json"
         additions += f"""
 [host_credentials.e2e-claude]
@@ -237,40 +398,25 @@ credentials = {_toml_str(str(credentials))}
         additions += _environment_stanza(
             name="e2e-claude",
             preset="claude-code",
-            image="omashiki/agent-claude:latest",
+            runtime_handler=runtime_handler,
             credentials=["e2e-claude"],
             caches=["global"],
             cpus=2.0,
-            memory="2GB",
+            memory=_runtime_settings(runtime_handler)["memory"],
             pids=256,
+            timeout_ms=_runtime_settings(runtime_handler)["timeout_ms"],
         )
     if jcode_ready:
-        # Tracked omashiki.toml keeps these commented so a missing
-        # OMASHIKI_LOCAL_LLM_BASE_URL cannot abort every other entrypoint.
-        # Bake the resolved URL into the gitignored e2e file: mix test does
-        # not inherit the prepare-time environment.
-        base_url = os.environ[LOCAL_LLM_BASE_URL_VAR]
-        additions += f"""
-[credentials.local-llm]
-provider = "llamacpp"
-model = {_toml_str(LOCAL_LLM_MODEL)}
-base_url = {_toml_str(base_url)}
-api_key = "unused-by-llama-server"
-
-[presets.jcode]
-plugin = "jcode"
-options = {{ timeout_ms = 1800000, model = {_toml_str(LOCAL_LLM_MODEL)} }}
-"""
-        additions += _environment_stanza(
-            name="e2e-jcode",
-            preset="jcode",
-            image="omashiki/agent-jcode:latest",
-            credentials=["local-llm"],
-            caches=[],
-            cpus=1.0,
-            memory="1GB",
-            pids=256,
+        runtime_plugins.append(PROVIDER_PLUGINS["jcode"])
+        additions += _jcode_stanza(
+            runtime_handler,
+            "jcode" if provider == "all" else provider,
         )
+    if (
+        runtime_handler == "kata"
+        and "[runtimes.docker.kata.debian.images]" not in base
+    ):
+        additions += _runtime_catalog_stanza(runtime_handler, runtime_plugins)
     E2E_CONFIG.write_text(base + additions, encoding="utf-8")
     print(f"snapshots ready: {SNAPSHOT_ROOT}")
     print(f"config ready: {E2E_CONFIG}")
@@ -279,7 +425,10 @@ options = {{ timeout_ms = 1800000, model = {_toml_str(LOCAL_LLM_MODEL)} }}
     if claude_ready:
         print("Claude Code credentials snapshot ready")
     if jcode_ready:
-        print(f"jcode gateway target ready: {LOCAL_LLM_BASE_URL_VAR}")
+        if provider == "jcode-stub":
+            print(f"jcode gateway target ready: {JCODE_STUB_BASE_URL} ({JCODE_STUB_SCENARIO})")
+        else:
+            print(f"jcode gateway target ready: {LOCAL_LLM_BASE_URL_VAR}")
 
 
 def validate(provider: str) -> None:
@@ -304,14 +453,15 @@ def validate_locked(provider: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("wipe", "prepare", "validate"))
+    parser.add_argument("runtime_handler", nargs="?")
     parser.add_argument("provider", nargs="?")
     args = parser.parse_args()
     if args.command == "validate":
-        if not args.provider:
+        if not args.runtime_handler:
             raise SystemExit("validate requires a provider: opencode or claude")
-        validate(args.provider)
+        validate(args.runtime_handler)
     elif args.command == "prepare":
-        prepare(args.provider or "all")
+        prepare(args.runtime_handler or "runc", args.provider or "all")
     else:
         wipe()
 
