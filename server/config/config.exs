@@ -26,6 +26,9 @@ config :omashiki, OmashikiWeb.Endpoint,
     layout: false
   ],
   pubsub_server: Omashiki.PubSub,
+  # Generator value, shared by every environment and safe to track: it salts
+  # LiveView session signing, which is already bound to secret_key_base — and
+  # that comes from SECRET_KEY_BASE in production. See config/dev.exs.
   live_view: [signing_salt: "t5EQju1M"]
 
 # Configure esbuild (the version is required)

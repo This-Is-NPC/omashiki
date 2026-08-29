@@ -33,6 +33,13 @@ config :omashiki, OmashikiWeb.Endpoint,
   check_origin: false,
   code_reloader: true,
   debug_errors: true,
+  # Checked into git on purpose: it is the Phoenix generator's dev value, not a
+  # secret. Production reads SECRET_KEY_BASE from the environment and refuses to
+  # boot without it (runtime.exs). The one dangerous combination is serving this
+  # `:dev` config on a reachable interface — the same config that ships with
+  # `check_origin: false` above and pairs with `[auth] enabled = false` in
+  # omashiki.toml. Bind to loopback or run a real release; do not "fix" this by
+  # rotating the value.
   secret_key_base: "vh5B4AZ+oKh5S1IBm0+/4ouLoL/WJBDvq1caXOQCZPliI3AEbtEeE1JztGvKd1m6",
   # `--sourcemap=inline` is a dev-only debugging aid and is deliberately absent
   # from the shared esbuild profile in config.exs, so the watcher's output is
