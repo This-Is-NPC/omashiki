@@ -96,6 +96,7 @@ defmodule Omashiki.Application do
       Omashiki.Runtime.PortAllocator,
       Omashiki.Runtime.ContainerManager,
       Omashiki.Runtime.Inspector,
+      Omashiki.Worker.Slots,
       Omashiki.Worker.Poller
     ]
   end

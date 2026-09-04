@@ -34,23 +34,26 @@ defmodule Omashiki.ApplicationBootTest do
     refute Omashiki.Runtime.LeaseRenewer in modules
   end
 
-  test "children_for(:worker) includes ContainerManager, AttemptSupervisor, Poller; excludes control plane" do
+  test "children_for(:worker) includes ContainerManager, AttemptSupervisor, Slots, Poller; excludes control plane" do
     modules = child_modules(Application.children_for(:worker))
 
     assert Omashiki.Runtime.ContainerManager in modules
     assert Omashiki.Runtime.AttemptSupervisor in modules
+    assert Omashiki.Worker.Slots in modules
     assert Omashiki.Worker.Poller in modules
     refute Omashiki.Repo in modules
     refute OmashikiWeb.Endpoint in modules
     refute Oban in modules
   end
 
-  test "children_for(:embedded) and :manager exclude Poller" do
+  test "children_for(:embedded) and :manager exclude Poller and Slots" do
     embedded = child_modules(Application.children_for(:embedded))
     manager = child_modules(Application.children_for(:manager))
 
     refute Omashiki.Worker.Poller in embedded
     refute Omashiki.Worker.Poller in manager
+    refute Omashiki.Worker.Slots in embedded
+    refute Omashiki.Worker.Slots in manager
   end
 
   test "manager Oban child serves webhooks only" do

@@ -63,6 +63,13 @@ if size = System.get_env("OMASHIKI_AGENT_TMP_SIZE_MB") do
   end
 end
 
+if containers = System.get_env("OMASHIKI_MAX_CONCURRENT_CONTAINERS") do
+  case Integer.parse(containers) do
+    {value, ""} when value > 0 -> config :omashiki, :max_concurrent_containers, value
+    _ -> raise "OMASHIKI_MAX_CONCURRENT_CONTAINERS must be a positive integer"
+  end
+end
+
 # config/runtime.exs is executed for all environments, including
 # during releases. It is executed after compilation and before the
 # system starts, so it is typically used to load production configuration
