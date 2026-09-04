@@ -1,7 +1,7 @@
 defmodule Omashiki.Worker.PollerTest do
   use ExUnit.Case, async: false
 
-  alias Omashiki.Worker.{Complete, Offer, Poller}
+  alias Omashiki.Worker.{Complete, Offer, Poller, Slots}
 
   @poll_interval_ms 60_000
 
@@ -13,6 +13,7 @@ defmodule Omashiki.Worker.PollerTest do
       restore_env(:worker_poll_interval_ms)
       restore_env(:fake_executor_result)
       restore_env(:fake_executor_owner)
+      restore_env(:fake_executor_mode)
     end)
 
     :ok
@@ -57,13 +58,16 @@ defmodule Omashiki.Worker.PollerTest do
       put_env(:worker_poll_interval_ms, @poll_interval_ms)
       put_env(:fake_executor_owner, parent)
 
-      {:ok, bypass: bypass, token: token, parent: parent}
+      slots = start_slots!()
+
+      {:ok, bypass: bypass, token: token, parent: parent, slots: slots}
     end
 
-    test "completes a git sink offer", %{bypass: bypass, parent: parent} do
+    test "completes a git sink offer", %{bypass: bypass, parent: parent, slots: slots} do
       offer = sample_offer("git")
 
       expect_register(bypass)
+      expect_accept(bypass, parent)
       expect_poll_sequence(bypass, [offer], parent)
       expect_complete(bypass, parent, fn body ->
         assert body["complete"]["kind"] == "git"
@@ -84,11 +88,16 @@ defmodule Omashiki.Worker.PollerTest do
         }
       })
 
-      assert {:ok, _pid} = start_supervised({Poller, name: unique_poller_name()})
+      assert {:ok, _pid} = start_poller(slots)
+      assert_receive {:accept, _}, 2_000
       assert_receive {:complete, _}, 2_000
     end
 
-    test "uploads a blob then completes a files sink offer", %{bypass: bypass, parent: parent} do
+    test "uploads a blob then completes a files sink offer", %{
+      bypass: bypass,
+      parent: parent,
+      slots: slots
+    } do
       offer = sample_offer("files")
       blob_path = Path.join(System.tmp_dir!(), "poller-blob-#{System.unique_integer([:positive])}")
       blob = "artifact-bytes"
@@ -98,6 +107,7 @@ defmodule Omashiki.Worker.PollerTest do
       on_exit(fn -> File.rm(blob_path) end)
 
       expect_register(bypass)
+      expect_accept(bypass, parent)
       expect_poll_sequence(bypass, [offer], parent)
 
       Bypass.expect(bypass, "PUT", "/internal/work/blobs/#{offer["job_id"]}", fn conn ->
@@ -124,15 +134,17 @@ defmodule Omashiki.Worker.PollerTest do
         }
       })
 
-      assert {:ok, _pid} = start_supervised({Poller, name: unique_poller_name()})
+      assert {:ok, _pid} = start_poller(slots)
+      assert_receive {:accept, _}, 2_000
       assert_receive {:blob, ^blob}, 2_000
       assert_receive {:complete, _}, 2_000
     end
 
-    test "completes a none sink offer", %{bypass: bypass, parent: parent} do
+    test "completes a none sink offer", %{bypass: bypass, parent: parent, slots: slots} do
       offer = sample_offer("none")
 
       expect_register(bypass)
+      expect_accept(bypass, parent)
       expect_poll_sequence(bypass, [offer], parent)
 
       expect_complete(bypass, parent, fn body ->
@@ -141,14 +153,20 @@ defmodule Omashiki.Worker.PollerTest do
 
       put_env(:fake_executor_result, {:ok, %Complete{kind: :none, changed_bytes: 0}})
 
-      assert {:ok, _pid} = start_supervised({Poller, name: unique_poller_name()})
+      assert {:ok, _pid} = start_poller(slots)
+      assert_receive {:accept, _}, 2_000
       assert_receive {:complete, _}, 2_000
     end
 
-    test "posts an error complete when the executor fails", %{bypass: bypass, parent: parent} do
+    test "posts an error complete when the executor fails", %{
+      bypass: bypass,
+      parent: parent,
+      slots: slots
+    } do
       offer = sample_offer("git")
 
       expect_register(bypass)
+      expect_accept(bypass, parent)
       expect_poll_sequence(bypass, [offer], parent)
 
       expect_complete(bypass, parent, fn body ->
@@ -159,7 +177,96 @@ defmodule Omashiki.Worker.PollerTest do
 
       put_env(:fake_executor_result, {:error, :boom})
 
-      assert {:ok, _pid} = start_supervised({Poller, name: unique_poller_name()})
+      assert {:ok, _pid} = start_poller(slots)
+      assert_receive {:accept, _}, 2_000
+      assert_receive {:complete, _}, 2_000
+    end
+  end
+
+  describe "slot limits" do
+    setup do
+      bypass = Bypass.open()
+      parent = self()
+      token = "worker-poller-#{System.unique_integer([:positive])}"
+      put_env(:manager_url, "http://127.0.0.1:#{bypass.port}")
+      put_env(:worker_token, token)
+      put_env(:worker_executor, Omashiki.Worker.PollerTest.FakeExecutor)
+      put_env(:worker_poll_interval_ms, @poll_interval_ms)
+      put_env(:fake_executor_owner, parent)
+      put_env(:fake_executor_mode, :hang)
+      put_env(:fake_executor_result, {:ok, %Complete{kind: :none, changed_bytes: 0}})
+
+      {:ok, bypass: bypass, parent: parent}
+    end
+
+    test "does not run a second executor while max=1 slot is held", %{
+      bypass: bypass,
+      parent: parent
+    } do
+      slots = start_slots!(1)
+      offer1 = sample_offer("none")
+      offer2 = sample_offer("none")
+
+      expect_register(bypass, 1)
+      expect_accept(bypass, parent)
+      expect_poll_sequence(bypass, [offer1, offer2], parent)
+      expect_complete(bypass, parent, fn _ -> :ok end)
+
+      assert {:ok, _pid} = start_poller(slots)
+
+      assert_receive {:accept, _}, 2_000
+      assert_receive {:run, _offer, executor_pid}, 2_000
+      refute_receive {:complete, _}, 200
+      refute_receive {:accept, _}, 500
+      refute_receive {:run, _, _}, 500
+
+      send(executor_pid, :release_executor)
+      assert_receive {:complete, _}, 2_000
+    end
+
+    test "registers with zero free slots when the pool is pre-acquired", %{
+      bypass: bypass
+    } do
+      slots = start_slots!(1)
+      assert :ok = Slots.try_acquire(slots)
+      assert Slots.available(slots) == 0
+
+      expect_register(bypass, 0)
+
+      assert {:ok, _pid} = start_poller(slots)
+      refute_receive {:poll, _}, 200
+
+      Slots.release(slots)
+    end
+
+    test "accepts two concurrent jobs when max=2 and rejects a third", %{
+      bypass: bypass,
+      parent: parent
+    } do
+      slots = start_slots!(2)
+      offer1 = sample_offer("none")
+      offer2 = sample_offer("none")
+      offer3 = sample_offer("none")
+
+      expect_register(bypass, 2)
+      expect_accept(bypass, parent)
+      expect_poll_sequence(bypass, [offer1, offer2, offer3], parent)
+      expect_complete(bypass, parent, fn _ -> :ok end)
+
+      assert {:ok, _pid} = start_poller(slots)
+
+      assert_receive {:accept, _}, 2_000
+      assert_receive {:run, _, executor1}, 2_000
+      assert_receive {:accept, _}, 2_000
+      assert_receive {:run, _, executor2}, 2_000
+
+      refute_receive {:complete, _}, 200
+      refute_receive {:accept, _}, 500
+      refute_receive {:run, _, _}, 500
+
+      send(executor1, :release_executor)
+      send(executor2, :release_executor)
+      assert_receive {:complete, _}, 2_000
       assert_receive {:complete, _}, 2_000
     end
   end
@@ -171,11 +278,22 @@ defmodule Omashiki.Worker.PollerTest do
 
     @impl Omashiki.Worker.Executor
     def run(%Offer{} = offer) do
-      if owner = Application.get_env(:omashiki, :fake_executor_owner) do
-        send(owner, {:run, offer})
+      owner = Application.get_env(:omashiki, :fake_executor_owner)
+
+      if owner do
+        send(owner, {:run, offer, self()})
       end
 
-      Application.get_env(:omashiki, :fake_executor_result)
+      case Application.get_env(:omashiki, :fake_executor_mode) do
+        :hang ->
+          receive do
+            :release_executor ->
+              Application.get_env(:omashiki, :fake_executor_result)
+          end
+
+        _ ->
+          Application.get_env(:omashiki, :fake_executor_result)
+      end
     end
   end
 
@@ -196,9 +314,33 @@ defmodule Omashiki.Worker.PollerTest do
     }
   end
 
-  defp expect_register(bypass) do
+  defp start_slots!(max \\ 2) do
+    name = :"Omashiki.Worker.Slots.Test.#{System.unique_integer([:positive])}"
+    {:ok, _pid} = start_supervised({Slots, max: max, name: name})
+    name
+  end
+
+  defp start_poller(slots) do
+    start_supervised({Poller, name: unique_poller_name(), slots: slots})
+  end
+
+  defp expect_register(bypass, free_slots \\ 2) do
     Bypass.expect_once(bypass, "POST", "/internal/work/register", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      decoded = Jason.decode!(body)
+      assert decoded["free_slots"] == free_slots
       Plug.Conn.resp(conn, 204, "")
+    end)
+  end
+
+  defp expect_accept(bypass, parent) do
+    Bypass.expect(bypass, "POST", "/internal/work/accept", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(parent, {:accept, Jason.decode!(body)})
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, ~s({"ok":true}))
     end)
   end
 
@@ -227,7 +369,7 @@ defmodule Omashiki.Worker.PollerTest do
   end
 
   defp expect_complete(bypass, parent, assert_fun) do
-    Bypass.expect_once(bypass, "POST", "/internal/work/complete", fn conn ->
+    Bypass.expect(bypass, "POST", "/internal/work/complete", fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       decoded = Jason.decode!(body)
       assert_fun.(decoded)

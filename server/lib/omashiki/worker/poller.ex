@@ -5,16 +5,14 @@ defmodule Omashiki.Worker.Poller do
 
   require Logger
 
-  alias Omashiki.Worker.{Client, Complete, Execution, Offer}
-
-  @free_slots 1
+  alias Omashiki.Worker.{Client, Complete, Execution, Offer, Slots}
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
     manager_url = Application.get_env(:omashiki, :manager_url)
     worker_token = Application.get_env(:omashiki, :worker_token)
     executor = Application.get_env(:omashiki, :worker_executor)
@@ -29,8 +27,9 @@ defmodule Omashiki.Worker.Poller do
       {:ok, %{mode: :idle}}
     else
       client = Client.new(manager_url, worker_token)
+      slots = Keyword.get(opts, :slots, Slots)
 
-      case Client.register(client, machine_id, @free_slots) do
+      case Client.register(client, machine_id, free_slots(slots)) do
         :ok ->
           :ok
 
@@ -43,7 +42,8 @@ defmodule Omashiki.Worker.Poller do
         client: client,
         executor: executor,
         machine_id: machine_id,
-        interval_ms: interval_ms
+        interval_ms: interval_ms,
+        slots: slots
       }
 
       send(self(), :tick)
@@ -55,20 +55,37 @@ defmodule Omashiki.Worker.Poller do
   def handle_info(:tick, %{mode: :idle} = state), do: {:noreply, state}
 
   def handle_info(:tick, state) do
+    free = free_slots(state.slots)
+
     state =
-      case Client.poll(state.client, state.machine_id, @free_slots) do
-        {:ok, nil} ->
-          state
+      if free == 0 do
+        state
+      else
+        case Client.poll(state.client, state.machine_id, free) do
+          {:ok, nil} ->
+            state
 
-        {:ok, %Offer{} = offer} ->
-          handle_offer(state, offer)
+          {:ok, %Offer{} = offer} ->
+            handle_offer(state, offer)
 
-        {:error, reason} ->
-          Logger.warning("Worker.Poller poll failed: #{inspect(reason)}")
-          state
+          {:error, reason} ->
+            Logger.warning("Worker.Poller poll failed: #{inspect(reason)}")
+            state
+        end
       end
 
     schedule_tick(state)
+    {:noreply, state}
+  end
+
+  def handle_info({:job_finished, execution, offer, result}, state) do
+    try do
+      post_complete(state, execution, offer, result)
+    after
+      Slots.release(state.slots)
+    end
+
+    send(self(), :tick)
     {:noreply, state}
   end
 
@@ -77,7 +94,48 @@ defmodule Omashiki.Worker.Poller do
   defp handle_offer(state, %Offer{} = offer) do
     execution = execution_from(offer)
 
-    case state.executor.run(offer) do
+    case Slots.try_acquire(state.slots) do
+      {:error, :full} ->
+        Logger.warning("Worker.Poller rejecting offer #{offer.job_id}: no local slots")
+        Client.reject(state.client, execution)
+        state
+
+      :ok ->
+        case Client.accept(state.client, execution) do
+          :cancel ->
+            Slots.release(state.slots)
+            state
+
+          {:error, reason} ->
+            Logger.warning("Worker.Poller accept failed: #{inspect(reason)}")
+            Slots.release(state.slots)
+            Client.reject(state.client, execution)
+            state
+
+          :ok ->
+            poller_pid = self()
+
+            Task.start(fn ->
+              result = run_executor(state.executor, offer)
+              send(poller_pid, {:job_finished, execution, offer, result})
+            end)
+
+            send(self(), :tick)
+            state
+        end
+    end
+  end
+
+  defp run_executor(executor, offer) do
+    try do
+      executor.run(offer)
+    catch
+      kind, reason -> {:error, {kind, reason}}
+    end
+  end
+
+  defp post_complete(state, execution, offer, result) do
+    case result do
       {:ok, %Complete{kind: :files} = complete} ->
         complete
         |> maybe_upload_blob(state.client, offer)
@@ -95,9 +153,6 @@ defmodule Omashiki.Worker.Poller do
 
         Client.complete(state.client, execution, error_complete)
     end
-
-    send(self(), :tick)
-    state
   end
 
   defp maybe_upload_blob(%Complete{kind: :files} = complete, client, %Offer{job_id: job_id}) do
@@ -120,6 +175,8 @@ defmodule Omashiki.Worker.Poller do
       sink: offer.sink
     }
   end
+
+  defp free_slots(slots), do: Slots.available(slots)
 
   defp schedule_tick(%{mode: :idle}), do: :ok
 
