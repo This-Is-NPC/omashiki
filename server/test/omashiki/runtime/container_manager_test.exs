@@ -1,17 +1,17 @@
 defmodule Omashiki.Runtime.ContainerManagerTest do
-  use ExUnit.Case, async: false
+  use Omashiki.DataCase, async: false
 
   alias Omashiki.Config
   alias Omashiki.Runtime.ContainerManager
   alias Omashiki.Harness.LaunchPlan
   alias Omashiki.Plugin.Preset
   alias Omashiki.Runtime.Spec
+  alias Omashiki.Jobs.Job
+  alias Omashiki.Runtimes.CacheGroup
+  alias Omashiki.SupplyChain.Policy
 
   setup do
-    Config.reset!()
-
-    on_exit(fn -> Config.reset!() end)
-
+    on_exit(fn -> Application.delete_env(:omashiki, :manager_url) end)
     :ok
   end
 
@@ -304,6 +304,34 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
     end
   end
 
+
+  describe "supply_chain_delivery data plane" do
+    test "embedded allowlist binds host socket when manager_url is unset" do
+      Application.delete_env(:omashiki, :manager_url)
+
+      delivery = supply_chain_delivery_fixture()
+
+      assert Enum.any?(delivery.env, &String.starts_with?(&1, "OMASHIKI_HOST_SOCKET="))
+      assert Enum.any?(delivery.binds, &String.contains?(&1, "host.sock"))
+
+      npm = registry_env(delivery.env)
+      assert npm =~ "127.0.0.1:8080"
+      refute npm =~ "manager.test"
+    end
+
+    test "remote manager_url uses HTTP gateway without host socket binds" do
+      Application.put_env(:omashiki, :manager_url, "http://manager.test:9090/")
+
+      delivery = supply_chain_delivery_fixture()
+
+      refute Enum.any?(delivery.env, &String.starts_with?(&1, "OMASHIKI_HOST_SOCKET="))
+      refute Enum.any?(delivery.binds, &String.contains?(&1, "host.sock"))
+
+      npm = registry_env(delivery.env)
+      assert npm =~ "manager.test:9090"
+      assert npm =~ "/api/v1/supply-chain/deps/npm/"
+    end
+  end
   defp runtime(handler) do
     %Spec{
       name: "docker.#{handler}.debian",
@@ -344,5 +372,55 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
         }
       }
     }
+  end
+  defp supply_chain_delivery_fixture do
+    job = job_fixture()
+    policy = Policy.parse!(%{"mode" => "allowlist", "packages" => %{"npm" => %{"left-pad" => "1.0.0"}}})
+    group = %CacheGroup{name: "deps", policy: policy}
+
+    ContainerManager.supply_chain_delivery("scope-1", job, [group], 1000, 1000)
+  end
+
+  defp registry_env(env) do
+    Enum.find_value(env, fn entry ->
+      case String.split(entry, "=", parts: 2) do
+        ["npm_config_registry", url] -> url
+        _ -> nil
+      end
+    end)
+  end
+
+  defp job_fixture do
+    user = user_fixture()
+
+    attrs = %{
+      user_id: user.id,
+      schema_version: 1,
+      idempotency_key: "cm-#{System.unique_integer([:positive])}",
+      correlation_id: "cm-correlation",
+      repository: "repo",
+      environment: "isolated",
+      payload: %{"ok" => true},
+      payload_hash: String.duplicate("a", 64),
+      admitted_repository: %{"path" => "/tmp/repo", "base_branch" => "main"},
+      admitted_repository_digest: String.duplicate("b", 64),
+      admitted_environment: %{"capabilities" => ["internal_read"]},
+      admitted_environment_digest: String.duplicate("c", 64),
+      admitted_plugin: %{
+        "path" => "plugins/opencode.toml",
+        "contents" => "",
+        "digest" => String.duplicate("e", 64)
+      },
+      admitted_plugin_digest: String.duplicate("e", 64),
+      registry_digest: String.duplicate("d", 64),
+      queue: "default",
+      priority: 0,
+      status: "running",
+      current_attempt: 1,
+      queued_at: DateTime.utc_now(:microsecond),
+      started_at: DateTime.utc_now(:microsecond)
+    }
+
+    Repo.insert!(Job.changeset(%Job{}, attrs))
   end
 end

@@ -15,6 +15,7 @@ defmodule Omashiki.Runtime.ContainerManager do
 
   alias Omashiki.Jobs.Job
   alias Omashiki.SupplyChain.{Policy, Preflight, Proxy, SocketBridge}
+  alias Omashiki.Worker.DataPlane
   alias Omashiki.Runtime.HostCredentials
   alias Omashiki.Runtime.Spec
   alias Omashiki.Runtimes.{CacheMaintenance, CacheSnapshot}
@@ -594,14 +595,24 @@ defmodule Omashiki.Runtime.ContainerManager do
     do: harness_egress_delivery(llm_egress, supply_env, nil)
 
   def harness_egress_delivery(:engine, supply_env, runtime_job) when is_list(supply_env) do
-    isolated? = Enum.any?(supply_env, &String.starts_with?(&1, "OMASHIKI_HOST_SOCKET="))
+    socket_isolated? =
+      Enum.any?(supply_env, &String.starts_with?(&1, "OMASHIKI_HOST_SOCKET="))
 
-    if isolated? do
-      hosts = Omashiki.LlmEgress.Proxy.hosts()
+    remote? = DataPlane.remote?()
 
-      if hosts == [] do
-        raise ArgumentError,
-              "isolated engine egress requires OMASHIKI_LLM_EGRESS_HOSTS"
+    supply_chain? =
+      Enum.any?(supply_env, &String.starts_with?(&1, "npm_config_registry="))
+
+    restricted? = socket_isolated? or (remote? and supply_chain?)
+
+    if restricted? do
+      unless remote? do
+        hosts = Omashiki.LlmEgress.Proxy.hosts()
+
+        if hosts == [] do
+          raise ArgumentError,
+                "isolated engine egress requires OMASHIKI_LLM_EGRESS_HOSTS"
+        end
       end
 
       token_env =
@@ -616,15 +627,26 @@ defmodule Omashiki.Runtime.ContainerManager do
             []
         end
 
+      egress_proxy = DataPlane.base_url() || @isolated_egress_proxy
+
+      socket_env =
+        if remote?,
+          do: [],
+          else: ["OMASHIKI_LLM_EGRESS_SOCKET=#{@llm_egress_socket}"]
+
+      binds =
+        if remote?,
+          do: [],
+          else: ["#{Omashiki.LlmEgress.Proxy.path()}:#{@llm_egress_socket}:rw"]
+
       %{
         env:
           [
-            "OMASHIKI_LLM_EGRESS_SOCKET=#{@llm_egress_socket}",
-            "HTTPS_PROXY=#{@isolated_egress_proxy}",
-            "HTTP_PROXY=#{@isolated_egress_proxy}",
+            "HTTPS_PROXY=#{egress_proxy}",
+            "HTTP_PROXY=#{egress_proxy}",
             "NO_PROXY=localhost,127.0.0.1"
-          ] ++ token_env,
-        binds: ["#{Omashiki.LlmEgress.Proxy.path()}:#{@llm_egress_socket}:rw"],
+          ] ++ socket_env ++ token_env,
+        binds: binds,
         labels: %{"omashiki.llm_egress" => "restricted"}
       }
     else
@@ -662,7 +684,14 @@ defmodule Omashiki.Runtime.ContainerManager do
           )
 
         isolated? = policy.mode == :allowlist
-        proxy_opts = if isolated?, do: [base_url: @isolated_host_base_url], else: []
+        remote? = DataPlane.remote?()
+
+        proxy_opts =
+          if isolated? do
+            [base_url: DataPlane.base_url() || @isolated_host_base_url]
+          else
+            []
+          end
         npm = Proxy.url(group.name, "npm", token, proxy_opts)
         cargo = Proxy.url(group.name, "cargo", token, proxy_opts)
         go = Proxy.url(group.name, "go", token, proxy_opts)
@@ -671,7 +700,7 @@ defmodule Omashiki.Runtime.ContainerManager do
         cargo_home = Map.get(group.env || %{}, "CARGO_HOME", "#{@agent_home}/.cargo")
 
         socket_delivery =
-          if isolated? do
+          if isolated? and not remote? do
             %{
               env: ["OMASHIKI_HOST_SOCKET=#{@host_socket}"],
               binds: ["#{SocketBridge.path()}:#{@host_socket}:rw"]
@@ -1405,9 +1434,15 @@ defmodule Omashiki.Runtime.ContainerManager do
   defp port_environment(_, _), do: []
 
   defp isolated_host_base_url(env) do
-    if Enum.any?(env, &String.starts_with?(&1, "OMASHIKI_HOST_SOCKET=")),
-      do: @isolated_host_base_url,
-      else: nil
+    case DataPlane.base_url() do
+      base when is_binary(base) ->
+        base
+
+      _ ->
+        if Enum.any?(env, &String.starts_with?(&1, "OMASHIKI_HOST_SOCKET=")),
+          do: @isolated_host_base_url,
+          else: nil
+    end
   end
 
   @doc false
