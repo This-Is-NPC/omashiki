@@ -29,7 +29,6 @@ defmodule Omashiki.Runtime.ContainerManager do
   @isolated_egress_proxy "http://127.0.0.1:8081"
   @default_bootstrap_timeout_ms 10 * 60 * 1_000
   @cancellation_table :omashiki_runtime_cancellations
-  @socket_path Application.compile_env(:omashiki, :docker_socket_path, "/var/run/docker.sock")
 
   @default_resource_limits %{
     pids_limit: 256,
@@ -2114,12 +2113,16 @@ defmodule Omashiki.Runtime.ContainerManager do
     end
   end
 
+  defp socket_path do
+    Application.get_env(:omashiki, :docker_socket_path, "/var/run/docker.sock")
+  end
+
   defp mint_request(method, path, headers, body, timeout_ms \\ nil) do
     timeout_ms = timeout_ms || docker_timeout_ms()
     full_path = "/#{@docker_api_version}#{path}"
     deadline = System.monotonic_time(:millisecond) + timeout_ms
 
-    case Mint.HTTP.connect(:http, {:local, @socket_path}, 0, hostname: "localhost") do
+    case Mint.HTTP.connect(:http, {:local, socket_path()}, 0, hostname: "localhost") do
       {:ok, conn} ->
         case Mint.HTTP.request(conn, method, full_path, headers, body) do
           {:ok, conn, req_ref} ->

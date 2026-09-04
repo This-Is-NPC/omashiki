@@ -12,6 +12,14 @@ config :omashiki,
 # Endpoint binds to loopback — refused at boot otherwise (LAN = Bearer).
 config :omashiki, :auth_mode, :bearer
 
+# Boot topology. `:embedded` is today's single-node default (manager + worker
+# in one process). Override at runtime via OMASHIKI_ROLE.
+config :omashiki, :boot_role, :embedded
+
+# Docker Engine Unix socket. Read at runtime so workers can point at rootless
+# or remote sockets without recompiling.
+config :omashiki, :docker_socket_path, "/var/run/docker.sock"
+
 # Configures the mailer
 #
 # By default it uses the "Local" adapter which stores the emails

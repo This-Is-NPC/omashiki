@@ -15,6 +15,33 @@ if path = System.get_env("OMASHIKI_SUPPLY_CHAIN_SOCKET_PATH") do
   config :omashiki, :supply_chain_socket_path, path
 end
 
+case System.get_env("OMASHIKI_ROLE") do
+  nil ->
+    :ok
+
+  "embedded" ->
+    config :omashiki, :boot_role, :embedded
+
+  "manager" ->
+    config :omashiki, :boot_role, :manager
+
+  "worker" ->
+    config :omashiki, :boot_role, :worker
+
+  other ->
+    raise "OMASHIKI_ROLE must be embedded, manager, or worker; got #{inspect(other)}"
+end
+
+if path = System.get_env("OMASHIKI_DOCKER_SOCKET_PATH") do
+  if Path.type(path) != :absolute,
+    do: raise("OMASHIKI_DOCKER_SOCKET_PATH must be absolute")
+
+  config :omashiki, :docker_socket_path, path
+end
+
+config :omashiki, :worker_token, System.get_env("OMASHIKI_WORKER_TOKEN")
+config :omashiki, :manager_url, System.get_env("OMASHIKI_MANAGER_URL")
+
 if path = System.get_env("OMASHIKI_LLM_EGRESS_SOCKET_PATH") do
   if Path.type(path) != :absolute,
     do: raise("OMASHIKI_LLM_EGRESS_SOCKET_PATH must be absolute")
