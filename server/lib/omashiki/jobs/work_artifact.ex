@@ -52,7 +52,7 @@ defmodule Omashiki.Jobs.WorkArtifact do
   end
 
   defp publish("none", _path, _paths, changed_bytes, job_id, _job, _opts) do
-    {:ok, %{"job_id" => to_string(job_id), "changed_bytes" => changed_bytes}}
+    {:ok, %{"job_id" => to_string(job_id), "changed_bytes" => changed_bytes, "sink" => "none"}}
   end
 
   defp publish("files", path, paths, changed_bytes, job_id, _job, opts) do
@@ -63,7 +63,8 @@ defmodule Omashiki.Jobs.WorkArtifact do
          "job_id" => to_string(job_id),
          "changed_bytes" => changed_bytes,
          "blob_path" => blob_path,
-         "blob_digest" => digest
+         "blob_digest" => digest,
+         "sink" => "files"
        }}
     end
   end

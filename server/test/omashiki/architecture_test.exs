@@ -40,7 +40,8 @@ defmodule Omashiki.ArchitectureTest do
     Omashiki.Gateway.Provider,
     Omashiki.Harness.Adapter,
     Omashiki.Jobs.Runner.Container,
-    Omashiki.Runtime.ContainerManager.Behaviour
+    Omashiki.Runtime.ContainerManager.Behaviour,
+    Omashiki.Worker.Transport
   ]
 
   describe "INV5  port contracts use no vendor vocabulary" do

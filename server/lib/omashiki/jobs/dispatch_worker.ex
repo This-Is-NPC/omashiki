@@ -26,7 +26,7 @@ defmodule Omashiki.Jobs.DispatchWorker do
   alias Omashiki.Jobs
   alias Omashiki.Jobs.Job
   alias Omashiki.Repo
-  alias Omashiki.Runtime.AttemptSupervisor
+  alias Omashiki.Worker.Offer
 
   @terminal ~w(succeeded failed cancelled)
   @active ~w(provisioning running)
@@ -63,15 +63,15 @@ defmodule Omashiki.Jobs.DispatchWorker do
       nil ->
         {:cancel, :job_missing}
 
-      %Job{status: "queued"} = job ->
+      %Job{status: "queued"} ->
         case Jobs.claim(job_id, "oban:#{oban_id}") do
           {:ok, attempt} ->
-            case attempt_runner().run(attempt, await_timeout_ms: await_timeout_ms(job)) do
-              {:ok, %Job{status: status}} when status in @terminal ->
-                :ok
+            job = Repo.get!(Job, job_id)
+            offer = Offer.from_claimed(job, attempt)
 
-              {:ok, _job} ->
-                {:error, :runner_not_terminal}
+            case transport().execute(offer, await_timeout_ms: await_timeout_ms(job)) do
+              {:ok, _complete} ->
+                :ok
 
               {:error, reason} ->
                 {:error, reason}
@@ -158,8 +158,8 @@ defmodule Omashiki.Jobs.DispatchWorker do
     }
   end
 
-  defp attempt_runner,
-    do: Application.get_env(:omashiki, :dispatch_attempt_runner, AttemptSupervisor)
+  defp transport,
+    do: Application.get_env(:omashiki, :worker_transport, Omashiki.Worker.Local)
 
   defp await_timeout_ms(%Job{admitted_environment: env}) when is_map(env) do
     job_timeout = Map.get(env, "timeout_ms", 60_000)
