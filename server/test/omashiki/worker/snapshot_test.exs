@@ -159,6 +159,23 @@ defmodule Omashiki.Worker.SnapshotTest do
     assert_receive :destroyed
   end
 
+  test "git mirror path includes manager_id when set on offer" do
+    offer =
+      base_offer(%{
+        sink: "git",
+        manager_id: "mgr-a",
+        admitted_environment: environment_for("git"),
+        admitted_repository: git_repository()
+      })
+
+    assert {:ok, %Complete{kind: :git}} = Snapshot.run(offer)
+
+    assert_receive {:provision, job}
+    assert job.admitted_repository["path"] == mirror_path(@remote, "mgr-a")
+    refute job.admitted_repository["path"] == mirror_path(@remote, "mgr-b")
+    assert_receive :destroyed
+  end
+
   test "files offer completes with files metadata" do
     Application.put_env(:omashiki, :worker_snapshot_opts,
       container: FilesContainer,
@@ -266,11 +283,11 @@ defmodule Omashiki.Worker.SnapshotTest do
     }
   end
 
-  defp mirror_path(remote) do
+  defp mirror_path(remote, manager_id \\ "local") do
     short =
       :crypto.hash(:sha256, remote) |> Base.encode16(case: :lower) |> String.slice(0, 16)
 
-    Path.join([System.user_home!(), ".cache", "omashiki", "mirrors", short])
+    Path.join([System.user_home!(), ".cache", "omashiki", "mirrors", manager_id, short])
   end
 
   defp environment_for("git") do

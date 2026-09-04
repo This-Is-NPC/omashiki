@@ -487,7 +487,8 @@ defmodule Omashiki.Runtime.ContainerManager do
          runtime_mount_defs
        ) do
     runtime_job = Keyword.get(opts, :job)
-    supply = supply_chain_delivery(group.id, runtime_job, cache_groups, host_uid, host_gid)
+    host_base_url = Keyword.get(opts, :host_base_url)
+    supply = supply_chain_delivery(group.id, runtime_job, cache_groups, host_uid, host_gid, host_base_url)
 
     context = %Omashiki.Harness.Context{
       job: runtime_job,
@@ -495,7 +496,7 @@ defmodule Omashiki.Runtime.ContainerManager do
       environment: Keyword.get(opts, :environment, %{}),
       profile: profile,
       runtime_mounts: runtime_mount_defs,
-      host_base_url: isolated_host_base_url(supply.env)
+      host_base_url: isolated_host_base_url(supply.env, host_base_url)
     }
 
     adapter = Omashiki.Presets.adapter(profile)
@@ -505,7 +506,7 @@ defmodule Omashiki.Runtime.ContainerManager do
       secret_payload = Map.get(secret, "contents")
       secret_target = Map.get(secret, "target")
       secret_host_path = if is_binary(secret_payload), do: secret_host_path_for(group.id)
-      egress = harness_egress_delivery(launch.llm_egress, supply.env, runtime_job)
+      egress = harness_egress_delivery(launch.llm_egress, supply.env, runtime_job, host_base_url)
 
       try do
         if is_binary(secret_payload) do
@@ -589,16 +590,20 @@ defmodule Omashiki.Runtime.ContainerManager do
 
   @doc false
   def harness_egress_delivery(:engine, supply_env),
-    do: harness_egress_delivery(:engine, supply_env, nil)
+    do: harness_egress_delivery(:engine, supply_env, nil, nil)
 
   def harness_egress_delivery(llm_egress, supply_env),
-    do: harness_egress_delivery(llm_egress, supply_env, nil)
+    do: harness_egress_delivery(llm_egress, supply_env, nil, nil)
 
-  def harness_egress_delivery(:engine, supply_env, runtime_job) when is_list(supply_env) do
+  def harness_egress_delivery(:engine, supply_env, runtime_job),
+    do: harness_egress_delivery(:engine, supply_env, runtime_job, nil)
+
+  def harness_egress_delivery(:engine, supply_env, runtime_job, host_base_url)
+       when is_list(supply_env) do
     socket_isolated? =
       Enum.any?(supply_env, &String.starts_with?(&1, "OMASHIKI_HOST_SOCKET="))
 
-    remote? = DataPlane.remote?()
+    remote? = DataPlane.remote?(host_base_url)
 
     supply_chain? =
       Enum.any?(supply_env, &String.starts_with?(&1, "npm_config_registry="))
@@ -627,7 +632,7 @@ defmodule Omashiki.Runtime.ContainerManager do
             []
         end
 
-      egress_proxy = DataPlane.base_url() || @isolated_egress_proxy
+      egress_proxy = DataPlane.base_url(host_base_url) || @isolated_egress_proxy
 
       socket_env =
         if remote?,
@@ -654,14 +659,16 @@ defmodule Omashiki.Runtime.ContainerManager do
     end
   end
 
-  def harness_egress_delivery(_llm_egress, _supply_env, _runtime_job),
+  def harness_egress_delivery(_llm_egress, _supply_env, _runtime_job, _host_base_url),
     do: %{env: [], binds: [], labels: %{}}
 
   @doc false
-  def supply_chain_delivery(_group_id, _job, [], _uid, _gid),
+  def supply_chain_delivery(group_id, job, cache_groups, uid, gid, host_base_url \\ nil)
+
+  def supply_chain_delivery(_group_id, _job, [], _uid, _gid, _host_base_url),
     do: %{env: [], labels: %{}, binds: [], files: []}
 
-  def supply_chain_delivery(group_id, %Job{} = job, cache_groups, _uid, _gid) do
+  def supply_chain_delivery(group_id, %Job{} = job, cache_groups, _uid, _gid, host_base_url) do
     policies = Enum.filter(cache_groups, &match?(%{policy: %Policy{}}, &1))
 
     case policies do
@@ -684,11 +691,11 @@ defmodule Omashiki.Runtime.ContainerManager do
           )
 
         isolated? = policy.mode == :allowlist
-        remote? = DataPlane.remote?()
+        remote? = DataPlane.remote?(host_base_url)
 
         proxy_opts =
           if isolated? do
-            [base_url: DataPlane.base_url() || @isolated_host_base_url]
+            [base_url: DataPlane.base_url(host_base_url) || @isolated_host_base_url]
           else
             []
           end
@@ -1313,7 +1320,8 @@ defmodule Omashiki.Runtime.ContainerManager do
 
     harness_env =
       Keyword.get_lazy(opts, :harness_env, fn ->
-        host_base_url = isolated_host_base_url(supply_chain_env)
+        host_base_url_opt = Keyword.get(opts, :host_base_url)
+        host_base_url = isolated_host_base_url(supply_chain_env, host_base_url_opt)
 
         context = %Omashiki.Harness.Context{
           job: job,
@@ -1432,9 +1440,8 @@ defmodule Omashiki.Runtime.ContainerManager do
   end
 
   defp port_environment(_, _), do: []
-
-  defp isolated_host_base_url(env) do
-    case DataPlane.base_url() do
+  defp isolated_host_base_url(env, host_base_url) do
+    case host_base_url || DataPlane.base_url() do
       base when is_binary(base) ->
         base
 

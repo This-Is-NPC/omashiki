@@ -19,7 +19,7 @@ defmodule Omashiki.Jobs.WorkArtifact do
   @doc "Create a tmpdir and invoke the container callback."
   def provision(%Job{id: job_id}, sink, opts, callback) when sink in ["files", "none"] do
     with :ok <- not_cancelled(opts),
-         path <- work_path(job_id),
+         path <- work_path(job_id, opts),
          :ok <- File.mkdir_p(path) do
       artifact = %{path: path, sink: sink, job_id: job_id}
 
@@ -69,12 +69,40 @@ defmodule Omashiki.Jobs.WorkArtifact do
     end
   end
 
-  defp work_path(job_id) do
-    Path.join(System.tmp_dir!(), Path.join("omashiki-work", to_string(job_id)))
+  defp work_path(job_id, opts) do
+    base = Path.join(System.tmp_dir!(), "omashiki-work")
+
+    case Keyword.get(opts, :manager_id) do
+      id when is_binary(id) and id != "" ->
+        Path.join([base, sanitize_manager_id(id), to_string(job_id)])
+
+      _ ->
+        Path.join(base, to_string(job_id))
+    end
   end
 
   defp blob_root(opts) do
-    Keyword.get(opts, :blob_root, Path.join(System.tmp_dir!(), "omashiki-blobs"))
+    case Keyword.get(opts, :blob_root) do
+      root when is_binary(root) ->
+        root
+
+      _ ->
+        base = Path.join(System.tmp_dir!(), "omashiki-blobs")
+
+        case Keyword.get(opts, :manager_id) do
+          id when is_binary(id) and id != "" ->
+            Path.join(base, sanitize_manager_id(id))
+
+          _ ->
+            base
+        end
+    end
+  end
+
+  defp sanitize_manager_id(id) do
+    id
+    |> String.trim()
+    |> String.replace(~r/[^A-Za-z0-9._-]/, "-")
   end
 
   defp write_blob(work_path, paths, job_id, opts) do

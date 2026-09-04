@@ -21,4 +21,9 @@ defmodule Omashiki.Worker.DataPlaneTest do
     assert DataPlane.base_url() == "http://manager.test:9090"
     assert DataPlane.remote?()
   end
+
+  test "base_url/1 trims explicit url" do
+    assert DataPlane.base_url("http://manager-b.test:8080/") == "http://manager-b.test:8080"
+    assert DataPlane.remote?("http://manager-b.test:8080/")
+  end
 end

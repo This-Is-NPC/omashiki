@@ -34,6 +34,7 @@ defmodule Omashiki.Worker.Snapshot do
   end
 
   defp execute(job, attempt, environment, offer, opts) do
+    opts = provision_opts(opts, offer)
     pre_steps = Map.get(environment, "pre_steps", [])
     post_steps = Map.get(environment, "post_steps", [])
     timeout_ms = Map.get(environment, "timeout_ms", offer.timeout_ms)
@@ -212,7 +213,7 @@ defmodule Omashiki.Worker.Snapshot do
     }
   end
 
-  defp relocate_repository(%Offer{sink: "git", admitted_repository: repo}) when is_map(repo) do
+  defp relocate_repository(%Offer{sink: "git", admitted_repository: repo} = offer) when is_map(repo) do
     case Map.get(repo, "remote") do
       remote when is_binary(remote) and remote != "" ->
         mirror_path =
@@ -221,6 +222,7 @@ defmodule Omashiki.Worker.Snapshot do
             ".cache",
             "omashiki",
             "mirrors",
+            manager_mirror_segment(offer),
             short_sha256(remote)
           ])
 
@@ -243,6 +245,28 @@ defmodule Omashiki.Worker.Snapshot do
   end
 
   defp check_dependency_base(_), do: :ok
+
+  defp provision_opts(opts, %Offer{manager_url: url, manager_id: id}) do
+    opts
+    |> maybe_kw(:host_base_url, url)
+    |> maybe_kw(:manager_id, id)
+  end
+
+  defp maybe_kw(opts, _key, nil), do: opts
+  defp maybe_kw(opts, _key, ""), do: opts
+  defp maybe_kw(opts, key, value), do: Keyword.put(opts, key, value)
+
+  defp manager_mirror_segment(%Offer{manager_id: id}) when is_binary(id) and id != "" do
+    sanitize_manager_id(id)
+  end
+
+  defp manager_mirror_segment(_), do: "local"
+
+  defp sanitize_manager_id(id) do
+    id
+    |> String.trim()
+    |> String.replace(~r/[^A-Za-z0-9._-]/, "-")
+  end
 
   defp check_git_remote(%Offer{sink: "git", admitted_repository: %{"remote" => remote}})
        when is_binary(remote) and remote != "",
