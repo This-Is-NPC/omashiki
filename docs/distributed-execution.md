@@ -1,248 +1,368 @@
-# Distributed Execution Roadmap
+# Manager and Worker Plan
 
-Design direction for running one central queue whose work executes either on the
-same host or spread across several. Same release, different roles. PostgreSQL
-stays the coordination authority: no distributed Erlang, no libcluster.
+Design direction for splitting Omashiki into a **manager** (control plane) and
+**workers** (execution). Same release, different roles. The database and the
+product registry belong to the manager. A worker never mounts PostgreSQL.
 
-Status: **not implemented.** Phases are ordered by dependency, and each one
-names the condition that closes it.
+Status: **design.** Phases are ordered by dependency; each one names the
+condition that closes it. This document replaces the earlier "N processes, one
+Postgres" roadmap. Phases 1–3 of that revision (canonical Git remote, machine
+identity, per-machine capacity rows) already shipped and remain foundations on
+the **manager** side.
 
-## Current State
+The three topologies are the same protocol, not three products:
 
-What already works across nodes, unchanged:
+| Shape | Meaning |
+| --- | --- |
+| **1 manager, N workers** | One control plane, a fleet of executors |
+| **N managers, 1 worker** | Several products / tenants share one machine |
+| **N:M** | Cartesian product of the two |
+| **Embedded** | Manager with an in-process worker — today's single-node default |
 
-- **Pull-based dispatch.** `Omashiki.Jobs.DispatchWorker` claims through
-  `Jobs.claim/3`, which reserves capacity and returns `{:snooze, 1}` when there
-  is no slot (`dispatch_worker.ex:38`). Oban lives in PostgreSQL, so N nodes
-  running the `scheduler` queue contend for jobs correctly.
-- **Fencing leases.** `lease_token` plus `lease_expires_at` and
-  `Omashiki.Jobs.Recovery` already handle a dead node: the lease expires and
-  capacity is released exactly once (NFR-002).
-- **Port allocation.** The allocator is per-VM, which is the correct multi-node
-  behaviour — each node leases its own local ports. Do not promote it to a
-  global resource.
+Two manager *processes* in front of **one** Postgres are HA of HTTP, not N
+managers. N managers means N databases and N registries.
 
-What breaks on the second node: global capacity, the result stranded on local
-disk, and the Docker socket pinned at compile time.
+Kata, Arch images, and judge/fan-in are out of this plan. Non-code work is
+**in**: the environment already selects `sink = git | files | none`.
 
-### Two defects to fix before distributing
+## Target Shape
 
-**Dispatch durability is broken today.** The claim path contends correctly, but
-the enclosing Oban job does not survive a failure. `DispatchWorker` declares
-`max_attempts: 1` (`dispatch_worker.ex:6`), so any `{:error, reason}` return
-(`:35`, `:45`) discards the Oban job on its first failure while the `jobs` row
-stays `queued` with no `terminal_error`. Recovery does not reconcile it either:
-`recover_stale_locked/1` (`jobs.ex:497`) only scans attempts whose status is in
-the active set, and a job that was never claimed has no active attempt. The
-400-job load test produced 109 rows in exactly that state. This violates NFR-001
-and falls through the gap in NFR-002. N nodes multiply the loss rather than
-absorbing it, so this is a prerequisite, not a parallel concern.
+```
+Clientes A ──► Manager A + Postgres A ──┐
+                                        ├── Worker × M
+Clientes B ──► Manager B + Postgres B ──┘
+                      ▲
+                      └─── gateway / tools / packages stay on the owning manager
+```
 
-**`recover_stale_locked/1` runs inside every `claim`.** `Jobs.claim/3` calls it
-at the top of the claim transaction (`jobs.ex:41`), before it even looks at its
-own job. Every claim therefore opens a transaction that scans all expired active
-attempts and takes a row lock per candidate. That is a cluster-wide
-serialization point with the same convoy shape as the `api_tokens` row lock
-found during load testing, and it gets worse in proportion to node count. Hoist
-stale recovery out of `claim` and leave it to `Omashiki.Jobs.Recovery` before
-Phase 3 makes claims more frequent.
+- Clients talk only to a manager.
+- A worker **pulls** work. It does not accept inbound HTTP from the internet
+  and does not share a database with anyone.
+- Each admitted job already carries `admitted_environment`,
+  `admitted_repository`, `admitted_plugin`, and `registry_digest`
+  (`jobs/admission.ex`). The worker executes that snapshot. It never resolves
+  an environment by name.
+- `Complete` is a sum type keyed by sink, not "a Git branch".
 
-## Phase 1 — Result Off the Node
+## Ownership
 
-Do this first. It depends on no other phase and it is the only one that changes
-observable product behavior.
+| Concern | Manager | Worker |
+| --- | --- | --- |
+| Postgres, Oban, admission, UI, webhooks, SSE | yes | **no** |
+| Product registry / `omashiki.toml` environments, presets, models | yes | **no** |
+| Claim, lease row, recovery, digest | yes | heartbeat / result over the protocol |
+| Docker, `docker_socket_path`, this machine's `[limits]` | no | yes |
+| Git mirror + push of **that job's** snapshot remote | no | yes, `sink=git` only |
+| `files` blob / `none` metadata | persist + serve | produce and return on `Complete` |
+| LLM keys, MCP headers (NFR-007) | yes | short-lived claim, never the secret |
+| Container slots | in-flight **of this manager** | **authority**: local semaphore |
 
-Status: **done.**
+Three rules make N:1 and N:M possible:
 
-**Problem.** Success is a local `omashiki/job-<id>` branch inside `<repo_path>`
-on the machine that executed. If that node dies, or the client asks a different
-node, the deliverable is gone. A second defect sat underneath it:
-`collision_check/2` only inspected local state, and with N nodes writing to one
-shared remote the absence of a *local* collision proves nothing.
+1. **The slot belongs to the worker.** Eight containers are the machine's, not
+   eight per manager. Two managers must not reserve 8+8 and explode the host.
+2. **The job knows its owner.** Result, events, and failure return only to the
+   manager that admitted the work. A does not read B's jobs.
+3. **The worker does not mix frontiers.** Worktree, tmpdir, network, and
+   claims of a job from A never cross into a job from B.
 
-**Change.** Finalization publishes to a canonical remote. The local branch
-becomes an execution detail and the result becomes
-`(remote, branch, base_sha, head_sha)`.
+## What Already Ships
 
-- [x] A canonical remote field per repository in `omashiki.toml` —
-      `[repositories.*].remote`, optional, `nil` keeps single-node behaviour
-- [x] `GitArtifact.finalize` pushes after the safety validations — secret,
-      symlink, protected path, and the 100 MiB cap stay **before** the push
-      (NFR-005)
-- [x] The API result exposes the remote, in the attempt `result` map
-- [x] `prune_expired/2` prunes on the remote, not only locally: candidates come
-      from the remote's own refs, so a node prunes artifacts it never held
-- [x] Collision detection moved to the push. `--force-with-lease=<ref>:` with an
-      empty expectation makes the remote refuse a branch name that already
-      exists there, so the arbiter is the one repository every node shares
+Keep these; do not re-implement them behind the new transport.
 
-**Push credentials.** Not declared in `omashiki.toml`. The push is a host-side
-operation by the Omashiki daemon and authenticates the way every other host-side
-Git command does — SSH agent, `~/.ssh/config`, or a credential helper.
-`[host_credentials.*]` was rejected for it: that section is harness-shaped and
-delivers by copying into the per-attempt container mount, which is precisely
-where a push credential must not be. An agent holding it could push to the
-canonical remote directly and bypass the artifact safety validations.
+- **Admission snapshots.** `Runner` reads `job.admitted_environment`, not the
+  live registry (`jobs/runner.ex`). Gateway routing uses
+  `Credentials.admitted/2`. A reload cannot move a job already in flight.
+- **Sinks.** Registry requires `sink` in `git | files | none`
+  (`config/registry.ex`). Admission omits `repo` for `files`/`none`.
+  `GitArtifact` vs `WorkArtifact` already branches provision/publish.
+  `VALIDATE` is sink-independent (`jobs/validate.ex`).
+- **Canonical Git remote.** Finalization pushes `(remote, branch, base_sha,
+  head_sha)` so a result is not stranded on the executing disk.
+- **Machine identity.** `OMASHIKI_NODE` / `[nodes.*]`; attempts record
+  `machine_id`.
+- **Dispatch durability.** `DispatchWorker` retries (`max_attempts: 5`) and
+  settles a stranded `jobs` row before Oban records the error. Stale recovery
+  lives in `Jobs.Recovery`, not inside `claim/3`. The defects recorded in the
+  previous revision of this file are closed in code; do not re-open them.
+- **Fencing leases.** `LeaseRenewer` (5s tick, 60s window) plus
+  `Jobs.Recovery`. Health of an attempt is the lease, not a node ping.
+- **Tools over MCP.** Container talks to `Tools.Proxy` on the host; headers
+  stay on the host. That host, after this plan, is the **manager that owns
+  the job**.
+- **Hot reload.** `Config.Rollout` (`gradual` / `drain_all`) applies to the
+  process that holds the product TOML — the manager.
 
-**Done when:** a job's branch is reachable from a machine that did not run the
-attempt. Covered by `Omashiki.Jobs.GitArtifactTest`, "canonical remote"
-— a bare repository plus a second clone stands in for the second machine.
+## What Breaks Against This Target
 
-## Phase 2 — Node Identity
+- Every process starts `Repo`, Endpoint, Oban, and Docker
+  (`application.ex`). A "worker" today is a second copy of the app.
+- `Jobs.claim/3` reserves `execution_capacity` in Postgres. That cannot be
+  the machine's real slot once two managers share one worker.
+- `docker_socket_path` is `Application.compile_env`
+  (`runtime/container_manager.ex`).
+- `WorkArtifact` writes `blob_path` on local disk. A remote worker would
+  leave the product on the wrong machine.
+- `DispatchWorker` claims and then runs `AttemptSupervisor` in the same
+  BEAM. There is no transport seam.
+- The checked-in multi-node example still describes "copy this TOML, point
+  everyone at one Postgres". That is the transitional layout, not the target.
 
-Cheap now, expensive to retrofit: recovery needs to know whose lease it was.
+## Protocol
 
-Status: **done.**
+Pull. The worker is often behind NAT and must not expose HTTP. N managers
+are N `(url, worker_token)` pairs in the worker's machine config.
 
-- [x] Nodes are declared in `omashiki.toml` as `[nodes.<name>]`, parsed and
-      validated like every other registry section. A name is the whole
-      declaration — per-node capacity and per-node Docker endpoint arrive with
-      the changes that read them
-- [x] A stable node per process: `OMASHIKI_NODE`, falling back to the hostname.
-      One declared node is this machine by construction; with several declared,
-      a host in none of them fails config load rather than claiming work under a
-      node id no other machine has heard of
-- [x] No `[nodes]` section means exactly one implicit local node, so the
-      distributed path is opt-in by the presence of configuration
-- [x] Persisted as `job_attempts.node_id`, a dedicated nullable column.
-      `runner_id` was not extended: it carries `"oban:<id>"`, which identifies
-      the dispatch job rather than the host, and Phase 3 needs a column to join
-      on
-- [x] The job detail view shows the node per attempt — per attempt, not per
-      job, because a retry can land on a different machine
+```
+Register  →  Poll(free_slots, machine)  →  Offer
+                 ↓
+              Accept  (local semaphore, atomic)
+                 ↓
+              Run snapshot  ── Heartbeat / events / Cancel-on-next-tick
+                 ↓
+              Complete {sink, git | files | none | error}
+```
 
-**Nodes are not in the registry digest.** The digest is captured at admission
-and pins what a job *does*. Adding or draining a machine is a deployment, not
-configuration drift, and hashing the node list would go stale on every
-in-flight job's admitted digest during a routine scale-out. It would also
-defeat the Phase 4 cross-node comparison below: the implicit node is named
-after its own host, so two identically-configured machines would hash
-differently and report a divergence that is not there.
+| Message | Direction | Contract |
+| --- | --- | --- |
+| `Register` | worker → manager | machine id, runtime handlers, images present, max slots |
+| `Poll` | worker → manager | `free_slots`. Manager offers at most that many jobs from **its** queue |
+| `Accept` | worker → manager | worker has taken a local slot. If the slot vanished, reject and the manager re-queues |
+| `Heartbeat` | worker → manager | renews `lease_expires_at` on that manager's attempt row (~5s). Cancel is piggy-backed on the reply |
+| `Complete` | worker → manager | sum type below. Manager writes the job row, webhook outbox, and its own in-flight count |
 
-**Done when:** "which machine ran this attempt?" is answerable from the
-database. Covered by `Omashiki.Jobs.ClaimsTest`, "a claim records the declared
-node that ran the attempt" and "a claim with no declared nodes records the
-implicit local node".
+Auth: each manager issues a **worker token**, distinct from client API
+tokens. The worker presents the matching token per URL. Managers never
+share tokens or databases.
 
-## Phase 3 — Capacity Per Node
+Cancel window is the heartbeat interval (same order as today's 5s/60s
+lease). No push channel required for v1.
 
-The central change. `execution_capacity` was a single row guarded by
-`CHECK (id = 1)`, and `Jobs.sync_capacity/0` wrote
-`[limits].max_concurrent_containers` into it at boot — so the second node to
-start overwrote the first node's capacity.
+Single-node uses the same structs over `LocalWorker` (in-process). Zero
+network hop; today's tests stay on that path.
 
-Status: **done.**
+### `Complete` by sink
 
-- [x] Migration: drop `CHECK (id = 1)`, key the table by `node_id`, one row per
-      node. The surviving row is re-keyed to `'local'`, which is where a
-      pre-node install's outstanding reservations were counted and therefore
-      where attempts with a NULL `node_id` are released
-- [x] `reserve_capacity!/1` reserves against the **own** node's row. The
-      `UPDATE ... WHERE active < capacity` pattern does not change — it is still
-      one row and one atomic compare-and-swap — so the whole existing
-      correctness argument carries over. This is a re-key, not a new
-      concurrency design
-- [x] `release_capacity!/1` releases against the row that *reserved*, read from
-      the attempt's own `node_id`, which is why Phase 2 comes first. A sweep is
-      cluster-wide, so the machine failing an expired attempt is routinely not
-      the machine holding its slot
-- [x] `sync_capacity/0` reconciles only its own row at boot, and creates it: a
-      node's row has no other origin, so the table no longer ships a seeded
-      singleton for new machines
-- [x] `Recovery` releases against the right row when a lease expires — it goes
-      through the same `release_capacity_if_reserved!/1`, so it inherited this
-- [x] Aggregate cluster capacity in the operator UI, as the sum of the rows
-      (`Jobs.cluster_capacity/0`)
+The container, lease, and heartbeat do not change. Only the artefact does.
+The environment selects the sink (BR-002: no `type` on the payload).
 
-**Capacity is not a `[nodes.*]` option.** A machine's budget is
-`[limits].max_concurrent_containers` in that machine's own `omashiki.toml`,
-alongside the rest of its host limits. Declaring it centrally as well would give
-one fact two sources that can disagree, and the central copy is the one no
-operator would think to update when they change the machine.
+| Sink | Workspace | Success payload | Worker must not |
+| --- | --- | --- | --- |
+| `git` | worktree from the snapshot remote | `(remote, branch, base_sha, head_sha)` after push | invent another remote |
+| `files` | tmpdir | validated blob (tar+digest today) **delivered to the manager** | leave `blob_path` only on worker disk |
+| `none` | tmpdir | terminal metadata (`changed_bytes`, …) | clone or push |
 
-**Done when:** two nodes with `max_concurrent_containers = 10` each run 20
-simultaneous attempts, and killing one does not affect the other's capacity.
-Covered by `Omashiki.Jobs.NodeCapacityTest`. That suite is a proxy, and says so
-in its own moduledoc: one BEAM becomes each node in turn, because
-`Config.current_node/0` is process-global, so it exercises the real reserve,
-release, sync and recovery code against two real `node_id` rows but not two real
-machines. Simultaneous cross-host contention, partitions, and clock skew are not
-covered.
+`GET /api/v1/jobs/:id/result` and the signed webhook stay on the manager
+(FR-004, BR-009). The worker does not retain the product.
 
-## Phase 4 — Per-Node Configuration and Roles
+Size: `WorkArtifact` caps at 100 MiB today. Inline vs signed-blob (256 KB
+in `generic-task-processor.md`) is a later refinement of `files`; the
+transport must already carry a blob or a manager-side upload. JSON Schema
+validation of `/workspace/.omashiki/result.json` is **not** this plan —
+it is items 1–2 of that document, after the hop knows `files`/`none`.
 
-- [ ] `docker_socket_path` leaves `Application.compile_env`
-      (`runtime/container_manager.ex:31`) and becomes runtime configuration
-- [ ] Process role by configuration: `central` (HTTP, LiveView, Oban) and
-      `worker` (the `scheduler` queue plus Docker, no HTTP). Same release
-- [ ] Worker boot validates Docker, mounts, and declared repositories, and fails
-      loudly if the node cannot serve the environments it registered
-- [ ] Decide repository locality: a per-node mirror with a `fetch` before the
-      worktree. This is simple after Phase 1, because there is already something
-      to mirror from
-- [ ] Verify that environment and registry digests match across nodes.
-      Divergent configuration between machines must be an error, not a runtime
-      surprise
+### Data plane
 
-**Done when:** a new worker joins the cluster by pointing at PostgreSQL alone
-and starts pulling work.
+The sandbox on the worker calls the **owning manager's** LLM gateway, tool
+proxy, and package proxy. Claims already bind
+`admitted_environment_digest`. Keys never leave the manager (NFR-007).
+This is the largest networking change versus today's localhost sockets.
 
-## Phase 5 — Multi-Model Fan-Out and Judge/Merge
+If the worker cannot reach that manager's data plane, it **refuses** the
+job rather than falling back to another manager's gateway.
 
-This blocks nothing above. It is recorded so that Phase 4 does not close doors
-here.
+### Isolation when N managers share a worker
 
-**Fan-out is already expressible.** An environment already fixes harness plus
-credential plus model, so "the same task across 4 models" is 4 jobs with the
-same `instruction` and 4 environments, submitted as one atomic batch. No new
-code. The caller still does not choose a model — the operator declares the pool.
+- `git`: worktree and mirror keyed `manager-id/job-id`; push only that
+  job's remote.
+- `files` / `none`: tmpdir per attempt (`…/<manager-id>/<job-id>`),
+  removed on destroy.
+- Slots do not care about sink. A `none` job occupies a container the
+  same way a `git` job does.
 
-**What is missing is the fan-in:**
+Fairness: round-robin poll across manager URLs so one manager cannot fill
+the machine.
 
-- [ ] N:1 dependency. `unlock_children!` (`jobs.ex:470`) is 1:N through
-      `parent_job_id`. This needs a join table and a join policy
-      (`all_terminal` / `quorum` / `first_success`). Note that BR-005 currently
-      says a failed parent does not unlock; for a judge, a failed candidate is
-      information
-- [ ] A **system-injected** context channel, separate from the caller's
-      `context` (`contract/payload_v2.ex`), to hand the candidate refs over at
-      unlock. Keeping it separate is what preserves "the caller does not control
-      the harness" (BR-002)
-- [ ] A verification `post_step` with a structured result: does it compile, do
-      the tests pass, is the diff minimal. Rank candidates by objective signal;
-      a model judge only breaks ties among those that passed
-- [ ] A cost policy per task class. N models is N times the cost, never a global
-      mode
+## Implementation Phases
 
-Judge and merge are the same primitive: a job whose instruction is to evaluate
-or to merge, given N branches. A merge is a judge that emits code instead of
-picking.
+### Phase 0 — In-process transport seam
 
-The structured-verification item has the most leverage on that list — it serves
-best-of-N selection, fleet maintenance ("did the migration pass?"), and an
-evaluation harness. It is worth pulling out of this phase and doing earlier.
+Extract `Omashiki.Worker.Transport` with `offer / accept / heartbeat /
+complete`. `DispatchWorker` stops calling `AttemptSupervisor` directly;
+it offers through the transport. Default implementation: `LocalWorker`,
+behaviour identical to today, including all three sinks.
+
+`Complete` is the sum type from day one. Do not ship a Git-only callback
+and retrofit `files` later — `blob_path` on the local disk is exactly the
+bug Phase 1 would freeze.
+
+**Touch:** `jobs/dispatch_worker.ex`, new `worker/transport.ex`,
+`worker/local.ex`, `jobs/work_artifact.ex` (result already a map; keep it
+serialisable), tests around `DispatchWorker` and the three sinks.
+
+**Done when:** a local runc job of each sink (`git`, `files`, `none`)
+succeeds with `LocalWorker` as the only path from dispatch to runner.
+Existing `mise run e2e:overture` and mix tests stay green. No new HTTP,
+no role flag, no topology change.
+
+### Phase 1 — Remote worker, 1 manager : N workers
+
+Same release, boot role `manager` | `worker`.
+
+**Manager** keeps Repo, Endpoint, Oban (admission + webhooks), Rollout,
+gateway, tools, packages. It does **not** start Docker, `LeaseRenewer`
+for local attempts, or `ContainerManager` unless the embedded worker is
+on. Internal HTTP (`/internal/work/*`) authenticates with the worker
+token.
+
+**Worker** starts Docker, `AttemptSupervisor`, `ContainerManager`,
+`PortAllocator`, and a poll loop. It does **not** start `Repo`, Endpoint,
+or Oban. Machine config only: `OMASHIKI_NODE`, `docker_socket_path`
+(runtime, not `compile_env`), `max_concurrent_containers`, one
+`(manager_url, token)`.
+
+On `Accept`:
+
+- `git` — fetch/mirror from the snapshot remote, worktree, finalize,
+  push. No product TOML on the worker.
+- `files` / `none` — tmpdir, validate, return artefact on `Complete`.
+  No Git.
+- Missing image, unreachable data-plane, or failed fetch → **refuse**,
+  do not invent another environment.
+
+UI lists workers that have polled recently and the slots they reported.
+That is liveness of the *machine to this manager*, not a cluster
+membership table.
+
+**Done when:** a worker process on a second machine, given only URL +
+token + Docker, runs a `git` job whose branch is reachable on the
+canonical remote, and a `files`/`none` job whose result is served from
+the **manager** API after the worker disk is wiped.
+
+### Phase 2 — Worker owns the slot
+
+Local semaphore is the authority. `execution_capacity` on the manager
+becomes "attempts this manager currently has on workers", not "containers
+on this box". `Accept` / reject is atomic on the worker. `Poll` carries
+`free_slots`.
+
+**Done when:** two managers (two Postgres, in test) cannot over-reserve a
+worker with `max=2`. Killing the worker expires leases **independently**
+on each manager (NFR-002 still holds per control plane).
+
+This is the prerequisite for N:1. Do not skip it: Phase 1 can still cheat
+by keeping a Postgres capacity row that looks like today's
+`max_concurrent_containers`.
+
+### Phase 3 — N:1 and N:M
+
+Worker config is a list of managers. Round-robin poll, isolated
+workspaces, `Complete` only to the owner, heartbeat/cancel on the right
+manager. Embedded manager+worker remains the default for `mise run up`.
+
+**Done when:** the same worker runs one job from A and one from B in
+parallel without crossing Git remotes, blobs, events, or data-plane
+claims; killing the worker recovers A on A and B on B.
+
+## Operator Config After This Lands
+
+**Manager** (product TOML, today's `omashiki.toml` minus host Docker
+budget as cluster truth):
+
+- repositories, presets, environments (including `sink`), runtimes
+  catalog, credentials, caches, `[reload]`, `[auth]`, `[app]`, `[db]`
+- worker tokens
+- optional embedded worker for single-node
+
+**Worker** (machine file, not the product registry):
+
+- `OMASHIKI_NODE`
+- `docker_socket_path`
+- `max_concurrent_containers` and other host limits
+- `managers = [{url, token}, …]`
+- no environments, no models, no sinks — those arrive on the job
+
+Secrets: LLM keys stay on the manager as `${env:VAR}`. Git push
+credentials stay on the worker host (already forbidden inside the
+container). A missing `${env:VAR}` still aborts boot.
+
+## What This Replaces
+
+The previous Phase 4 (identical TOML on every machine, cross-node
+registry digest, worker that still speaks Postgres) is the wrong target
+for this architecture. A worker has no registry, so digest comparison
+across workers is meaningless. Divergence is a **manager** problem: two
+managers with two TOMLs are two products. Two manager processes sharing
+one Postgres must see one generation — one writer, or Postgres-backed
+registry, not two files.
+
+What is reused from that phase:
+
+- `docker_socket_path` as runtime configuration → Phase 1
+- boot roles → Phase 1
+- per-node Git mirror → Phase 1, `sink=git` only, keyed by manager+job
+
+Old Phase 5 (N:1 dependencies, judge/merge, verification `post_step`)
+stays out. Fan-out is already an atomic batch of jobs against declared
+environments. Fan-in does not change the worker protocol.
 
 ## Do Not Do
 
-- **libcluster, Horde, or distributed Erlang.** PostgreSQL is already the
-  coordination layer, with fencing leases and recovery. BEAM clustering adds a
-  distributed registry that is not needed and a split-brain that does not exist
-  today. If cross-node PubSub becomes necessary, use the PostgreSQL adapter.
-- **Untrusted nodes.** The whole NFR set assumes the operator owns the node:
-  credentials on the host, a trusted gateway, finalization on a machine they
-  control. Third-party nodes require attestation or verifiable execution, which
-  is a different product.
-- **A shared filesystem for repositories.** Git over NFS has unreliable
-  locking. Mirror per node.
+- **Worker mounts `Repo`.** That collapses N managers into one database
+  and puts product policy on the executor.
+- **Push dispatch to the worker.** NAT, extra attack surface, and a
+  second HTTP stack on every executor.
+- **libcluster / Horde / distributed Erlang.** Coordination is
+  manager-local Postgres plus the pull protocol.
+- **A `type` field on the payload.** Sink and toolchain are environment
+  declarations (BR-002).
+- **Shared filesystem for Git.** Mirror per worker; NFS locking is
+  unreliable.
+- **Untrusted workers.** NFR-004/007 assume the operator owns the
+  machine. Third-party executors need attestation — a different product.
+- **Manager-side container budget as the real slot after Phase 2.** It
+  becomes in-flight accounting only.
+- **Shipping Phase 1 Git-only.** `files`/`none` would keep writing
+  local `blob_path` and break the moment a worker is remote.
+- **JSON Schema `result.json` in this sequence.** Separate, after the
+  transport carries `files`.
+
+## Test Strategy
+
+| Phase | Evidence |
+| --- | --- |
+| 0 | Mix tests: `LocalWorker` for `git`, `files`, `none`; existing dispatch durability tests still pass; `mise run e2e:overture` |
+| 1 | One manager + one remote worker process (second BEAM or VM); `git` result on the canonical remote; `files` result on manager after worker tmp wipe; refuse path when the snapshot image is missing |
+| 2 | Two manager apps, two test databases, one worker with `max=2`; over-accept is impossible; lease expiry is per manager |
+| 3 | Same as 2 plus concurrent A+B jobs and independent recovery |
+
+VM E2E (`mise run e2e:vm`) is the place for 1:N across hosts. N:1 can stay
+in mix with two Repo configs until a second VM manager is worth the cost.
+
+## Order of Work
+
+0. Transport seam + serialisable `Complete` for every sink.
+1. Roles, runtime Docker socket, internal poll API, remote 1:N, artefact
+   delivery to the manager.
+2. Worker semaphore as slot authority.
+3. Multi-manager list, fairness, isolation.
+
+Do not start 1 until 0 has `files`/`none` in the callback. Do not start 3
+until 2 forbids over-reservation.
 
 ## References
 
 - [Job lifecycle](../server/lib/omashiki/jobs.ex)
 - [Durable dispatch](../server/lib/omashiki/jobs/dispatch_worker.ex)
+- [Admission snapshots](../server/lib/omashiki/jobs/admission.ex)
+- [Git artefact](../server/lib/omashiki/jobs/git_artifact.ex)
+- [Non-Git artefact](../server/lib/omashiki/jobs/work_artifact.ex)
+- [Sink-independent validate](../server/lib/omashiki/jobs/validate.ex)
 - [Stale-attempt recovery](../server/lib/omashiki/jobs/recovery.ex)
-- [Git artifact boundary](../server/lib/omashiki/jobs/git_artifact.ex)
+- [Lease renewer](../server/lib/omashiki/runtime/lease_renewer.ex)
 - [Container boundary](../server/lib/omashiki/runtime/container_manager.ex)
-- [V2 neutral payload](../server/lib/omashiki/jobs/contract/payload_v2.ex)
-- [Database schema](../server/priv/repo/migrations/20260101000000_initial_schema.exs)
+- [Config rollout](../server/lib/omashiki/config/rollout.ex)
+- [V2 payload](../server/lib/omashiki/jobs/contract/payload_v2.ex)
+- [Generic task processor](generic-task-processor.md)
 - [Requirements](requirements.md)
 - [Architecture](architecture.md)

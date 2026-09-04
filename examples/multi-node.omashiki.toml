@@ -18,13 +18,14 @@
 # --- What works today, and what does not ------------------------------------
 #
 # Implemented: the canonical remote, node identity, and per-node capacity
-# (docs/distributed-execution.md phases 1-3).
+# rows. This file is the transitional layout: every machine still runs the
+# full release against one PostgreSQL. The target is a manager that owns
+# the database and workers that pull job snapshots without Repo — see
+# docs/distributed-execution.md.
 #
-# Not implemented (phase 4): there is no worker-only role yet, so every machine
-# starts the full release including HTTP and LiveView — give the extra nodes a
-# distinct [app].port or a firewall. `docker_socket_path` is still compile-time,
-# so every node must reach Docker at the default socket. Cross-node registry
-# digest verification is not automatic either: divergence is silent today.
+# Until those roles exist, every extra node still starts HTTP and LiveView —
+# give it a distinct [app].port or a firewall. `docker_socket_path` is still
+# compile-time, so every node must reach Docker at the default socket.
 
 # ---------------------------------------------------------------------------
 # Infrastructure

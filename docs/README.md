@@ -42,8 +42,9 @@ requires; individual status notes distinguish implemented seams from pending
 deployment. Anything they contradict in the four documents above is
 aspirational, not current.
 
-- [Distributed execution](distributed-execution.md): running the queue across
-  several nodes with PostgreSQL as the coordination authority.
+- [Manager and worker plan](distributed-execution.md): control plane owns
+  PostgreSQL and the product registry; workers pull snapshots and never mount
+  the database. Covers 1:N, N:1, and N:M plus `git` / `files` / `none` sinks.
 - [Kata Containers runtime handler](runtime-kata.md): Docker API/configuration
   support plus host deployment and compatibility requirements for per-sandbox
   kernels.

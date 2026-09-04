@@ -56,10 +56,10 @@ relative to single node:
   against the one repository every node shares.
 - **`OMASHIKI_DB_HOST`** — only one machine has PostgreSQL on its localhost.
 
-Implemented today: the canonical remote, node identity, and per-node capacity.
-Not yet: a worker-only process role, runtime `docker_socket_path`, and automatic
-cross-node registry-digest verification. See
-[distributed execution](../docs/distributed-execution.md) for the phase status.
+Implemented today: the canonical remote, node identity, and per-node capacity
+rows — still one process shape, every node mounting the same PostgreSQL.
+The target is a manager that owns the database and workers that pull snapshots
+without `Repo`. See [manager and worker plan](../docs/distributed-execution.md).
 
 ## `mcp.json.example`
 
