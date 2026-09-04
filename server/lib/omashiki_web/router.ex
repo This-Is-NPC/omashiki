@@ -22,6 +22,11 @@ defmodule OmashikiWeb.Router do
     plug OmashikiWeb.Plugs.BearerAuth
   end
 
+  pipeline :worker_api do
+    plug :accepts, ["json"]
+    plug OmashikiWeb.Plugs.WorkerAuth
+  end
+
   scope "/", OmashikiWeb do
     pipe_through :browser
 
@@ -100,5 +105,15 @@ defmodule OmashikiWeb.Router do
     # GatewayController verifies itself — an operator API token would be the
     # wrong credential.
     post "/gateway/v1/chat/completions", GatewayController, :chat_completions
+  end
+
+  scope "/internal/work", OmashikiWeb.Api, as: :internal_work do
+    pipe_through :worker_api
+
+    post "/register", WorkController, :register
+    post "/poll", WorkController, :poll
+    post "/heartbeat", WorkController, :heartbeat
+    post "/complete", WorkController, :complete
+    put "/blobs/:job_id", WorkController, :put_blob
   end
 end

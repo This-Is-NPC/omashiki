@@ -80,6 +80,40 @@ defmodule Omashiki.Jobs do
 
   def claim(_, _, _), do: {:error, :invalid_claim}
 
+  @doc """
+  Claim the oldest queued job for a remote worker poll loop.
+
+  Skips when `free_slots` is zero. Capacity is still reserved against
+  `Config.current_machine/0` in Phase 1.
+  """
+  def claim_next(runner_id, opts \\ [])
+
+  def claim_next(runner_id, opts) when is_binary(runner_id) do
+    if Keyword.get(opts, :free_slots, 1) == 0 do
+      {:ok, :empty}
+    else
+      with true <- runner_id != "" do
+        lease_ms = Keyword.get(opts, :lease_ms, @default_lease_ms)
+
+        Repo.transaction(fn ->
+          case next_queued_job() do
+            nil -> :empty
+            %Job{} = job -> claim_locked(job, runner_id, now(), lease_ms)
+          end
+        end)
+        |> case do
+          {:ok, :empty} -> {:ok, :empty}
+          other -> normalize_transaction_result(other) |> notify_job()
+        end
+      else
+        false -> {:error, :invalid_runner_id}
+      end
+    end
+  end
+
+  def claim_next(_, _), do: {:error, :invalid_runner_id}
+
+
   @doc "Refresh a lease using its fencing token."
   def heartbeat(attempt_or_id, lease_token, opts \\ [])
 
@@ -962,6 +996,17 @@ defmodule Omashiki.Jobs do
     do:
       (from(e in JobEvent, where: e.job_id == ^job_id, select: max(e.sequence)) |> Repo.one() || 0) +
         1
+
+  defp next_queued_job do
+    from(j in Job,
+      where: j.status == "queued",
+      order_by: [asc: j.inserted_at, asc: j.id],
+      lock: "FOR UPDATE SKIP LOCKED",
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
 
   defp locked_job(job_id),
     do: from(j in Job, where: j.id == ^job_id, lock: "FOR UPDATE") |> Repo.one()
