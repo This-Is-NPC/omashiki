@@ -41,6 +41,7 @@ defmodule Omashiki.ArchitectureTest do
     Omashiki.Harness.Adapter,
     Omashiki.Jobs.Runner.Container,
     Omashiki.Runtime.ContainerManager.Behaviour,
+    Omashiki.Worker.Executor,
     Omashiki.Worker.Transport
   ]
 

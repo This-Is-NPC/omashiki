@@ -1,0 +1,253 @@
+defmodule Omashiki.Worker.PollerTest do
+  use ExUnit.Case, async: false
+
+  alias Omashiki.Worker.{Complete, Offer, Poller}
+
+  @poll_interval_ms 60_000
+
+  setup do
+    on_exit(fn ->
+      restore_env(:manager_url)
+      restore_env(:worker_token)
+      restore_env(:worker_executor)
+      restore_env(:worker_poll_interval_ms)
+      restore_env(:fake_executor_result)
+      restore_env(:fake_executor_owner)
+    end)
+
+    :ok
+  end
+
+  describe "idle boot" do
+    test "stays alive without manager_url, worker_token, or executor and sends no HTTP traffic" do
+      parent = self()
+      bypass = Bypass.open()
+
+      for {method, path} <- [
+            {"POST", "/internal/work/register"},
+            {"POST", "/internal/work/poll"},
+            {"POST", "/internal/work/complete"}
+          ] do
+        Bypass.stub(bypass, method, path, fn conn ->
+          send(parent, {:http_hit, path})
+          Plug.Conn.resp(conn, 500, "")
+        end)
+      end
+
+      Application.delete_env(:omashiki, :manager_url)
+      Application.delete_env(:omashiki, :worker_token)
+      Application.delete_env(:omashiki, :worker_executor)
+
+      assert {:ok, pid} = start_supervised({Poller, name: unique_poller_name()})
+      assert Process.alive?(pid)
+
+      Process.sleep(50)
+      refute_receive {:http_hit, _}, 50
+    end
+  end
+
+  describe "executor round-trip" do
+    setup do
+      bypass = Bypass.open()
+      parent = self()
+      token = "worker-poller-#{System.unique_integer([:positive])}"
+      put_env(:manager_url, "http://127.0.0.1:#{bypass.port}")
+      put_env(:worker_token, token)
+      put_env(:worker_executor, Omashiki.Worker.PollerTest.FakeExecutor)
+      put_env(:worker_poll_interval_ms, @poll_interval_ms)
+      put_env(:fake_executor_owner, parent)
+
+      {:ok, bypass: bypass, token: token, parent: parent}
+    end
+
+    test "completes a git sink offer", %{bypass: bypass, parent: parent} do
+      offer = sample_offer("git")
+
+      expect_register(bypass)
+      expect_poll_sequence(bypass, [offer], parent)
+      expect_complete(bypass, parent, fn body ->
+        assert body["complete"]["kind"] == "git"
+        assert body["complete"]["remote"] == "https://example.com/repo.git"
+        assert body["complete"]["branch"] == "main"
+        assert body["complete"]["base_sha"] == "abc"
+        assert body["complete"]["head_sha"] == "def"
+      end)
+
+      put_env(:fake_executor_result, {
+        :ok,
+        %Complete{
+          kind: :git,
+          remote: "https://example.com/repo.git",
+          branch: "main",
+          base_sha: "abc",
+          head_sha: "def"
+        }
+      })
+
+      assert {:ok, _pid} = start_supervised({Poller, name: unique_poller_name()})
+      assert_receive {:complete, _}, 2_000
+    end
+
+    test "uploads a blob then completes a files sink offer", %{bypass: bypass, parent: parent} do
+      offer = sample_offer("files")
+      blob_path = Path.join(System.tmp_dir!(), "poller-blob-#{System.unique_integer([:positive])}")
+      blob = "artifact-bytes"
+      digest = :crypto.hash(:sha256, blob) |> Base.encode16(case: :lower)
+      File.write!(blob_path, blob)
+
+      on_exit(fn -> File.rm(blob_path) end)
+
+      expect_register(bypass)
+      expect_poll_sequence(bypass, [offer], parent)
+
+      Bypass.expect(bypass, "PUT", "/internal/work/blobs/#{offer["job_id"]}", fn conn ->
+        assert {"x-omashiki-digest", ^digest} = List.keyfind(conn.req_headers, "x-omashiki-digest", 0)
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(parent, {:blob, body})
+        Plug.Conn.resp(conn, 201, ~s({"path":"/tmp/blob","digest":"#{digest}"}))
+      end)
+
+      expect_complete(bypass, parent, fn body ->
+        assert body["complete"]["kind"] == "files"
+        assert body["complete"]["blob_digest"] == digest
+        assert body["complete"]["changed_bytes"] == byte_size(blob)
+        refute Map.has_key?(body["complete"], "blob_path")
+      end)
+
+      put_env(:fake_executor_result, {
+        :ok,
+        %Complete{
+          kind: :files,
+          changed_bytes: byte_size(blob),
+          blob_digest: digest,
+          blob_path: blob_path
+        }
+      })
+
+      assert {:ok, _pid} = start_supervised({Poller, name: unique_poller_name()})
+      assert_receive {:blob, ^blob}, 2_000
+      assert_receive {:complete, _}, 2_000
+    end
+
+    test "completes a none sink offer", %{bypass: bypass, parent: parent} do
+      offer = sample_offer("none")
+
+      expect_register(bypass)
+      expect_poll_sequence(bypass, [offer], parent)
+
+      expect_complete(bypass, parent, fn body ->
+        assert body["complete"] == %{"kind" => "none", "changed_bytes" => 0}
+      end)
+
+      put_env(:fake_executor_result, {:ok, %Complete{kind: :none, changed_bytes: 0}})
+
+      assert {:ok, _pid} = start_supervised({Poller, name: unique_poller_name()})
+      assert_receive {:complete, _}, 2_000
+    end
+
+    test "posts an error complete when the executor fails", %{bypass: bypass, parent: parent} do
+      offer = sample_offer("git")
+
+      expect_register(bypass)
+      expect_poll_sequence(bypass, [offer], parent)
+
+      expect_complete(bypass, parent, fn body ->
+        assert body["complete"]["kind"] == "error"
+        assert body["complete"]["code"] == "executor_failed"
+        assert is_binary(body["complete"]["message"])
+      end)
+
+      put_env(:fake_executor_result, {:error, :boom})
+
+      assert {:ok, _pid} = start_supervised({Poller, name: unique_poller_name()})
+      assert_receive {:complete, _}, 2_000
+    end
+  end
+
+  defmodule FakeExecutor do
+    @behaviour Omashiki.Worker.Executor
+
+    alias Omashiki.Worker.Offer
+
+    @impl Omashiki.Worker.Executor
+    def run(%Offer{} = offer) do
+      if owner = Application.get_env(:omashiki, :fake_executor_owner) do
+        send(owner, {:run, offer})
+      end
+
+      Application.get_env(:omashiki, :fake_executor_result)
+    end
+  end
+
+  defp sample_offer(sink) do
+    n = System.unique_integer([:positive])
+
+    %{
+      "job_id" => "job_#{n}",
+      "attempt_id" => "attempt_#{n}",
+      "lease_token" => "lease_#{n}",
+      "sink" => sink,
+      "payload" => %{"instruction" => "do work"},
+      "admitted_environment" => %{"sink" => sink},
+      "admitted_repository" => nil,
+      "admitted_plugin" => nil,
+      "registry_digest" => nil,
+      "timeout_ms" => 60_000
+    }
+  end
+
+  defp expect_register(bypass) do
+    Bypass.expect_once(bypass, "POST", "/internal/work/register", fn conn ->
+      Plug.Conn.resp(conn, 204, "")
+    end)
+  end
+
+  defp expect_poll_sequence(bypass, offers, parent) do
+    table = :ets.new(:poll_offers, [:set, :public])
+    :ets.insert(table, {:offers, offers})
+
+    Bypass.expect(bypass, "POST", "/internal/work/poll", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(parent, {:poll, Jason.decode!(body)})
+
+      offer =
+        case :ets.lookup(table, :offers) do
+          [{:offers, [next | rest]}] ->
+            :ets.insert(table, {:offers, rest})
+            next
+
+          _ ->
+            nil
+        end
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, Jason.encode!(%{"offer" => offer}))
+    end)
+  end
+
+  defp expect_complete(bypass, parent, assert_fun) do
+    Bypass.expect_once(bypass, "POST", "/internal/work/complete", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      decoded = Jason.decode!(body)
+      assert_fun.(decoded)
+      send(parent, {:complete, decoded})
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, ~s({"ok":true}))
+    end)
+  end
+
+  defp unique_poller_name do
+    :"Omashiki.Worker.Poller.Test.#{System.unique_integer([:positive])}"
+  end
+
+  defp put_env(key, value) do
+    Application.put_env(:omashiki, key, value)
+  end
+
+  defp restore_env(key) do
+    Application.delete_env(:omashiki, key)
+  end
+end
