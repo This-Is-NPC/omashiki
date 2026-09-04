@@ -43,7 +43,7 @@ defmodule Omashiki.Jobs do
 
   @event_data_keys %{
     "blocked" => ~w(depends_on),
-    "queued" => ~w(depends_on unlock_event_id retry),
+    "queued" => ~w(depends_on unlock_event_id retry unclaimed runner_id),
     "provisioning" => ~w(runner_id),
     "running" => [],
     "succeeded" => ~w(branch base_sha head_sha),
@@ -83,8 +83,9 @@ defmodule Omashiki.Jobs do
   @doc """
   Claim the oldest queued job for a remote worker poll loop.
 
-  Skips when `free_slots` is zero. Capacity is still reserved against
-  `Config.current_machine/0` in Phase 1.
+  Skips when `free_slots` is zero. `free_slots` is the worker-reported remaining
+  semaphore; manager `execution_capacity` tracks in-flight attempts on this
+  manager, not the worker host's container budget.
   """
   def claim_next(runner_id, opts \\ [])
 
@@ -139,6 +140,65 @@ defmodule Omashiki.Jobs do
   end
 
   def heartbeat(_, _, _), do: {:error, :invalid_lease}
+
+  @doc """
+  Release a provisioning attempt back to the queue without creating a new attempt.
+
+  Used when a worker rejects an offer before execution starts.
+  """
+  def unclaim(attempt_or_id, lease_token) when is_binary(lease_token) do
+    with {:ok, attempt_id} <- attempt_id(attempt_or_id),
+         true <- lease_token != "" do
+      Repo.transaction(fn ->
+        now = now()
+
+        case locked_attempt_with_job(attempt_id) do
+          nil ->
+            Repo.rollback(:not_found)
+
+          %{attempt: attempt, job: job} ->
+            assert_lease!(attempt, lease_token, now)
+            previous_runner_id = attempt.runner_id
+
+            cond do
+              attempt.status == "running" ->
+                Repo.rollback(:already_running)
+
+              attempt.status != "provisioning" or job.status != "provisioning" ->
+                Repo.rollback(:attempt_not_active)
+
+              true ->
+                release_capacity_if_reserved!(attempt)
+
+                update_attempt!(attempt, %{
+                  status: "queued",
+                  runner_id: nil,
+                  lease_token: nil,
+                  lease_expires_at: nil,
+                  heartbeat_at: nil,
+                  claimed_at: nil,
+                  started_at: nil,
+                  capacity_reserved: false
+                })
+
+                updated = update_job!(job, %{status: "queued", started_at: nil})
+
+                record_event!(updated, "queued", %{
+                  "unclaimed" => true,
+                  "runner_id" => previous_runner_id
+                })
+
+                updated
+            end
+        end
+      end)
+      |> normalize_transaction_result()
+      |> notify_job()
+    else
+      false -> {:error, :invalid_lease_token}
+      error -> error
+    end
+  end
 
   @doc "Advance a claimed provisioning attempt to running without changing its fence."
   def mark_running(attempt_or_id, lease_token) when is_binary(lease_token) do

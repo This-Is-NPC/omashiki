@@ -39,6 +39,30 @@ defmodule OmashikiWeb.Api.WorkController do
     end
   end
 
+  def accept(conn, params) do
+    with {:ok, attempt_id} <- required_string(params, "attempt_id"),
+         {:ok, lease_token} <- required_string(params, "lease_token"),
+         {:ok, status} <- Inbox.accept(attempt_id, lease_token) do
+      if status == :cancel do
+        json(conn, %{cancel: true})
+      else
+        json(conn, %{ok: true})
+      end
+    else
+      {:error, reason} -> error(conn, reason)
+    end
+  end
+
+  def reject(conn, params) do
+    with {:ok, attempt_id} <- required_string(params, "attempt_id"),
+         {:ok, lease_token} <- required_string(params, "lease_token"),
+         {:ok, :ok} <- Inbox.reject(attempt_id, lease_token) do
+      json(conn, %{ok: true})
+    else
+      {:error, reason} -> error(conn, reason)
+    end
+  end
+
   def complete(conn, params) do
     with {:ok, attempt_id} <- required_string(params, "attempt_id"),
          {:ok, lease_token} <- required_string(params, "lease_token"),
@@ -127,6 +151,9 @@ defmodule OmashikiWeb.Api.WorkController do
 
   defp error(conn, :attempt_not_active),
     do: error_response(conn, 409, "attempt_not_active", "Attempt is not active")
+
+  defp error(conn, :already_running),
+    do: error_response(conn, 409, "already_running", "Attempt is already running")
 
   defp error(conn, :invalid_success_result),
     do: error_response(conn, 422, "invalid_success_result", "Success payload is invalid")

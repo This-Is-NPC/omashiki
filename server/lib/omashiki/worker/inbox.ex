@@ -49,6 +49,30 @@ defmodule Omashiki.Worker.Inbox do
     end
   end
 
+  @doc "Renew a lease after the worker accepts an offer; does not mark running."
+  def accept(attempt_id, lease_token)
+      when is_binary(attempt_id) and is_binary(lease_token) do
+    case Jobs.heartbeat(attempt_id, lease_token) do
+      {:ok, _} ->
+        if cancel?(attempt_id), do: {:ok, :cancel}, else: {:ok, :ok}
+
+      {:error, :attempt_not_active} ->
+        {:ok, :cancel}
+
+      other ->
+        other
+    end
+  end
+
+  @doc "Release a provisioning offer back to the queue."
+  def reject(attempt_id, lease_token)
+      when is_binary(attempt_id) and is_binary(lease_token) do
+    case Jobs.unclaim(attempt_id, lease_token) do
+      {:ok, _} -> {:ok, :ok}
+      other -> other
+    end
+  end
+
   @doc "Apply a worker-complete payload to the manager job row."
   def complete(attempt_id, lease_token, complete_map)
       when is_binary(attempt_id) and is_binary(lease_token) and is_map(complete_map) do

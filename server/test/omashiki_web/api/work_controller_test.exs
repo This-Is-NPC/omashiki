@@ -14,6 +14,8 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
 
   @worker_poll "/internal/work/poll"
   @worker_complete "/internal/work/complete"
+  @worker_accept "/internal/work/accept"
+  @worker_reject "/internal/work/reject"
 
   setup context do
     assert {:ok, _} = Jobs.sync_capacity()
@@ -101,6 +103,16 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
       conn = worker_conn(conn, "anything")
       conn = post(conn, @worker_poll, %{machine_id: "box-a", free_slots: 1})
       assert %{"error" => %{"code" => "invalid_token"}} = json_response(conn, 403)
+    end
+
+    @tag :unauthenticated
+    test "returns 401 without a worker token on accept and reject", %{conn: conn} do
+      conn = post(conn, @worker_accept, %{attempt_id: Ecto.UUID.generate(), lease_token: "t"})
+      assert %{"error" => %{"code" => "missing_token"}} = json_response(conn, 401)
+
+      conn = build_conn()
+      conn = post(conn, @worker_reject, %{attempt_id: Ecto.UUID.generate(), lease_token: "t"})
+      assert %{"error" => %{"code" => "missing_token"}} = json_response(conn, 401)
     end
   end
 
@@ -271,6 +283,76 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
       assert {:ok, _} = Jobs.cancel(job)
 
       assert {:ok, :cancel} = Inbox.heartbeat(attempt.id, attempt.lease_token)
+    end
+
+    @tag :unauthenticated
+    test "accept returns 200 after poll", %{
+      conn: conn,
+      worker_token: token,
+      user: user,
+      token: token_record
+    } do
+      {job, _attempt} = job_fixture(user, token_record, %{status: "queued"})
+
+      conn =
+        build_conn()
+        |> worker_conn(token)
+        |> post(@worker_poll, %{machine_id: "box-a", free_slots: 1})
+
+      assert %{"offer" => %{"attempt_id" => attempt_id, "lease_token" => lease_token}} =
+
+               json_response(conn, 200)
+
+      conn =
+        build_conn()
+        |> worker_conn(token)
+        |> post(@worker_accept, %{"attempt_id" => attempt_id, "lease_token" => lease_token})
+
+      assert %{"ok" => true} = json_response(conn, 200)
+
+      reloaded = Repo.get!(JobAttempt, attempt_id)
+      assert reloaded.status == "provisioning"
+      assert reloaded.job_id == job.id
+    end
+
+    @tag :unauthenticated
+    test "reject after poll returns job to queued", %{
+      worker_token: token,
+      user: user,
+      token: token_record
+    } do
+      job = job_fixture(user, token_record, %{status: "queued"}) |> elem(0)
+
+      conn =
+        build_conn()
+        |> worker_conn(token)
+        |> post(@worker_poll, %{machine_id: "box-a", free_slots: 1})
+
+      assert %{"offer" => %{"attempt_id" => attempt_id, "lease_token" => lease_token}} =
+               json_response(conn, 200)
+
+      conn =
+        build_conn()
+        |> worker_conn(token)
+        |> post(@worker_reject, %{"attempt_id" => attempt_id, "lease_token" => lease_token})
+
+      assert %{"ok" => true} = json_response(conn, 200)
+
+      reloaded_job = Repo.get!(Job, job.id)
+      reloaded_attempt = Repo.get!(JobAttempt, attempt_id)
+      assert reloaded_job.status == "queued"
+      assert reloaded_job.started_at == nil
+      assert reloaded_attempt.status == "queued"
+
+      conn =
+        build_conn()
+        |> worker_conn(token)
+        |> post(@worker_poll, %{machine_id: "box-a", free_slots: 1})
+
+      assert %{"offer" => %{"job_id" => job_id, "attempt_id" => ^attempt_id}} =
+               json_response(conn, 200)
+
+      assert job_id == job.id
     end
   end
 end

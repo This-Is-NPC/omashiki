@@ -65,6 +65,37 @@ defmodule Omashiki.Worker.Client do
     end
   end
 
+  def accept(%__MODULE__{} = client, %Execution{} = execution) do
+    body =
+      Jason.encode!(%{
+        "attempt_id" => execution.attempt_id,
+        "lease_token" => execution.lease_token
+      })
+
+    with {:ok, %{status: status, body: resp}} when status in 200..299 <-
+           request(client, "POST", "/internal/work/accept", json_headers(client), body),
+         {:ok, decoded} <- Jason.decode(resp) do
+      cond do
+        Map.get(decoded, "cancel") == true -> :cancel
+        Map.get(decoded, "ok") == true -> :ok
+        true -> {:error, {:http, status, resp}}
+      end
+    end
+  end
+
+  def reject(%__MODULE__{} = client, %Execution{} = execution) do
+    body =
+      Jason.encode!(%{
+        "attempt_id" => execution.attempt_id,
+        "lease_token" => execution.lease_token
+      })
+
+    with {:ok, %{status: status}} when status in 200..299 <-
+           request(client, "POST", "/internal/work/reject", json_headers(client), body) do
+      :ok
+    end
+  end
+
   def put_blob(%__MODULE__{} = client, job_id, digest, binary)
       when is_binary(job_id) and is_binary(digest) and is_binary(binary) do
     headers =
