@@ -14,6 +14,7 @@ defmodule Omashiki.Worker.PollerTest do
       restore_env(:fake_executor_result)
       restore_env(:fake_executor_owner)
       restore_env(:fake_executor_mode)
+      restore_env(:worker_managers)
     end)
 
     :ok
@@ -57,6 +58,8 @@ defmodule Omashiki.Worker.PollerTest do
       put_env(:worker_executor, Omashiki.Worker.PollerTest.FakeExecutor)
       put_env(:worker_poll_interval_ms, @poll_interval_ms)
       put_env(:fake_executor_owner, parent)
+
+      stub_heartbeat(bypass)
 
       slots = start_slots!()
 
@@ -196,6 +199,8 @@ defmodule Omashiki.Worker.PollerTest do
       put_env(:fake_executor_mode, :hang)
       put_env(:fake_executor_result, {:ok, %Complete{kind: :none, changed_bytes: 0}})
 
+      stub_heartbeat(bypass)
+
       {:ok, bypass: bypass, parent: parent}
     end
 
@@ -271,6 +276,140 @@ defmodule Omashiki.Worker.PollerTest do
     end
   end
 
+  describe "multi-manager round-robin" do
+    setup do
+      bypass_a = Bypass.open()
+      bypass_b = Bypass.open()
+      parent = self()
+
+      Application.delete_env(:omashiki, :manager_url)
+      Application.delete_env(:omashiki, :worker_token)
+      put_env(:worker_executor, Omashiki.Worker.PollerTest.FakeExecutor)
+      put_env(:worker_poll_interval_ms, @poll_interval_ms)
+      put_env(:fake_executor_owner, parent)
+      put_env(:fake_executor_mode, :hang)
+      put_env(:fake_executor_result, {:ok, %Complete{kind: :none, changed_bytes: 0}})
+
+      managers = [
+        %{id: "mgr-a", url: "http://127.0.0.1:#{bypass_a.port}", token: "token-a"},
+        %{id: "mgr-b", url: "http://127.0.0.1:#{bypass_b.port}", token: "token-b"}
+      ]
+
+      stub_heartbeat(bypass_a)
+      stub_heartbeat(bypass_b)
+
+      slots = start_slots!(2)
+
+      {:ok,
+       bypass_a: bypass_a,
+       bypass_b: bypass_b,
+       parent: parent,
+       managers: managers,
+       slots: slots}
+    end
+
+    test "polls two managers and completes to the originating bypass", %{
+      bypass_a: bypass_a,
+      bypass_b: bypass_b,
+      parent: parent,
+      managers: managers,
+      slots: slots
+    } do
+      offer_a = sample_offer("none")
+      offer_b = sample_offer("none")
+
+      expect_register(bypass_a)
+      expect_register(bypass_b)
+      expect_accept(bypass_a, parent)
+      expect_accept(bypass_b, parent)
+      expect_poll_sequence(bypass_a, [offer_a], parent)
+      expect_poll_sequence(bypass_b, [offer_b], parent)
+
+      expect_complete(bypass_a, parent, fn _ -> send(parent, {:complete_from, :a}) end)
+      expect_complete(bypass_b, parent, fn _ -> send(parent, {:complete_from, :b}) end)
+
+      assert {:ok, poller} =
+               start_supervised(
+                 {Poller, name: unique_poller_name(), slots: slots, managers: managers}
+               )
+
+      assert_receive {:accept, %{"attempt_id" => attempt_a}}, 2_000
+      assert_receive {:run, %Offer{attempt_id: ^attempt_a, manager_id: "mgr-a"}, pid_a}, 2_000
+
+      send(poller, :tick)
+
+      assert_receive {:accept, %{"attempt_id" => attempt_b}}, 2_000
+      assert_receive {:run, %Offer{attempt_id: ^attempt_b, manager_id: "mgr-b"}, pid_b}, 2_000
+
+      send(pid_a, :release_executor)
+      assert_receive {:complete_from, :a}, 2_000
+      refute_receive {:complete_from, :b}, 200
+
+      send(pid_b, :release_executor)
+      assert_receive {:complete_from, :b}, 2_000
+    end
+
+    test "uploads files blob to the originating manager only", %{
+      bypass_a: bypass_a,
+      bypass_b: bypass_b,
+      parent: parent,
+      managers: managers,
+      slots: slots
+    } do
+      offer_a = sample_offer("files")
+      blob_path = Path.join(System.tmp_dir!(), "poller-blob-#{System.unique_integer([:positive])}")
+      blob = "artifact-bytes"
+      digest = :crypto.hash(:sha256, blob) |> Base.encode16(case: :lower)
+      File.write!(blob_path, blob)
+
+      on_exit(fn -> File.rm(blob_path) end)
+
+      expect_register(bypass_a)
+      expect_register(bypass_b)
+      expect_accept(bypass_a, parent)
+      expect_poll_sequence(bypass_a, [offer_a], parent)
+      expect_poll_sequence(bypass_b, [], parent)
+
+      Bypass.expect(bypass_a, "PUT", "/internal/work/blobs/#{offer_a["job_id"]}", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(parent, {:blob, body})
+        Plug.Conn.resp(conn, 201, ~s({"path":"/tmp/blob","digest":"#{digest}"}))
+      end)
+
+      Bypass.stub(bypass_b, "PUT", "/internal/work/blobs/#{offer_a["job_id"]}", fn conn ->
+        send(parent, {:blob_wrong_manager, true})
+        Plug.Conn.resp(conn, 500, "")
+      end)
+
+      expect_complete(bypass_a, parent, fn body ->
+        assert body["complete"]["kind"] == "files"
+        assert body["complete"]["blob_digest"] == digest
+      end)
+
+      put_env(:fake_executor_mode, nil)
+
+      put_env(:fake_executor_result, {
+        :ok,
+        %Complete{
+          kind: :files,
+          changed_bytes: byte_size(blob),
+          blob_digest: digest,
+          blob_path: blob_path
+        }
+      })
+
+      assert {:ok, _pid} =
+               start_supervised(
+                 {Poller, name: unique_poller_name(), slots: slots, managers: managers}
+               )
+
+      assert_receive {:accept, _}, 2_000
+      assert_receive {:blob, ^blob}, 2_000
+      assert_receive {:complete, _}, 2_000
+      refute_receive {:blob_wrong_manager, _}, 200
+    end
+  end
+
   defmodule FakeExecutor do
     @behaviour Omashiki.Worker.Executor
 
@@ -320,8 +459,10 @@ defmodule Omashiki.Worker.PollerTest do
     name
   end
 
-  defp start_poller(slots) do
-    start_supervised({Poller, name: unique_poller_name(), slots: slots})
+
+  defp start_poller(slots, opts \\ []) do
+    opts = Keyword.merge([name: unique_poller_name(), slots: slots], opts)
+    start_supervised({Poller, opts})
   end
 
   defp expect_register(bypass, free_slots \\ 2) do
@@ -381,6 +522,14 @@ defmodule Omashiki.Worker.PollerTest do
     end)
   end
 
+
+  defp stub_heartbeat(bypass) do
+    Bypass.stub(bypass, "POST", "/internal/work/heartbeat", fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, ~s({"cancel":false}))
+    end)
+  end
   defp unique_poller_name do
     :"Omashiki.Worker.Poller.Test.#{System.unique_integer([:positive])}"
   end

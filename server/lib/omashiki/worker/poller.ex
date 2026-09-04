@@ -5,7 +5,7 @@ defmodule Omashiki.Worker.Poller do
 
   require Logger
 
-  alias Omashiki.Worker.{Client, Complete, Execution, Offer, Slots}
+  alias Omashiki.Worker.{Client, Complete, Execution, Managers, Offer, Slots}
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -13,33 +13,39 @@ defmodule Omashiki.Worker.Poller do
 
   @impl true
   def init(opts) do
-    manager_url = Application.get_env(:omashiki, :manager_url)
-    worker_token = Application.get_env(:omashiki, :worker_token)
+    managers = Keyword.get(opts, :managers) || Managers.configured()
     executor = Application.get_env(:omashiki, :worker_executor)
     machine_id = System.get_env("OMASHIKI_NODE") || hostname()
     interval_ms = Application.get_env(:omashiki, :worker_poll_interval_ms, 1_000)
+    slots = Keyword.get(opts, :slots, Slots)
 
-    if missing_config?(manager_url, worker_token, executor) do
+    if managers == [] or is_nil(executor) do
       Logger.warning(
-        "Worker.Poller idle: manager_url, worker_token, and worker_executor must all be configured"
+        "Worker.Poller idle: at least one manager and worker_executor must be configured"
       )
 
       {:ok, %{mode: :idle}}
     else
-      client = Client.new(manager_url, worker_token)
-      slots = Keyword.get(opts, :slots, Slots)
+      managers =
+        Enum.map(managers, fn m ->
+          %{id: m.id, url: m.url, client: Client.new(m.url, m.token)}
+        end)
 
-      case Client.register(client, machine_id, free_slots(slots)) do
-        :ok ->
-          :ok
+      for m <- managers do
+        case Client.register(m.client, machine_id, free_slots(slots)) do
+          :ok ->
+            :ok
 
-        {:error, reason} ->
-          Logger.warning("Worker.Poller register failed: #{inspect(reason)}")
+          {:error, reason} ->
+            Logger.warning("Worker.Poller register failed for #{m.id}: #{inspect(reason)}")
+        end
       end
 
       state = %{
         mode: :active,
-        client: client,
+        managers: managers,
+        rr: 0,
+        in_flight: %{},
         executor: executor,
         machine_id: machine_id,
         interval_ms: interval_ms,
@@ -55,53 +61,93 @@ defmodule Omashiki.Worker.Poller do
   def handle_info(:tick, %{mode: :idle} = state), do: {:noreply, state}
 
   def handle_info(:tick, state) do
+    state = heartbeat_in_flight(state)
     free = free_slots(state.slots)
 
     state =
       if free == 0 do
         state
       else
-        case Client.poll(state.client, state.machine_id, free) do
-          {:ok, nil} ->
-            state
-
-          {:ok, %Offer{} = offer} ->
-            handle_offer(state, offer)
-
-          {:error, reason} ->
-            Logger.warning("Worker.Poller poll failed: #{inspect(reason)}")
-            state
-        end
+        poll_next_manager(state, free)
       end
 
     schedule_tick(state)
     {:noreply, state}
   end
 
-  def handle_info({:job_finished, execution, offer, result}, state) do
-    try do
-      post_complete(state, execution, offer, result)
-    after
-      Slots.release(state.slots)
-    end
+  def handle_info({:job_finished, _execution, offer, result}, state) do
+    attempt_id = offer.attempt_id
 
-    send(self(), :tick)
-    {:noreply, state}
+    case Map.fetch(state.in_flight, attempt_id) do
+      {:ok, %{client: client, execution: execution}} ->
+        try do
+          post_complete(client, execution, offer, result)
+        after
+          Slots.release(state.slots)
+        end
+
+        state = update_in(state.in_flight, &Map.delete(&1, attempt_id))
+        send(self(), :tick)
+        {:noreply, state}
+
+      :error ->
+        {:noreply, state}
+    end
   end
 
   def handle_info(_message, state), do: {:noreply, state}
 
-  defp handle_offer(state, %Offer{} = offer) do
+  defp poll_next_manager(state, free) do
+    managers = state.managers
+    count = length(managers)
+    idx = state.rr
+    manager = Enum.at(managers, idx)
+    rr = rem(idx + 1, count)
+    state = %{state | rr: rr}
+
+    case Client.poll(manager.client, state.machine_id, free) do
+      {:ok, nil} ->
+        state
+
+      {:ok, %Offer{} = offer} ->
+        offer = %{offer | manager_id: manager.id, manager_url: manager.url}
+        handle_offer(state, offer, manager.client)
+
+      {:error, reason} ->
+        Logger.warning(
+          "Worker.Poller poll failed for #{manager.id}: #{inspect(reason)}"
+        )
+
+        state
+    end
+  end
+
+  defp heartbeat_in_flight(state) do
+    Enum.reduce(state.in_flight, state, fn {attempt_id, job}, acc ->
+      case Client.heartbeat(job.client, job.execution) do
+        :cancel ->
+          if Process.alive?(job.task_pid), do: Process.exit(job.task_pid, :kill)
+          Slots.release(acc.slots)
+          %{acc | in_flight: Map.delete(acc.in_flight, attempt_id)}
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+
+  defp handle_offer(state, %Offer{} = offer, client) do
     execution = execution_from(offer)
 
     case Slots.try_acquire(state.slots) do
       {:error, :full} ->
         Logger.warning("Worker.Poller rejecting offer #{offer.job_id}: no local slots")
-        Client.reject(state.client, execution)
+        Client.reject(client, execution)
         state
 
       :ok ->
-        case Client.accept(state.client, execution) do
+        case Client.accept(client, execution) do
           :cancel ->
             Slots.release(state.slots)
             state
@@ -109,19 +155,28 @@ defmodule Omashiki.Worker.Poller do
           {:error, reason} ->
             Logger.warning("Worker.Poller accept failed: #{inspect(reason)}")
             Slots.release(state.slots)
-            Client.reject(state.client, execution)
+            Client.reject(client, execution)
             state
 
           :ok ->
             poller_pid = self()
 
-            Task.start(fn ->
-              result = run_executor(state.executor, offer)
-              send(poller_pid, {:job_finished, execution, offer, result})
-            end)
+            {:ok, task_pid} =
+              Task.start(fn ->
+                result = run_executor(state.executor, offer)
+                send(poller_pid, {:job_finished, execution, offer, result})
+              end)
+
+            in_flight =
+              Map.put(state.in_flight, offer.attempt_id, %{
+                execution: execution,
+                offer: offer,
+                client: client,
+                task_pid: task_pid
+              })
 
             send(self(), :tick)
-            state
+            %{state | in_flight: in_flight}
         end
     end
   end
@@ -134,15 +189,15 @@ defmodule Omashiki.Worker.Poller do
     end
   end
 
-  defp post_complete(state, execution, offer, result) do
+  defp post_complete(client, execution, offer, result) do
     case result do
       {:ok, %Complete{kind: :files} = complete} ->
         complete
-        |> maybe_upload_blob(state.client, offer)
-        |> then(&Client.complete(state.client, execution, &1))
+        |> maybe_upload_blob(client, offer)
+        |> then(&Client.complete(client, execution, &1))
 
       {:ok, %Complete{} = complete} ->
-        Client.complete(state.client, execution, complete)
+        Client.complete(client, execution, complete)
 
       {:error, reason} ->
         error_complete = %Complete{
@@ -151,7 +206,7 @@ defmodule Omashiki.Worker.Poller do
           message: Exception.format(:error, reason, [])
         }
 
-        Client.complete(state.client, execution, error_complete)
+        Client.complete(client, execution, error_complete)
     end
   end
 
@@ -172,7 +227,8 @@ defmodule Omashiki.Worker.Poller do
       job_id: offer.job_id,
       attempt_id: offer.attempt_id,
       lease_token: offer.lease_token,
-      sink: offer.sink
+      sink: offer.sink,
+      manager_id: offer.manager_id
     }
   end
 
@@ -183,13 +239,6 @@ defmodule Omashiki.Worker.Poller do
   defp schedule_tick(%{interval_ms: interval_ms}) do
     Process.send_after(self(), :tick, interval_ms)
   end
-
-  defp missing_config?(manager_url, worker_token, executor) do
-    blank?(manager_url) or blank?(worker_token) or is_nil(executor)
-  end
-
-  defp blank?(value) when value in [nil, ""], do: true
-  defp blank?(_), do: false
 
   defp hostname do
     case :inet.gethostname() do
