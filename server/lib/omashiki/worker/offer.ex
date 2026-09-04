@@ -15,7 +15,14 @@ defmodule Omashiki.Worker.Offer do
           admitted_repository: map() | nil,
           admitted_plugin: map() | nil,
           registry_digest: String.t() | nil,
-          timeout_ms: pos_integer()
+          timeout_ms: pos_integer(),
+          attempt_number: pos_integer(),
+          user_id: String.t(),
+          repository: String.t() | nil,
+          environment: String.t(),
+          admitted_environment_digest: String.t(),
+          admitted_repository_digest: String.t() | nil,
+          admitted_plugin_digest: String.t()
         }
 
   defstruct [
@@ -28,7 +35,14 @@ defmodule Omashiki.Worker.Offer do
     :admitted_repository,
     :admitted_plugin,
     :registry_digest,
-    :timeout_ms
+    :timeout_ms,
+    :attempt_number,
+    :user_id,
+    :repository,
+    :environment,
+    :admitted_environment_digest,
+    :admitted_repository_digest,
+    :admitted_plugin_digest
   ]
 
   @doc "Build an offer from a claimed job and attempt."
@@ -45,7 +59,14 @@ defmodule Omashiki.Worker.Offer do
       admitted_repository: job.admitted_repository,
       admitted_plugin: job.admitted_plugin,
       registry_digest: job.registry_digest,
-      timeout_ms: Map.get(env, "timeout_ms", 60_000)
+      timeout_ms: Map.get(env, "timeout_ms", 60_000),
+      attempt_number: attempt.number,
+      user_id: job.user_id,
+      repository: job.repository,
+      environment: job.environment,
+      admitted_environment_digest: job.admitted_environment_digest,
+      admitted_repository_digest: job.admitted_repository_digest,
+      admitted_plugin_digest: job.admitted_plugin_digest
     }
   end
 
@@ -61,7 +82,14 @@ defmodule Omashiki.Worker.Offer do
       "admitted_repository" => offer.admitted_repository,
       "admitted_plugin" => offer.admitted_plugin,
       "registry_digest" => offer.registry_digest,
-      "timeout_ms" => offer.timeout_ms
+      "timeout_ms" => offer.timeout_ms,
+      "attempt_number" => offer.attempt_number,
+      "user_id" => offer.user_id,
+      "repository" => offer.repository,
+      "environment" => offer.environment,
+      "admitted_environment_digest" => offer.admitted_environment_digest,
+      "admitted_repository_digest" => offer.admitted_repository_digest,
+      "admitted_plugin_digest" => offer.admitted_plugin_digest
     }
   end
 
@@ -78,7 +106,14 @@ defmodule Omashiki.Worker.Offer do
        admitted_repository: Map.get(map, "admitted_repository"),
        admitted_plugin: Map.get(map, "admitted_plugin"),
        registry_digest: Map.get(map, "registry_digest"),
-       timeout_ms: Map.get(map, "timeout_ms", 60_000)
+       timeout_ms: Map.get(map, "timeout_ms", 60_000),
+       attempt_number: map["attempt_number"],
+       user_id: map["user_id"],
+       repository: Map.get(map, "repository"),
+       environment: map["environment"],
+       admitted_environment_digest: map["admitted_environment_digest"],
+       admitted_repository_digest: Map.get(map, "admitted_repository_digest"),
+       admitted_plugin_digest: map["admitted_plugin_digest"]
      }}
   end
 end

@@ -27,6 +27,7 @@ case System.get_env("OMASHIKI_ROLE") do
 
   "worker" ->
     config :omashiki, :boot_role, :worker
+    config :omashiki, :worker_executor, Omashiki.Worker.Snapshot
 
   other ->
     raise "OMASHIKI_ROLE must be embedded, manager, or worker; got #{inspect(other)}"
