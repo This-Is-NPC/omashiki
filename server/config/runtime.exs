@@ -43,6 +43,24 @@ end
 config :omashiki, :worker_token, System.get_env("OMASHIKI_WORKER_TOKEN")
 config :omashiki, :manager_url, System.get_env("OMASHIKI_MANAGER_URL")
 
+case System.get_env("OMASHIKI_MANAGERS") do
+  nil ->
+    :ok
+
+  raw ->
+    case Jason.decode(raw) do
+      {:ok, list} when is_list(list) ->
+        config :omashiki, :worker_managers, list
+
+      {:ok, other} ->
+        raise "OMASHIKI_MANAGERS must be a JSON array of objects, got #{inspect(other)}"
+
+      {:error, reason} ->
+        raise "OMASHIKI_MANAGERS is not valid JSON: #{inspect(reason)}"
+    end
+end
+
+
 if path = System.get_env("OMASHIKI_LLM_EGRESS_SOCKET_PATH") do
   if Path.type(path) != :absolute,
     do: raise("OMASHIKI_LLM_EGRESS_SOCKET_PATH must be absolute")

@@ -22,7 +22,9 @@ defmodule Omashiki.Worker.Offer do
           environment: String.t(),
           admitted_environment_digest: String.t(),
           admitted_repository_digest: String.t() | nil,
-          admitted_plugin_digest: String.t()
+          admitted_plugin_digest: String.t(),
+          manager_id: String.t() | nil,
+          manager_url: String.t() | nil
         }
 
   defstruct [
@@ -42,7 +44,9 @@ defmodule Omashiki.Worker.Offer do
     :environment,
     :admitted_environment_digest,
     :admitted_repository_digest,
-    :admitted_plugin_digest
+    :admitted_plugin_digest,
+    :manager_id,
+    :manager_url
   ]
 
   @doc "Build an offer from a claimed job and attempt."
@@ -72,7 +76,7 @@ defmodule Omashiki.Worker.Offer do
 
   @doc "Encode an offer for JSON transport."
   def to_map(%__MODULE__{} = offer) do
-    %{
+    base = %{
       "job_id" => offer.job_id,
       "attempt_id" => offer.attempt_id,
       "lease_token" => offer.lease_token,
@@ -91,6 +95,10 @@ defmodule Omashiki.Worker.Offer do
       "admitted_repository_digest" => offer.admitted_repository_digest,
       "admitted_plugin_digest" => offer.admitted_plugin_digest
     }
+
+    base
+    |> maybe_put("manager_id", offer.manager_id)
+    |> maybe_put("manager_url", offer.manager_url)
   end
 
   @doc "Decode an offer from JSON transport."
@@ -113,7 +121,12 @@ defmodule Omashiki.Worker.Offer do
        environment: map["environment"],
        admitted_environment_digest: map["admitted_environment_digest"],
        admitted_repository_digest: Map.get(map, "admitted_repository_digest"),
-       admitted_plugin_digest: map["admitted_plugin_digest"]
+       admitted_plugin_digest: map["admitted_plugin_digest"],
+       manager_id: Map.get(map, "manager_id"),
+       manager_url: Map.get(map, "manager_url")
      }}
   end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 end
