@@ -442,6 +442,52 @@ run         = "mise run e2e:overture:runc:jcode"
 description = "Run the standard runc/jcode E2E against the deterministic LLM stub"
 run         = "mise run e2e:overture:runc"
 
+[tasks."e2e:host-worker"]
+description = "Run the two-process host manager+worker Docker E2E"
+run         = """
+set -e
+umask 077
+if [ -L .omashiki ] || { [ -e .omashiki ] && [ ! -d .omashiki ]; }; then
+  echo "refusing unsafe .omashiki lock directory" >&2
+  exit 1
+fi
+mkdir -p .omashiki
+exec 9>.omashiki/e2e.lock
+if ! flock -n 9; then
+  echo "another E2E is already running" >&2
+  exit 1
+fi
+export OMASHIKI_E2E_LOCK_HELD=1
+mise run e2e:prepare:runc:jcode-stub
+mise run images
+python3 .scripts/host_worker_e2e.py --skip-prepare
+"""
+
+[tasks."e2e:compose-worker"]
+description = "Run the packaged Compose manager+worker Docker E2E"
+run         = """
+set -e
+umask 077
+if [ -L .omashiki ] || { [ -e .omashiki ] && [ ! -d .omashiki ]; }; then
+  echo "refusing unsafe .omashiki lock directory" >&2
+  exit 1
+fi
+mkdir -p .omashiki
+exec 9>.omashiki/e2e.lock
+if ! flock -n 9; then
+  echo "another E2E is already running" >&2
+  exit 1
+fi
+export OMASHIKI_E2E_LOCK_HELD=1
+mise run e2e:prepare:runc:jcode-stub
+mise run images
+python3 .scripts/compose_worker_e2e.py --skip-prepare
+"""
+
+[tasks."worker:enroll"]
+description = "POST manager credentials to a remote worker enroll listener"
+run         = "python3 .scripts/enroll_worker.py"
+
 [tasks."kata:install"]
 description = "Install pinned Kata on the host and register Docker runtime kata"
 run         = "sudo .scripts/kata_install.sh"
