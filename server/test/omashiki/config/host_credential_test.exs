@@ -76,7 +76,10 @@ defmodule Omashiki.Config.HostCredentialTest do
     assert [%HostCredential{name: "opencode-local"}] = Config.host_credentials()
   end
 
-  test "expands a home-relative origin outside the configuration root", ctx do
+  # The home that matters is the one on the machine running Docker, which in a
+  # manager/worker split is not the machine loading this file. So the declared
+  # form travels in the snapshot and `Runtime.HostCredentials` expands it.
+  test "keeps a home-relative origin in its declared form", ctx do
     configured =
       put_in(
         fixture(ctx),
@@ -86,8 +89,19 @@ defmodule Omashiki.Config.HostCredentialTest do
 
     assert :ok = Config.load_map!(configured, path: Path.join(ctx.root, "omashiki.toml"))
 
-    assert %{"auth.json" => path} = hd(Config.host_credentials()).files
-    assert path == Path.join(System.user_home!(), ".local/share/opencode/auth.json")
+    assert %{"auth.json" => "~/.local/share/opencode/auth.json"} =
+             hd(Config.host_credentials()).files
+  end
+
+  test "rejects a relative origin", ctx do
+    for relative <- ["./auth.json", "../auth.json", "auth.json", "~", "~user/auth.json"] do
+      configured =
+        put_in(fixture(ctx), ["host_credentials", "opencode-local", "auth"], relative)
+
+      assert_raise Error, ~r/must be an absolute host path or start with ~\//, fn ->
+        Config.load_map!(configured, path: Path.join(ctx.root, "omashiki.toml"))
+      end
+    end
   end
 
   test "rejects an unknown kind, unknown field, or missing origin field", ctx do

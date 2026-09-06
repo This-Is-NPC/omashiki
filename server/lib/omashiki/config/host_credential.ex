@@ -31,9 +31,14 @@ defmodule Omashiki.Config.HostCredential do
   @doc """
   Build the declared `[host_credentials]` section.
 
-  Origins are resolved to absolute host paths but are never checked for
-  existence: a missing or mid-rotation credential must fail one attempt, not
-  the boot.
+  Origins are kept in their declared form. `~/` is **not** expanded here: the
+  home that matters is the one on the machine that runs the container, which
+  in a manager/worker split is not the machine loading this file.
+  `Omashiki.Runtime.HostCredentials.materialize/3` expands it at copy time.
+  Absolute paths pass through; `./` and `../` are rejected because they would
+  silently bind the credential to whichever working directory the process
+  happened to start in. Nothing is checked for existence: a missing or
+  mid-rotation credential must fail one attempt, not the boot.
   """
   def build!(section) when is_map(section) do
     section
@@ -77,17 +82,20 @@ defmodule Omashiki.Config.HostCredential do
       raise Error, "#{where}.#{field} must be a non-empty path"
     end
 
-    path = expand(value)
+    case value do
+      "~/" <> rest when rest != "" ->
+        value
 
-    unless Path.type(path) == :absolute do
-      raise Error, "#{where}.#{field} must resolve to an absolute host path"
+      _ ->
+        unless Path.type(value) == :absolute do
+          raise Error,
+                "#{where}.#{field} must be an absolute host path or start with ~/ " <>
+                  "(relative paths are not allowed)"
+        end
+
+        Path.expand(value)
     end
-
-    path
   end
-
-  defp expand("~/" <> rest), do: Path.join(System.user_home!(), rest)
-  defp expand(path), do: Path.expand(path)
 
   defp require_table!(attrs, _where) when is_map(attrs),
     do: Map.new(attrs, fn {key, value} -> {to_string(key), value} end)

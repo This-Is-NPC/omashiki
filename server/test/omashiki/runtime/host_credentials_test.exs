@@ -79,6 +79,31 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
     refute File.exists?(HostCredentials.scope_dir(scope))
   end
 
+  # `~/` resolves against the home of the process that copies — this one — so a
+  # worker with a different Unix user reads its own login, never the manager's.
+  test "expands ~/ against the home of the copying process", ctx do
+    File.mkdir_p!(Path.join(ctx.origins, ".harness"))
+    File.write!(Path.join(ctx.origins, ".harness/login.json"), ~s({"login":"worker"}))
+
+    with_home(ctx.origins, fn ->
+      assert {:ok, materialized} =
+               HostCredentials.materialize(scope(), environment("~/.harness/login.json"))
+
+      assert File.read!(Path.join(materialized.dir, "auth.json")) == ~s({"login":"worker"})
+    end)
+  end
+
+  test "fails the attempt when this home lacks the declared file", ctx do
+    scope = scope()
+
+    with_home(ctx.origins, fn ->
+      assert {:error, {:host_credential_unavailable, "opencode-local", "auth.json"}} =
+               HostCredentials.materialize(scope, environment("~/.harness/login.json"))
+    end)
+
+    refute File.exists?(HostCredentials.scope_dir(scope))
+  end
+
   test "rejects two credentials fighting for one container file", ctx do
     environment = %{
       host_credentials: [
@@ -135,6 +160,17 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
     }
 
     assert {:ok, _plan} = Interpreter.prepare(claude_profile(), context)
+  end
+
+  defp with_home(home, fun) do
+    previous = System.get_env("HOME")
+    System.put_env("HOME", home)
+
+    try do
+      fun.()
+    after
+      System.put_env("HOME", previous)
+    end
   end
 
   defp environment(auth) do

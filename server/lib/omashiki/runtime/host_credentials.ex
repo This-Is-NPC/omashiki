@@ -6,6 +6,12 @@ defmodule Omashiki.Runtime.HostCredentials do
   live operator credentials, mounted read-write at `/run/omashiki/state`. The
   copy is per attempt because OAuth harnesses rewrite these files on token
   refresh and concurrent containers would corrupt a shared origin.
+
+  A `~/` origin is expanded **here**, against the home of the process doing
+  the copy. That is the point: the subscription login belongs to the machine
+  running Docker (embedded manager or remote worker), not to whoever loaded
+  `omashiki.toml`. A worker whose home lacks the file fails the attempt with
+  `host_credential_unavailable`; nothing is fetched from anywhere else.
   """
 
   alias Omashiki.Config.HostCredential
@@ -110,8 +116,9 @@ defmodule Omashiki.Runtime.HostCredentials do
     end
   end
 
-  defp copy_file(dir, name, file, origin, mounts, owner) do
+  defp copy_file(dir, name, file, declared, mounts, owner) do
     target = Path.join(@container_dir, file)
+    origin = expand_host_path(declared)
 
     cond do
       Enum.any?(mounts, fn {_source, destination, _read_only} -> destination == target end) ->
@@ -187,9 +194,18 @@ defmodule Omashiki.Runtime.HostCredentials do
   defp normalize_mounts(mounts) when is_list(mounts), do: mounts
   defp normalize_mounts(_), do: []
 
-  defp expand_host_path("~/" <> rest), do: Path.join(System.user_home!(), rest)
-  defp expand_host_path("~"), do: System.user_home!()
+  defp expand_host_path("~/" <> rest), do: Path.join(home(), rest)
+  defp expand_host_path("~"), do: home()
   defp expand_host_path(path), do: path
+
+  # `HOME` first: the release entrypoint and Compose set it per process, and
+  # `System.user_home!/0` is frozen at VM boot from wherever the BEAM started.
+  defp home do
+    case System.get_env("HOME") do
+      home when is_binary(home) and home != "" -> home
+      _ -> System.user_home!()
+    end
+  end
 
   defp default_base, do: if(File.dir?("/dev/shm"), do: "/dev/shm", else: System.tmp_dir!())
 end
