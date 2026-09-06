@@ -1,0 +1,43 @@
+# Remote worker: same release image, worker role, enroll listener on 4012.
+#
+# Build and start on the execution host (needs access to the Docker daemon):
+#   docker compose -f examples/compose.worker.yml build
+#   docker compose -f examples/compose.worker.yml up -d
+#
+# From the laptop, after the manager is reachable, enroll once:
+#   mise run worker:enroll
+#
+# Set OMASHIKI_HOST_HOME to this machine's home directory so Git mirrors and
+# worktrees resolve to the same paths as the host Docker daemon.
+
+services:
+  worker:
+    image: omashiki/worker:local
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      HOME: ${OMASHIKI_HOST_HOME:?set OMASHIKI_HOST_HOME to this machine's home directory}
+      OMASHIKI_ROLE: worker
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-dev-only-change-me}
+      OMASHIKI_NODE: ${OMASHIKI_NODE:-worker-1}
+      OMASHIKI_WORKER_CONFIG: /config/worker.toml
+      OMASHIKI_ENROLL_SECRET: ${OMASHIKI_ENROLL_SECRET:?set OMASHIKI_ENROLL_SECRET}
+      OMASHIKI_ENROLL_PORT: ${OMASHIKI_ENROLL_PORT:-4012}
+      OMASHIKI_WORKER_STATE_PATH: /cache/worker-state.json
+      OMASHIKI_DOCKER_SOCKET_PATH: /var/run/docker.sock
+      OMASHIKI_AGENT_NETWORK_MODE: bridge
+    ports:
+      - "${OMASHIKI_ENROLL_PORT:-4012}:${OMASHIKI_ENROLL_PORT:-4012}"
+    volumes:
+      - ./worker.toml:/config/worker.toml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${OMASHIKI_HOST_HOME:?set OMASHIKI_HOST_HOME}/.cache/omashiki:${OMASHIKI_HOST_HOME:?set OMASHIKI_HOST_HOME}/.cache/omashiki
+      # Agent secret files land in /dev/shm; share the host path so the
+      # daemon can bind-mount them into job containers.
+      - /dev/shm:/dev/shm
+      - worker-cache:/cache
+volumes:
+  worker-cache:

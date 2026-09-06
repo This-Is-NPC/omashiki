@@ -1,0 +1,55 @@
+# Manager control plane: PostgreSQL + Omashiki release in manager role.
+#
+# Prerequisite: copy a product registry to the repository root, for example
+#   cp examples/single-node.omashiki.toml ../omashiki.toml
+#
+# Build and start:
+#   docker compose -f examples/compose.manager.yml build
+#   docker compose -f examples/compose.manager.yml up -d
+#
+# Export OMASHIKI_WORKER_TOKEN and OMASHIKI_ENROLL_SECRET in .env before
+# starting the worker stack; the enroll script sends the same worker token.
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: omashiki
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omashiki"]
+      interval: 1s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  manager:
+    image: omashiki/manager:local
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      OMASHIKI_ROLE: manager
+      PHX_SERVER: "true"
+      DATABASE_URL: ecto://postgres:postgres@db/omashiki
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-dev-only-change-me}
+      OMASHIKI_WORKER_TOKEN: ${OMASHIKI_WORKER_TOKEN:-worker-token-change-me}
+      OMASHIKI_CONFIG: /config/omashiki.toml
+      PORT: ${MANAGER_PORT:-4010}
+      # OMASHIKI_MANAGER_URL passed to worker:enroll must be reachable FROM the
+      # worker host (LAN, Tailscale, public), not 127.0.0.1 on the laptop.
+    ports:
+      - "${MANAGER_PORT:-4010}:${MANAGER_PORT:-4010}"
+    volumes:
+      - ${OMASHIKI_CONFIG_HOST:-../omashiki.toml}:/config/omashiki.toml:ro
+
+volumes:
+  pgdata:

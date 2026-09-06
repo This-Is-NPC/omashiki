@@ -1,0 +1,11 @@
+# Worker machine config — not the product registry.
+#
+# Mount this file and point OMASHIKI_WORKER_CONFIG at it. Manager URL and
+# worker token arrive through HTTP enrollment (mise run worker:enroll), not
+# from this file.
+
+[limits]
+max_concurrent_containers = 4
+
+[docker]
+socket_path = "/var/run/docker.sock"
