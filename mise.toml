@@ -484,6 +484,27 @@ mise run images
 python3 .scripts/compose_worker_e2e.py --skip-prepare
 """
 
+[tasks."e2e:two-houses"]
+description = "Run the two-manager, one-worker isolation E2E (kill/restart one house)"
+run         = """
+set -e
+umask 077
+if [ -L .omashiki ] || { [ -e .omashiki ] && [ ! -d .omashiki ]; }; then
+  echo "refusing unsafe .omashiki lock directory" >&2
+  exit 1
+fi
+mkdir -p .omashiki
+exec 9>.omashiki/e2e.lock
+if ! flock -n 9; then
+  echo "another E2E is already running" >&2
+  exit 1
+fi
+export OMASHIKI_E2E_LOCK_HELD=1
+mise run e2e:prepare:runc:jcode-stub
+mise run images
+python3 .scripts/two_houses_e2e.py --skip-prepare
+"""
+
 [tasks."worker:enroll"]
 description = "POST manager credentials to a remote worker enroll listener"
 run         = "python3 .scripts/enroll_worker.py"
