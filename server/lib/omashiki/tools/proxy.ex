@@ -3,6 +3,7 @@ defmodule Omashiki.Tools.Proxy do
 
   require Logger
 
+  alias Omashiki.Identities.Broker
   alias Omashiki.Runtime.Claims
   alias Omashiki.Security.Network
 
@@ -44,7 +45,8 @@ defmodule Omashiki.Tools.Proxy do
   def handle_rpc(server_name, rpc, claims) when is_binary(server_name) and is_map(rpc) do
     with {:ok, %{job: job}} <- Claims.authorize("tools", claims),
          servers when is_map(servers) <- Claims.mcp_servers(job),
-         upstream when is_map(upstream) <- Map.get(servers, server_name) || :unknown_server do
+         upstream when is_map(upstream) <-
+           Map.get(servers, server_name) || Broker.upstream(job, server_name) || :unknown_server do
       dispatch_rpc(rpc, job, Claims.capabilities(job), server_name, upstream)
     else
       :unknown_server -> {:error, %{code: -32004, message: "unknown_mcp_server"}}
@@ -107,6 +109,10 @@ defmodule Omashiki.Tools.Proxy do
 
     :ok
   end
+
+  # An identity the preset wears is answered in-process by the house; nothing
+  # leaves this node and no upstream URL exists for it.
+  defp forward(%{"identity" => %{} = admitted}, rpc), do: Broker.call(admitted, rpc)
 
   defp forward(%{"url" => url} = upstream, rpc) when is_binary(url) do
     headers =

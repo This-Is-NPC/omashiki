@@ -296,9 +296,8 @@ defmodule Omashiki.Plugin.Interpreter do
     }
 
     env = context.environment || %{}
-    servers = Map.get(env, "mcp_servers", %{})
 
-    if is_map(servers) and map_size(servers) > 0 do
+    if Omashiki.Tools.McpConfig.server_names(env) != [] do
       Map.merge(
         config,
         Omashiki.Tools.McpConfig.render(env, spec, %{

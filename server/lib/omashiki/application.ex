@@ -27,6 +27,7 @@ defmodule Omashiki.Application do
     install_logger_filter()
     OmashikiWeb.RateLimiter.ensure_table()
     Omashiki.Runtime.ContainerManager.ensure_cancellation_table()
+    Omashiki.Identities.GithubApp.ensure_table()
 
     unless role == :worker do
       OmashikiWeb.AuthMode.assert_boot_safe!()
@@ -39,8 +40,6 @@ defmodule Omashiki.Application do
     end
 
     children = children_for(role)
-
-
 
     opts = [strategy: :one_for_one, name: Omashiki.Supervisor]
     {:ok, sup_pid} = Supervisor.start_link(children, opts)

@@ -1,6 +1,7 @@
 defmodule Omashiki.Tools.McpConfig do
   @moduledoc "Renders job environment MCP declarations through the internal proxy."
 
+  alias Omashiki.Identities.Broker
   alias Omashiki.Tools.Proxy
 
   @default_shape %{"root_key" => "mcp", "server_type" => "remote", "include_enabled" => true}
@@ -13,6 +14,22 @@ defmodule Omashiki.Tools.McpConfig do
   def encode(environment, profile, ctx),
     do: environment |> render(profile, ctx) |> Jason.encode!()
 
+  @doc """
+  Every MCP server name the sandbox should be told about: the environment's
+  declared upstreams plus one server per identity the preset wears.
+  """
+  def server_names(environment) when is_map(environment) do
+    declared =
+      case Map.get(environment, "mcp_servers", Map.get(environment, :mcp_servers, %{})) do
+        %{} = servers -> Map.keys(servers) |> Enum.map(&to_string/1)
+        _ -> []
+      end
+
+    Enum.uniq(declared ++ Broker.server_names(environment))
+  end
+
+  def server_names(_), do: []
+
   defp mcp_config_of(%{capabilities: caps}) when is_map(caps) do
     case Map.get(caps, "mcp_config") || Map.get(caps, :mcp_config) do
       %{} = shape -> Map.merge(@default_shape, stringify(shape))
@@ -23,24 +40,19 @@ defmodule Omashiki.Tools.McpConfig do
   defp mcp_config_of(_), do: @default_shape
 
   defp render_with_shape(environment, shape, ctx) do
-    servers = Map.get(environment, "mcp_servers", Map.get(environment, :mcp_servers, %{}))
-
     servers =
-      if is_map(servers) do
-        servers
-        |> Map.new(fn {name, _declaration} ->
-          entry = %{
-            "type" => shape["server_type"],
-            "url" => proxy_url(name, ctx),
-            "headers" => %{"Authorization" => "Bearer #{token(ctx)}"}
-          }
+      environment
+      |> server_names()
+      |> Map.new(fn name ->
+        entry = %{
+          "type" => shape["server_type"],
+          "url" => proxy_url(name, ctx),
+          "headers" => %{"Authorization" => "Bearer #{token(ctx)}"}
+        }
 
-          entry = if shape["include_enabled"], do: Map.put(entry, "enabled", true), else: entry
-          {name, entry}
-        end)
-      else
-        %{}
-      end
+        entry = if shape["include_enabled"], do: Map.put(entry, "enabled", true), else: entry
+        {name, entry}
+      end)
 
     %{shape["root_key"] => servers}
   end
