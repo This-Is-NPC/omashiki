@@ -122,7 +122,11 @@ defmodule Omashiki.Worker.Snapshot do
     end)
   end
 
-  defp run_step(%{container: container, container_mod: container_mod} = state, step, default_timeout) do
+  defp run_step(
+         %{container: container, container_mod: container_mod} = state,
+         step,
+         default_timeout
+       ) do
     argv = Map.get(step, "argv", [])
     timeout_ms = Map.get(step, "timeout_ms", default_timeout)
 
@@ -213,7 +217,8 @@ defmodule Omashiki.Worker.Snapshot do
     }
   end
 
-  defp relocate_repository(%Offer{sink: "git", admitted_repository: repo} = offer) when is_map(repo) do
+  defp relocate_repository(%Offer{sink: "git", admitted_repository: repo} = offer)
+       when is_map(repo) do
     case Map.get(repo, "remote") do
       remote when is_binary(remote) and remote != "" ->
         mirror_path =

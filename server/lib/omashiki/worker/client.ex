@@ -135,11 +135,19 @@ defmodule Omashiki.Worker.Client do
     [{"authorization", "Bearer #{token}"}]
   end
 
-  defp request(%__MODULE__{} = client, method, path, headers, body, timeout_ms \\ @default_timeout_ms) do
+  defp request(
+         %__MODULE__{} = client,
+         method,
+         path,
+         headers,
+         body,
+         timeout_ms \\ @default_timeout_ms
+       ) do
     mint = client.mint_mod
     %URI{scheme: scheme, host: host, port: port} = URI.parse(client.manager_url)
 
-    with {:ok, conn} <- mint.connect(scheme_atom(scheme), host, port_for(scheme, port), mode: :passive),
+    with {:ok, conn} <-
+           mint.connect(scheme_atom(scheme), host, port_for(scheme, port), mode: :passive),
          {:ok, conn, req_ref} <- mint.request(conn, method, path, headers, body || ""),
          {:ok, response} <- recv_full(mint, conn, req_ref, timeout_ms) do
       mint.close(conn)

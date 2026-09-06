@@ -10,14 +10,13 @@ defmodule Omashiki.Worker.Poller do
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
+
   @doc "Activate or refresh the poll loop after enrollment or config changes."
   @spec configure(keyword()) :: :ok
   def configure(opts \\ []) do
     {server, opts} = Keyword.pop(opts, :server, __MODULE__)
     GenServer.call(server, {:configure, opts})
   end
-
-
 
   @impl true
   def init(opts) do
@@ -29,7 +28,6 @@ defmodule Omashiki.Worker.Poller do
     new_state = build_state(Keyword.merge(default_opts(state), opts))
     {:reply, :ok, new_state}
   end
-
 
   @impl true
   def handle_info(:tick, %{mode: :idle} = state), do: {:noreply, state}
@@ -88,9 +86,7 @@ defmodule Omashiki.Worker.Poller do
         handle_offer(state, offer, manager.client)
 
       {:error, reason} ->
-        Logger.warning(
-          "Worker.Poller poll failed for #{manager.id}: #{inspect(reason)}"
-        )
+        Logger.warning("Worker.Poller poll failed for #{manager.id}: #{inspect(reason)}")
 
         state
     end
@@ -109,7 +105,6 @@ defmodule Omashiki.Worker.Poller do
       end
     end)
   end
-
 
   defp handle_offer(state, %Offer{} = offer, client) do
     execution = execution_from(offer)
@@ -261,7 +256,6 @@ defmodule Omashiki.Worker.Poller do
 
   defp default_opts(%{slots: slots}) when is_atom(slots) or is_pid(slots), do: [slots: slots]
   defp default_opts(_), do: []
-
 
   defp hostname do
     case :inet.gethostname() do
