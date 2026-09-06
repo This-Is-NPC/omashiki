@@ -26,6 +26,7 @@ defmodule Omashiki.Application do
     role = boot_role()
     install_logger_filter()
     OmashikiWeb.RateLimiter.ensure_table()
+    Omashiki.Runtime.ContainerManager.ensure_cancellation_table()
 
     unless role == :worker do
       OmashikiWeb.AuthMode.assert_boot_safe!()
@@ -33,7 +34,13 @@ defmodule Omashiki.Application do
 
     load_declared_config(role)
 
+    if role == :worker do
+      Omashiki.Worker.State.restore!()
+    end
+
     children = children_for(role)
+
+
 
     opts = [strategy: :one_for_one, name: Omashiki.Supervisor]
     {:ok, sup_pid} = Supervisor.start_link(children, opts)
@@ -63,7 +70,6 @@ defmodule Omashiki.Application do
       {Oban, Application.fetch_env!(:omashiki, Oban)},
       Omashiki.Gateway.CircuitBreaker,
       OmashikiWeb.Endpoint,
-      Omashiki.LlmEgress.Proxy,
       Omashiki.SupplyChain.SocketBridge
     ] ++ recovery_children()
   end
@@ -81,7 +87,6 @@ defmodule Omashiki.Application do
       manager_oban_child(),
       Omashiki.Gateway.CircuitBreaker,
       OmashikiWeb.Endpoint,
-      Omashiki.LlmEgress.Proxy,
       Omashiki.SupplyChain.SocketBridge
     ] ++ recovery_children()
   end
@@ -94,8 +99,11 @@ defmodule Omashiki.Application do
       {Task.Supervisor, name: Omashiki.Runtime.TaskSupervisor},
       Omashiki.Runtime.AttemptSupervisor,
       Omashiki.Runtime.PortAllocator,
+      Omashiki.Runtimes.CacheMaintenance,
       Omashiki.Runtime.ContainerManager,
       Omashiki.Runtime.Inspector,
+      Omashiki.LlmEgress.Proxy,
+      Omashiki.Worker.Enroll.Listener,
       Omashiki.Worker.Slots,
       Omashiki.Worker.Poller
     ]
@@ -130,7 +138,13 @@ defmodule Omashiki.Application do
   end
 
   defp post_start(:worker) do
-    run_orphan_cleanup()
+    if Application.get_env(:omashiki, :run_orphan_cleanup_on_boot, true) do
+      _ = Omashiki.Runtime.ContainerManager.cleanup_orphans()
+    end
+
+    :ok
+  rescue
+    e -> Logger.warning("[Application] Worker orphan cleanup skipped: #{inspect(e)}")
   end
 
   # `[limits].max_concurrent_containers` owns the database capacity row.
@@ -146,6 +160,7 @@ defmodule Omashiki.Application do
 
   defp load_declared_config(:worker) do
     Omashiki.Config.reset!()
+    Omashiki.Worker.State.restore!()
     :ok
   rescue
     e ->

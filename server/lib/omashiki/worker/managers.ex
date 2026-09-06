@@ -1,6 +1,8 @@
 defmodule Omashiki.Worker.Managers do
   @moduledoc false
 
+  alias Omashiki.Worker.State
+
   @type entry :: %{id: String.t(), url: String.t(), token: String.t()}
 
   @spec configured() :: [entry()]
@@ -20,12 +22,32 @@ defmodule Omashiki.Worker.Managers do
   def present?, do: configured() != []
 
   defp singleton do
+    case env_singleton() do
+      [] -> state_singleton()
+      entries -> entries
+    end
+  end
+
+  defp env_singleton do
     url = Application.get_env(:omashiki, :manager_url)
     token = Application.get_env(:omashiki, :worker_token)
 
     case normalize(%{url: url, token: token}) do
       nil -> []
       entry -> [entry]
+    end
+  end
+
+  defp state_singleton do
+    case State.load() do
+      {:ok, %{manager_url: url, worker_token: token}} ->
+        case normalize(%{url: url, token: token}) do
+          nil -> []
+          entry -> [entry]
+        end
+
+      :error ->
+        []
     end
   end
 

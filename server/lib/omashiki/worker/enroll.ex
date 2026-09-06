@@ -1,0 +1,53 @@
+defmodule Omashiki.Worker.Enroll do
+  @moduledoc false
+
+  alias Omashiki.Worker.{Poller, State}
+
+  @doc "Configured enroll listener TCP port."
+  @spec port() :: pos_integer()
+  def port do
+    Application.get_env(:omashiki, :enroll_port, 4012)
+  end
+
+  @doc "True when an enroll shared secret is configured."
+  @spec secret_configured?() :: boolean()
+  def secret_configured? do
+    case secret() do
+      secret when is_binary(secret) and secret != "" -> true
+      _ -> false
+    end
+  end
+
+  @doc "Validate a presented enroll bearer token."
+  @spec valid_secret?(String.t() | nil) :: boolean()
+  def valid_secret?(plaintext) when is_binary(plaintext) do
+    case secret() do
+      secret when is_binary(secret) and secret != "" ->
+        byte_size(secret) == byte_size(plaintext) and
+          Plug.Crypto.secure_compare(secret, plaintext)
+
+      _ ->
+        false
+    end
+  end
+
+  def valid_secret?(_), do: false
+
+  @doc """
+  Accept enrollment credentials, persist them, and activate the poll loop.
+  """
+  @spec enroll(map()) :: :ok | {:error, term()}
+  def enroll(params) when is_map(params) do
+    case State.save(params) do
+      :ok ->
+        Poller.configure()
+
+      :error ->
+        {:error, :invalid_body}
+    end
+  end
+
+  defp secret do
+    Application.get_env(:omashiki, :enroll_secret) || System.get_env("OMASHIKI_ENROLL_SECRET")
+  end
+end

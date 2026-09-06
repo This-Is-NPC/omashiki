@@ -523,6 +523,40 @@ defmodule Omashiki.Worker.PollerTest do
   end
 
 
+  describe "configure/1" do
+    test "activates an idle poller after enrollment credentials appear" do
+      bypass = Bypass.open()
+      parent = self()
+      token = "worker-configure-#{System.unique_integer([:positive])}"
+
+      Application.delete_env(:omashiki, :manager_url)
+      Application.delete_env(:omashiki, :worker_token)
+      put_env(:worker_executor, Omashiki.Worker.PollerTest.FakeExecutor)
+      put_env(:worker_poll_interval_ms, @poll_interval_ms)
+
+      Bypass.expect_once(bypass, "POST", "/internal/work/register", fn conn ->
+        send(parent, :registered)
+        Plug.Conn.resp(conn, 204, "")
+      end)
+
+      Bypass.stub(bypass, "POST", "/internal/work/poll", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"offer":null}))
+      end)
+
+      slots = start_slots!()
+      poller = start_supervised!({Poller, name: unique_poller_name(), slots: slots})
+
+      put_env(:manager_url, "http://127.0.0.1:#{bypass.port}")
+      put_env(:worker_token, token)
+
+      assert :ok = Poller.configure(server: poller)
+      assert_receive :registered, 2_000
+    end
+  end
+
+
   defp stub_heartbeat(bypass) do
     Bypass.stub(bypass, "POST", "/internal/work/heartbeat", fn conn ->
       conn

@@ -10,52 +10,26 @@ defmodule Omashiki.Worker.Poller do
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
   end
+  @doc "Activate or refresh the poll loop after enrollment or config changes."
+  @spec configure(keyword()) :: :ok
+  def configure(opts \\ []) do
+    {server, opts} = Keyword.pop(opts, :server, __MODULE__)
+    GenServer.call(server, {:configure, opts})
+  end
+
+
 
   @impl true
   def init(opts) do
-    managers = Keyword.get(opts, :managers) || Managers.configured()
-    executor = Application.get_env(:omashiki, :worker_executor)
-    machine_id = System.get_env("OMASHIKI_NODE") || hostname()
-    interval_ms = Application.get_env(:omashiki, :worker_poll_interval_ms, 1_000)
-    slots = Keyword.get(opts, :slots, Slots)
-
-    if managers == [] or is_nil(executor) do
-      Logger.warning(
-        "Worker.Poller idle: at least one manager and worker_executor must be configured"
-      )
-
-      {:ok, %{mode: :idle}}
-    else
-      managers =
-        Enum.map(managers, fn m ->
-          %{id: m.id, url: m.url, client: Client.new(m.url, m.token)}
-        end)
-
-      for m <- managers do
-        case Client.register(m.client, machine_id, free_slots(slots)) do
-          :ok ->
-            :ok
-
-          {:error, reason} ->
-            Logger.warning("Worker.Poller register failed for #{m.id}: #{inspect(reason)}")
-        end
-      end
-
-      state = %{
-        mode: :active,
-        managers: managers,
-        rr: 0,
-        in_flight: %{},
-        executor: executor,
-        machine_id: machine_id,
-        interval_ms: interval_ms,
-        slots: slots
-      }
-
-      send(self(), :tick)
-      {:ok, state}
-    end
+    {:ok, build_state(opts)}
   end
+
+  @impl true
+  def handle_call({:configure, opts}, _from, state) do
+    new_state = build_state(Keyword.merge(default_opts(state), opts))
+    {:reply, :ok, new_state}
+  end
+
 
   @impl true
   def handle_info(:tick, %{mode: :idle} = state), do: {:noreply, state}
@@ -239,6 +213,55 @@ defmodule Omashiki.Worker.Poller do
   defp schedule_tick(%{interval_ms: interval_ms}) do
     Process.send_after(self(), :tick, interval_ms)
   end
+
+  defp build_state(opts) do
+    managers = Keyword.get(opts, :managers) || Managers.configured()
+    executor = Keyword.get(opts, :executor) || Application.get_env(:omashiki, :worker_executor)
+    machine_id = Keyword.get(opts, :machine_id) || System.get_env("OMASHIKI_NODE") || hostname()
+    interval_ms = Application.get_env(:omashiki, :worker_poll_interval_ms, 1_000)
+    slots = Keyword.get(opts, :slots, Slots)
+
+    if managers == [] or is_nil(executor) do
+      Logger.warning(
+        "Worker.Poller idle: at least one manager and worker_executor must be configured"
+      )
+
+      %{mode: :idle, slots: slots}
+    else
+      managers =
+        Enum.map(managers, fn m ->
+          %{id: m.id, url: m.url, client: Client.new(m.url, m.token)}
+        end)
+
+      for m <- managers do
+        case Client.register(m.client, machine_id, free_slots(slots)) do
+          :ok ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning("Worker.Poller register failed for #{m.id}: #{inspect(reason)}")
+        end
+      end
+
+      state = %{
+        mode: :active,
+        managers: managers,
+        rr: 0,
+        in_flight: %{},
+        executor: executor,
+        machine_id: machine_id,
+        interval_ms: interval_ms,
+        slots: slots
+      }
+
+      send(self(), :tick)
+      state
+    end
+  end
+
+  defp default_opts(%{slots: slots}) when is_atom(slots) or is_pid(slots), do: [slots: slots]
+  defp default_opts(_), do: []
+
 
   defp hostname do
     case :inet.gethostname() do

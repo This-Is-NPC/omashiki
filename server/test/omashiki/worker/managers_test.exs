@@ -49,4 +49,44 @@ defmodule Omashiki.Worker.ManagersTest do
     assert Managers.configured() == []
     refute Managers.present?()
   end
+
+  test "falls back to persisted state when env is unset" do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "worker-state-#{System.unique_integer([:positive])}.json"
+      )
+
+    previous = Application.get_env(:omashiki, :worker_state_path)
+    Application.put_env(:omashiki, :worker_state_path, path)
+
+    on_exit(fn ->
+      File.rm(path)
+
+      if previous do
+        Application.put_env(:omashiki, :worker_state_path, previous)
+      else
+        Application.delete_env(:omashiki, :worker_state_path)
+      end
+    end)
+
+    File.mkdir_p!(Path.dirname(path))
+
+    File.write!(
+      path,
+      Jason.encode!(%{
+        "manager_url" => "http://saved-manager.test:9090/",
+        "worker_token" => "saved-token"
+      })
+    )
+
+    assert [
+             %{
+               id: "saved-manager.test",
+               url: "http://saved-manager.test:9090",
+               token: "saved-token"
+             }
+           ] = Managers.configured()
+  end
+
 end

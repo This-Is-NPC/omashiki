@@ -41,9 +41,11 @@ defmodule Omashiki.ApplicationBootTest do
     assert Omashiki.Runtime.AttemptSupervisor in modules
     assert Omashiki.Worker.Slots in modules
     assert Omashiki.Worker.Poller in modules
+    assert Omashiki.Worker.Enroll.Listener in modules
     refute Omashiki.Repo in modules
     refute OmashikiWeb.Endpoint in modules
     refute Oban in modules
+
   end
 
   test "children_for(:embedded) and :manager exclude Poller and Slots" do
