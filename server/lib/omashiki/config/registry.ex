@@ -113,14 +113,15 @@ defmodule Omashiki.Config.Registry do
         credentials,
         host_credentials,
         base_dir,
-        plugins
+        plugins,
+        identities \\ []
       ) do
     if symlink_in_absolute_path?(base_dir) do
       raise Error, "configuration root must not contain symlink components"
     end
 
     repositories = build_repositories!(repository_section, base_dir)
-    presets = Omashiki.Presets.build!(preset_section, plugins)
+    presets = Omashiki.Presets.build!(preset_section, plugins, identities)
     runtimes = build_runtimes!(runtime_section, Map.keys(plugins))
     nodes = build_nodes!(node_section)
 

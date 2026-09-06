@@ -33,7 +33,13 @@ defmodule Omashiki.Jobs.AdmissionTest do
     {token, plaintext} = api_token_fixture(user)
 
     on_exit(fn -> File.rm_rf!(root) end)
-    {:ok, token: token, plaintext: plaintext, load_config: load_config}
+
+    {:ok,
+     token: token,
+     plaintext: plaintext,
+     load_config: load_config,
+     root: root,
+     state_path: state_path}
   end
 
   defp config_map(state_path, model, image) do
@@ -50,11 +56,11 @@ defmodule Omashiki.Jobs.AdmissionTest do
       "presets" => %{
         "opencode" => %{"plugin" => "opencode", "options" => %{}}
       },
-        "runtimes" => %{
-          "docker" => %{
-            "runc" => %{"debian" => %{"images" => %{"opencode" => image}}}
-          }
-        },
+      "runtimes" => %{
+        "docker" => %{
+          "runc" => %{"debian" => %{"images" => %{"opencode" => image}}}
+        }
+      },
       "credentials" => %{
         "secret" => %{
           "provider" => "anthropic",
@@ -88,6 +94,36 @@ defmodule Omashiki.Jobs.AdmissionTest do
       },
       "limits" => %{}
     }
+  end
+
+  # The preset wears the identity; the job carries the face, never the key.
+  test "an admitted environment carries identity names and public ids, never the key",
+       %{token: token, root: root, state_path: state_path} do
+    System.put_env("OMASHIKI_TEST_ADMISSION_APP_KEY", "-----BEGIN RSA PRIVATE KEY-----\nnope")
+    on_exit(fn -> System.delete_env("OMASHIKI_TEST_ADMISSION_APP_KEY") end)
+
+    configured =
+      config_map(state_path, "test", "omashiki/agent:latest")
+      |> Map.put("identities", %{
+        "ana-bot" => %{
+          "kind" => "github-app",
+          "app_id" => "123456",
+          "installation_id" => "987654",
+          "private_key" => "${env:OMASHIKI_TEST_ADMISSION_APP_KEY}"
+        }
+      })
+      |> put_in(["presets", "opencode", "identities"], ["ana-bot"])
+
+    :ok = Config.load_map!(configured, path: Path.join(root, "omashiki.toml"))
+
+    assert {:ok, job} = Admission.admit(token, single_request())
+
+    assert [%{"name" => "ana-bot", "kind" => "github-app", "app_id" => "123456"} = public] =
+             job.admitted_environment["preset"]["identities"]
+
+    refute Map.has_key?(public, "private_key")
+    refute inspect(job.admitted_environment) =~ "PRIVATE KEY"
+    refute Map.has_key?(job.admitted_environment, "identities")
   end
 
   test "rejects git sink jobs without branch or title", %{token: token} do

@@ -45,7 +45,7 @@ defmodule Omashiki.Config do
   """
 
   alias Omashiki.Credentials.Credential
-  alias Omashiki.Config.{HostCredential, Include, Machine, Registry, ResolvedJob}
+  alias Omashiki.Config.{HostCredential, Identity, Include, Machine, Registry, ResolvedJob}
   alias Omashiki.Runtimes.CacheGroup
   alias Omashiki.SupplyChain.Policy
 
@@ -77,6 +77,7 @@ defmodule Omashiki.Config do
   @empty %{
     credentials: [],
     host_credentials: [],
+    identities: [],
     caches: [],
     presets: [],
     repositories: [],
@@ -206,6 +207,7 @@ defmodule Omashiki.Config do
 
   def credentials, do: snapshot().credentials
   def host_credentials, do: snapshot().host_credentials
+  def identities, do: snapshot().identities
   def caches, do: snapshot().caches
   def presets, do: snapshot().presets
   def repositories, do: snapshot().repositories
@@ -333,6 +335,13 @@ defmodule Omashiki.Config do
 
   def get_host_credential(_), do: nil
 
+  @doc "Identity by name, or nil. The only place the resolved private key lives."
+  def get_identity(name) when is_binary(name) do
+    Enum.find(identities(), &(&1.name == name))
+  end
+
+  def get_identity(_), do: nil
+
   @doc "Cache group by TOML name, or nil."
   def get_cache(name) when is_binary(name) do
     Enum.find(caches(), &(&1.name == name))
@@ -424,6 +433,7 @@ defmodule Omashiki.Config do
     caches = build_caches!(section(map, "caches"))
     credentials = build_credentials!(section(map, "credentials"))
     host_credentials = HostCredential.build!(section(map, "host_credentials"))
+    identities = Identity.build!(section(map, "identities"))
 
     base_dir = if is_binary(path), do: Path.dirname(Path.expand(path)), else: File.cwd!()
     plugins_dir = plugins_dir_for(base_dir)
@@ -440,7 +450,8 @@ defmodule Omashiki.Config do
         credentials,
         host_credentials,
         base_dir,
-        plugins
+        plugins,
+        identities
       )
 
     limits = build_limits(section_map(map, "limits"))
@@ -449,6 +460,7 @@ defmodule Omashiki.Config do
     %{
       credentials: credentials,
       host_credentials: host_credentials,
+      identities: identities,
       caches: caches,
       presets: registry.presets,
       runtimes: registry.runtimes,

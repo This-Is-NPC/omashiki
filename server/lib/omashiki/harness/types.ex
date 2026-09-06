@@ -2,7 +2,7 @@ defmodule Omashiki.Plugin.Preset do
   @moduledoc "Immutable, configured preset resolved from the registry."
 
   @enforce_keys [:name, :adapter, :plugin, :options, :runtime, :launch_plan, :manifest]
-  defstruct @enforce_keys
+  defstruct @enforce_keys ++ [identities: []]
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -11,7 +11,8 @@ defmodule Omashiki.Plugin.Preset do
           options: map(),
           runtime: Omashiki.Runtime.Spec.t(),
           launch_plan: Omashiki.Harness.LaunchPlan.t(),
-          manifest: Omashiki.Plugin.Manifest.t() | nil
+          manifest: Omashiki.Plugin.Manifest.t() | nil,
+          identities: [Omashiki.Config.Identity.public()]
         }
 end
 

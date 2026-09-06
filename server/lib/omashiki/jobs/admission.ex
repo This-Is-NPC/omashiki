@@ -162,6 +162,8 @@ defmodule Omashiki.Jobs.Admission do
       key in [
         :api_key,
         "api_key",
+        :private_key,
+        "private_key",
         :ssh_key,
         "ssh_key",
         :ssh_key_passphrase,

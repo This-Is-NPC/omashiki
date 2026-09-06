@@ -1,16 +1,16 @@
 defmodule Omashiki.Presets do
   @moduledoc "Configured preset registry backed by declarative plugin manifests."
 
-  alias Omashiki.Config.Error
+  alias Omashiki.Config.{Error, Identity}
   alias Omashiki.Harness.LaunchPlan
   alias Omashiki.Plugin.{Interpreter, Loader, Manifest}
   alias Omashiki.Plugin.Preset
   alias Omashiki.Runtime.Spec
 
   @adapter Omashiki.Plugin.Interpreter
-  @preset_fields ~w(plugin options)
+  @preset_fields ~w(plugin options identities)
   @legacy_preset_fields ~w(adapter runtime image)
-  @snapshot_fields ~w(name plugin options runtime launch_plan manifest)
+  @snapshot_fields ~w(name plugin options runtime launch_plan manifest identities)
   @launch_plan_fields ~w(runtime transport startup readiness secret environment manifest llm_egress)
 
   def adapter(%Preset{adapter: adapter}), do: adapter
@@ -38,13 +38,19 @@ defmodule Omashiki.Presets do
 
   def profile(_), do: raise(ArgumentError, "environment has no resolved preset")
 
-  def build!(section, plugins) when is_map(section) do
+  def build!(section, plugins, identities \\ [])
+
+  def build!(section, plugins, identities) when is_map(section) do
+    identities_by_name = Map.new(identities, &{&1.name, &1})
+
     section
-    |> Enum.map(fn {name, attrs} -> build_preset_base!(name, attrs, plugins) end)
+    |> Enum.map(fn {name, attrs} ->
+      build_preset_base!(name, attrs, plugins, identities_by_name)
+    end)
     |> Enum.sort_by(& &1.name)
   end
 
-  def build!(_, _), do: raise(Error, "presets must be a table")
+  def build!(_, _, _), do: raise(Error, "presets must be a table")
 
   def finalize_preset!(%Preset{} = base, %Spec{} = runtime, where) do
     preset = %{base | runtime: runtime, launch_plan: nil}
@@ -68,7 +74,7 @@ defmodule Omashiki.Presets do
     %{preset | launch_plan: launch_plan}
   end
 
-  defp build_preset_base!(name, attrs, plugins) do
+  defp build_preset_base!(name, attrs, plugins, identities_by_name) do
     where = "presets.#{name}"
     validate_name!(name, where)
     attrs = require_table!(attrs, where)
@@ -81,6 +87,7 @@ defmodule Omashiki.Presets do
 
     manifest = Loader.fetch!(plugins, plugin)
     validate_options!(manifest, options, where)
+    identities = resolve_identities!(Map.get(attrs, "identities", []), identities_by_name, where)
 
     %Preset{
       name: name,
@@ -89,12 +96,43 @@ defmodule Omashiki.Presets do
       options: options,
       runtime: nil,
       launch_plan: nil,
-      manifest: manifest
+      manifest: manifest,
+      identities: identities
     }
   rescue
     error in [ArgumentError] ->
       raise Error, "invalid preset #{inspect(name)}: #{error.message}"
   end
+
+  # The preset is the agent; an identity is a face the agent wears. Names
+  # resolve against `[identities]` at load so a typo fails the boot, and only
+  # the public view is kept here — the key stays in `Config.identities/0`.
+  defp resolve_identities!(names, identities_by_name, where) when is_list(names) do
+    names
+    |> Enum.map(fn
+      name when is_binary(name) and name != "" ->
+        case Map.fetch(identities_by_name, name) do
+          {:ok, identity} ->
+            Identity.public(identity)
+
+          :error ->
+            raise Error, "#{where}.identities references unknown identity #{inspect(name)}"
+        end
+
+      other ->
+        raise Error,
+              "#{where}.identities must be an array of identity names, got #{inspect(other)}"
+    end)
+    |> tap(fn resolved ->
+      names = Enum.map(resolved, & &1.name)
+
+      if names != Enum.uniq(names),
+        do: raise(Error, "#{where}.identities lists the same identity more than once")
+    end)
+  end
+
+  defp resolve_identities!(_, _, where),
+    do: raise(Error, "#{where}.identities must be an array of identity names")
 
   defp validate_options!(manifest, options, where) do
     unless is_map(options), do: raise(Error, "#{where}.options must be a table")
@@ -138,6 +176,7 @@ defmodule Omashiki.Presets do
 
     launch_plan = launch_plan_from_snapshot(Map.get(profile, "launch_plan"), runtime)
     manifest = manifest_from_snapshot(Map.get(profile, "manifest"))
+    identities = identities_from_snapshot(Map.get(profile, "identities", []))
 
     %Preset{
       name: name,
@@ -146,12 +185,16 @@ defmodule Omashiki.Presets do
       options: options,
       runtime: runtime,
       launch_plan: launch_plan,
-      manifest: manifest
+      manifest: manifest,
+      identities: identities
     }
   end
 
   defp profile_from_snapshot!(profile, _runtime),
     do: raise(ArgumentError, "invalid resolved preset #{inspect(profile)}")
+
+  defp identities_from_snapshot(list) when is_list(list), do: Enum.map(list, &Identity.public/1)
+  defp identities_from_snapshot(_), do: []
 
   defp manifest_from_snapshot(nil), do: nil
   defp manifest_from_snapshot(%Manifest{} = manifest), do: manifest
