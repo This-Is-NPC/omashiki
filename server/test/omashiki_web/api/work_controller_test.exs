@@ -125,6 +125,40 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
     end
 
     @tag :unauthenticated
+    test "poll stamps attempts with the polling worker machine_id", %{
+      worker_token: token,
+      user: user,
+      token: token_record
+    } do
+      manager = Config.current_machine().name
+
+      {_job1, _attempt1} = job_fixture(user, token_record, %{status: "queued"})
+      {_job2, _attempt2} = job_fixture(user, token_record, %{status: "queued"})
+
+      conn =
+        build_conn()
+        |> worker_conn(token)
+        |> post(@worker_poll, %{machine_id: "node-1", free_slots: 1})
+
+      assert %{"offer" => %{"attempt_id" => attempt1_id}} = json_response(conn, 200)
+      attempt1 = Repo.get!(JobAttempt, attempt1_id)
+      assert attempt1.machine_id == "node-1"
+      assert attempt1.runner_id == "worker:node-1"
+      refute attempt1.machine_id == manager
+
+      conn =
+        build_conn()
+        |> worker_conn(token)
+        |> post(@worker_poll, %{machine_id: "node-2", free_slots: 1})
+
+      assert %{"offer" => %{"attempt_id" => attempt2_id}} = json_response(conn, 200)
+      attempt2 = Repo.get!(JobAttempt, attempt2_id)
+      assert attempt2.machine_id == "node-2"
+      assert attempt2.runner_id == "worker:node-2"
+      refute attempt2.machine_id == manager
+    end
+
+    @tag :unauthenticated
     test "poll claims a files job with payload and no repository snapshot", %{
       conn: conn,
       worker_token: token,

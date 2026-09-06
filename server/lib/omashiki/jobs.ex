@@ -66,7 +66,7 @@ defmodule Omashiki.Jobs do
         # inline made every claim scan and `FOR UPDATE` every expired attempt.
         case locked_job(job_id) do
           nil -> Repo.rollback(:not_found)
-          %Job{status: "queued"} = job -> claim_locked(job, runner_id, now, lease_ms)
+          %Job{status: "queued"} = job -> claim_locked(job, runner_id, now, lease_ms, opts)
           %Job{status: status} -> Repo.rollback({:not_queued, status})
         end
       end)
@@ -99,7 +99,7 @@ defmodule Omashiki.Jobs do
         Repo.transaction(fn ->
           case next_queued_job() do
             nil -> :empty
-            %Job{} = job -> claim_locked(job, runner_id, now(), lease_ms)
+            %Job{} = job -> claim_locked(job, runner_id, now(), lease_ms, opts)
           end
         end)
         |> case do
@@ -451,11 +451,12 @@ defmodule Omashiki.Jobs do
     |> Repo.delete_all()
   end
 
-  defp claim_locked(%Job{} = job, runner_id, now, lease_ms) do
-    # One read of this host's identity feeds both the reservation and the stamp,
-    # so the row that was decremented is always the row the attempt names.
-    machine = Config.current_machine().name
-    reserve_capacity!(machine)
+  defp claim_locked(%Job{} = job, runner_id, now, lease_ms, opts) do
+    # Manager execution_capacity tracks in-flight attempts on this host; worker
+    # polls stamp the attempt with the polling worker's id, not this name.
+    capacity_machine = Config.current_machine().name
+    attempt_machine = attempt_machine_id(runner_id, opts)
+    reserve_capacity!(capacity_machine)
     token = new_lease_token()
     expires_at = lease_until(now, lease_ms)
     attempt = current_attempt!(job)
@@ -465,7 +466,7 @@ defmodule Omashiki.Jobs do
     update_attempt!(attempt, %{
       status: "provisioning",
       runner_id: runner_id,
-      machine_id: machine,
+      machine_id: attempt_machine,
       lease_token: token,
       lease_expires_at: expires_at,
       heartbeat_at: now,
@@ -918,21 +919,44 @@ defmodule Omashiki.Jobs do
     end
   end
 
-  # Release on the row of the node that *reserved*, which is the attempt's own
-  # `machine_id` — never `current_machine/0`. Every caller here also runs on the node
-  # that did not claim: `recover_stale/1` sweeps expired leases cluster-wide, so
-  # node B routinely fails an attempt node A is holding a slot for. Releasing
-  # against the sweeper would leave A one slot short forever and drive B's
-  # counter below the reservations it actually holds — both rows wrong, silently.
+  # Release on the row that *reserved*. For direct claims that row is the
+  # attempt's `machine_id`; for remote worker polls the manager reserved against
+  # its own row while stamping the worker id on the attempt. Every caller here
+  # also runs on the node that did not claim: `recover_stale/1` sweeps expired
+  # leases cluster-wide, so node B routinely fails an attempt node A is holding a
+  # slot for. Releasing against the sweeper would leave A one slot short forever
+  # and drive B's counter below the reservations it actually holds — both rows
+  # wrong, silently.
   #
   # A `nil` node predates `job_attempts.machine_id` and therefore predates any
   # cluster: those reservations were counted in the singleton this table's
   # migration re-keyed to `'local'`, so that is where they are given back.
   defp release_capacity_if_reserved!(%JobAttempt{capacity_reserved: true} = attempt) do
-    release_capacity!(attempt.machine_id || @legacy_machine)
+    release_capacity!(capacity_machine_for(attempt))
   end
 
   defp release_capacity_if_reserved!(_), do: :ok
+
+  defp attempt_machine_id(runner_id, opts) do
+    cond do
+      machine_id = Keyword.get(opts, :machine_id) ->
+        machine_id
+
+      String.starts_with?(runner_id, "worker:") ->
+        String.replace_prefix(runner_id, "worker:", "")
+
+      true ->
+        Config.current_machine().name
+    end
+  end
+
+  defp capacity_machine_for(%JobAttempt{runner_id: "worker:" <> _}) do
+    Config.current_machine().name
+  end
+
+  defp capacity_machine_for(%JobAttempt{machine_id: nil}), do: @legacy_machine
+
+  defp capacity_machine_for(%JobAttempt{machine_id: machine_id}), do: machine_id
 
   defp release_capacity!(machine) do
     case Repo.update_all(

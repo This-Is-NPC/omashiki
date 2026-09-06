@@ -18,7 +18,7 @@ defmodule Omashiki.Worker.Inbox do
 
     runner_id = "worker:#{machine_id}"
 
-    case Jobs.claim_next(runner_id, free_slots: free_slots) do
+    case Jobs.claim_next(runner_id, free_slots: free_slots, machine_id: machine_id) do
       {:ok, :empty} ->
         {:ok, %{offer: nil}}
 
