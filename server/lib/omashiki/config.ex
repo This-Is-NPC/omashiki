@@ -28,6 +28,12 @@ defmodule Omashiki.Config do
   still in `:persistent_term` and still serving. A stale config is recoverable;
   a half-applied one is not.
 
+  ## Pieces
+
+  The root file may name `include` entries; `Omashiki.Config.Include` unions
+  them into the same map before validation, so the digest is of the united
+  snapshot regardless of how many files it came from.
+
   ## Failures
 
   `load!/1` raises `Omashiki.Config.Error` (never a raw `KeyError`) when:
@@ -39,7 +45,7 @@ defmodule Omashiki.Config do
   """
 
   alias Omashiki.Credentials.Credential
-  alias Omashiki.Config.{HostCredential, Machine, Registry, ResolvedJob}
+  alias Omashiki.Config.{HostCredential, Include, Machine, Registry, ResolvedJob}
   alias Omashiki.Runtimes.CacheGroup
   alias Omashiki.SupplyChain.Policy
 
@@ -111,6 +117,7 @@ defmodule Omashiki.Config do
 
     case Toml.decode_file(path) do
       {:ok, map} ->
+        map = Include.expand!(map, path)
         put_snapshot!(build_snapshot!(map, path, :toml, require_sections?: true))
 
       {:error, reason} ->
