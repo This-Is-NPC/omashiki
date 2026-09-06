@@ -23,6 +23,34 @@ defmodule Omashiki.Worker.Enroll.Plug do
     |> enroll()
   end
 
+  get "/internal/enroll" do
+    conn = authenticate(conn)
+
+    if conn.state == :sent do
+      conn
+    else
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(200, Jason.encode!(%{managers: Enroll.list()}))
+      |> halt()
+    end
+  end
+
+  delete "/internal/enroll/:id" do
+    conn = authenticate(conn)
+
+    cond do
+      conn.state == :sent ->
+        conn
+
+      Enroll.unenroll(id) == :ok ->
+        conn |> send_resp(204, "") |> halt()
+
+      true ->
+        send_error(conn, 500, "state_unwritable", "Could not persist enrollment state")
+    end
+  end
+
   match _ do
     send_error(conn, 404, "not_found", "Route not found")
   end

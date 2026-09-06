@@ -9,6 +9,18 @@
 #
 # Export OMASHIKI_WORKER_TOKEN and OMASHIKI_ENROLL_SECRET in .env before
 # starting the worker stack; the enroll script sends the same worker token.
+#
+# Many houses, the same machines: run this file once per house under its own
+# Compose project name, port, registry and worker token, then enroll the same
+# worker into each house with a distinct --manager-id:
+#   MANAGER_PORT=4010 OMASHIKI_CONFIG_HOST=/srv/ana/omashiki.toml \
+#     OMASHIKI_WORKER_TOKEN=$ANA_TOKEN docker compose -p ana -f examples/compose.manager.yml up -d
+#   MANAGER_PORT=4020 OMASHIKI_CONFIG_HOST=/srv/joao/omashiki.toml \
+#     OMASHIKI_WORKER_TOKEN=$JOAO_TOKEN docker compose -p joao -f examples/compose.manager.yml up -d
+#   mise run worker:enroll -- --manager-id ana  --manager-url http://ana.lan:4010  --worker-token $ANA_TOKEN
+#   mise run worker:enroll -- --manager-id joao --manager-url http://joao.lan:4020 --worker-token $JOAO_TOKEN
+# Each project gets its own pgdata volume; the worker keeps mirrors, state and
+# results apart per manager id and completes each job only to its own house.
 
 services:
   db:

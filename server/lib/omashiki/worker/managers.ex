@@ -5,26 +5,33 @@ defmodule Omashiki.Worker.Managers do
 
   @type entry :: %{id: String.t(), url: String.t(), token: String.t()}
 
+  @doc """
+  Every house this worker serves.
+
+  Boot-time environment (`OMASHIKI_MANAGERS`, or the single
+  `OMASHIKI_MANAGER_URL` + `OMASHIKI_WORKER_TOKEN`) is the bootstrap;
+  enrollment persisted by `Omashiki.Worker.State` is the product path. Both
+  are merged by id, and an enrolled entry replaces a bootstrap one.
+  """
   @spec configured() :: [entry()]
   def configured do
-    case Application.get_env(:omashiki, :worker_managers) do
-      list when is_list(list) and list != [] ->
-        list
-        |> Enum.map(&normalize/1)
-        |> Enum.reject(&is_nil/1)
-
-      _ ->
-        singleton()
-    end
+    (env_list() ++ env_singleton())
+    |> merge(State.managers())
   end
 
   @spec present?() :: boolean()
   def present?, do: configured() != []
 
-  defp singleton do
-    case env_singleton() do
-      [] -> state_singleton()
-      entries -> entries
+  defp merge(base, overrides) do
+    Enum.reduce(overrides, base, fn entry, acc ->
+      Enum.reject(acc, &(&1.id == entry.id)) ++ [entry]
+    end)
+  end
+
+  defp env_list do
+    case Application.get_env(:omashiki, :worker_managers) do
+      list when is_list(list) -> list |> Enum.map(&normalize/1) |> Enum.reject(&is_nil/1)
+      _ -> []
     end
   end
 
@@ -35,19 +42,6 @@ defmodule Omashiki.Worker.Managers do
     case normalize(%{url: url, token: token}) do
       nil -> []
       entry -> [entry]
-    end
-  end
-
-  defp state_singleton do
-    case State.load() do
-      {:ok, %{manager_url: url, worker_token: token}} ->
-        case normalize(%{url: url, token: token}) do
-          nil -> []
-          entry -> [entry]
-        end
-
-      :error ->
-        []
     end
   end
 

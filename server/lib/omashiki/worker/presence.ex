@@ -20,13 +20,30 @@ defmodule Omashiki.Worker.Presence do
     :ok
   end
 
-  @doc "Return every worker seen on this manager."
-  def list do
+  # A worker that stopped polling is not gone from the fleet, it is gone from
+  # *this house*: it may still serve the others. Liveness here is per manager.
+  @stale_after_seconds 30
+
+  @doc "Return every worker seen on this manager, flagged stale after #{@stale_after_seconds}s."
+  def list(now \\ now()) do
     ensure_table()
 
     :ets.tab2list(@table)
-    |> Enum.map(fn {_id, attrs} -> attrs end)
+    |> Enum.map(fn {_id, attrs} ->
+      Map.put(
+        attrs,
+        :stale?,
+        DateTime.diff(now, attrs.last_poll_at, :second) > @stale_after_seconds
+      )
+    end)
     |> Enum.sort_by(& &1.machine_id)
+  end
+
+  @doc "Forget every worker (test hermeticity)."
+  def reset do
+    ensure_table()
+    :ets.delete_all_objects(@table)
+    :ok
   end
 
   defp ensure_table do

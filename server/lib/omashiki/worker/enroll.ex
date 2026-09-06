@@ -34,17 +34,32 @@ defmodule Omashiki.Worker.Enroll do
   def valid_secret?(_), do: false
 
   @doc """
-  Accept enrollment credentials, persist them, and activate the poll loop.
+  Enroll one house: persist its entry (replacing a previous one with the same
+  id) and reconfigure the poll loop over every enrolled house.
   """
   @spec enroll(map()) :: :ok | {:error, term()}
   def enroll(params) when is_map(params) do
-    case State.save(params) do
-      :ok ->
-        Poller.configure()
-
-      :error ->
-        {:error, :invalid_body}
+    case State.enroll(params) do
+      {:ok, _managers} -> Poller.configure()
+      :error -> {:error, :invalid_body}
     end
+  end
+
+  @doc "Forget one house by id and stop polling it. Other houses are untouched."
+  @spec unenroll(String.t()) :: :ok | {:error, term()}
+  def unenroll(id) when is_binary(id) and id != "" do
+    case State.remove(id) do
+      {:ok, _managers} -> Poller.configure()
+      :error -> {:error, :state_unwritable}
+    end
+  end
+
+  def unenroll(_), do: {:error, :invalid_id}
+
+  @doc "Enrolled houses without their tokens."
+  @spec list() :: [%{id: String.t(), url: String.t()}]
+  def list do
+    Enum.map(State.managers(), &Map.take(&1, [:id, :url]))
   end
 
   defp secret do

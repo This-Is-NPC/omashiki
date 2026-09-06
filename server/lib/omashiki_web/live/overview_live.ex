@@ -49,6 +49,7 @@ defmodule OmashikiWeb.OverviewLive do
     |> assign(:running, Enum.count(jobs, &(&1.status in ["provisioning", "running"])))
     |> assign(:terminal_events, Api.recent_terminal_events(user))
     |> assign(:webhook_failures, Api.recent_webhook_failures(user))
+    |> assign(:workers, Omashiki.Worker.Presence.list())
     |> assign(:cache, cache)
   end
 
@@ -165,6 +166,30 @@ defmodule OmashikiWeb.OverviewLive do
           </ul>
           <p :if={@webhook_failures == []} class="font-mono text-xs text-on-surface-variant">
             No webhook failures.
+          </p>
+        </.panel>
+
+        <.panel title="Workers" meta="machines polling this house">
+          <ul :if={@workers != []} class="divide-y divide-outline-variant/40">
+            <li
+              :for={worker <- @workers}
+              class="flex flex-wrap items-baseline justify-between gap-3 py-3"
+            >
+              <span class="font-mono text-xs text-on-surface">{worker.machine_id}</span>
+              <span class={[
+                "font-mono text-xs uppercase",
+                if(worker.stale?, do: "text-error", else: "text-primary")
+              ]}>
+                {if worker.stale?, do: "stale", else: "live"}
+              </span>
+              <span class="font-mono text-xs text-on-surface-variant">{worker.free_slots} free</span>
+              <time class="font-mono text-xs text-on-surface-variant" datetime={worker.last_poll_at}>{Ops.age(
+                worker.last_poll_at
+              )} ago</time>
+            </li>
+          </ul>
+          <p :if={@workers == []} class="font-mono text-xs text-on-surface-variant">
+            No worker has polled this house.
           </p>
         </.panel>
 

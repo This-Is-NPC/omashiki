@@ -74,6 +74,62 @@ defmodule Omashiki.Worker.EnrollTest do
     assert_receive :registered, 2_000
   end
 
+  test "two houses enroll on one worker, and one can leave without the other noticing" do
+    ana = Bypass.open()
+    joao = Bypass.open()
+    parent = self()
+
+    for {bypass, name} <- [{ana, :ana}, {joao, :joao}] do
+      Bypass.stub(bypass, "POST", "/internal/work/register", fn conn ->
+        send(parent, {:registered, name})
+        Plug.Conn.resp(conn, 204, "")
+      end)
+
+      Bypass.stub(bypass, "POST", "/internal/work/poll", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"offer":null}))
+      end)
+    end
+
+    Application.delete_env(:omashiki, :manager_url)
+    Application.delete_env(:omashiki, :worker_token)
+
+    slots = start_supervised!({Slots, max: 2, name: unique_slots()})
+    start_supervised!({Poller, slots: slots})
+
+    assert enroll_house("ana", ana.port, "tok-ana").status == 204
+    assert_receive {:registered, :ana}, 2_000
+
+    assert enroll_house("joao", joao.port, "tok-joao").status == 204
+    assert_receive {:registered, :joao}, 2_000
+    assert_receive {:registered, :ana}, 2_000
+
+    assert [%{id: "ana", token: "tok-ana"}, %{id: "joao", token: "tok-joao"}] =
+             Omashiki.Worker.Managers.configured()
+
+    listing =
+      conn(:get, "/internal/enroll")
+      |> put_req_header("authorization", "Bearer enroll-secret")
+      |> call_plug()
+
+    assert listing.status == 200
+
+    assert %{"managers" => [%{"id" => "ana", "url" => _}, %{"id" => "joao", "url" => _}]} =
+             Jason.decode!(listing.resp_body)
+
+    refute listing.resp_body =~ "tok-"
+
+    removed =
+      conn(:delete, "/internal/enroll/ana")
+      |> put_req_header("authorization", "Bearer enroll-secret")
+      |> call_plug()
+
+    assert removed.status == 204
+    assert [%{id: "joao"}] = Omashiki.Worker.Managers.configured()
+    assert_receive {:registered, :joao}, 2_000
+  end
+
   test "returns 401 without bearer token" do
     conn =
       conn(:post, "/internal/enroll", "{}")
@@ -122,6 +178,20 @@ defmodule Omashiki.Worker.EnrollTest do
   test "Enroll.valid_secret?/1 respects configured secret" do
     assert Enroll.valid_secret?("enroll-secret")
     refute Enroll.valid_secret?("wrong")
+  end
+
+  defp enroll_house(id, port, token) do
+    body =
+      Jason.encode!(%{
+        "manager_id" => id,
+        "manager_url" => "http://127.0.0.1:#{port}",
+        "worker_token" => token
+      })
+
+    conn(:post, "/internal/enroll", body)
+    |> put_req_header("authorization", "Bearer enroll-secret")
+    |> put_req_header("content-type", "application/json")
+    |> call_plug()
   end
 
   defp call_plug(conn) do

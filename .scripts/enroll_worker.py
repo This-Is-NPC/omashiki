@@ -48,7 +48,7 @@ def is_loopback_manager_url(url: str) -> bool:
 
 
 
-def build_enroll_body(manager_url: str, worker_token: str) -> bytes:
+def build_enroll_body(manager_url: str, worker_token: str, manager_id: str | None = None) -> bytes:
     token = worker_token.strip()
     if not token:
         raise ValueError("worker_token must not be empty")
@@ -56,6 +56,10 @@ def build_enroll_body(manager_url: str, worker_token: str) -> bytes:
         "manager_url": normalize_base_url(manager_url),
         "worker_token": token,
     }
+    # One worker serves many houses; the id is how a house is told apart on
+    # the worker (mirrors, state, un-enrollment). Defaults to the URL host.
+    if manager_id and manager_id.strip():
+        payload["manager_id"] = manager_id.strip()
     return json.dumps(payload).encode()
 
 
@@ -64,6 +68,7 @@ def build_enroll_request(
     enroll_secret: str,
     manager_url: str,
     worker_token: str,
+    manager_id: str | None = None,
 ) -> urllib.request.Request:
     secret = enroll_secret.strip()
     if not secret:
@@ -71,7 +76,7 @@ def build_enroll_request(
 
     request = urllib.request.Request(
         f"{normalize_base_url(worker_url)}/internal/enroll",
-        data=build_enroll_body(manager_url, worker_token),
+        data=build_enroll_body(manager_url, worker_token, manager_id),
         method="POST",
     )
     request.add_header("Content-Type", "application/json")
@@ -98,8 +103,9 @@ def enroll(
     manager_url: str,
     worker_token: str,
     timeout: float = 30,
+    manager_id: str | None = None,
 ) -> None:
-    request = build_enroll_request(worker_url, enroll_secret, manager_url, worker_token)
+    request = build_enroll_request(worker_url, enroll_secret, manager_url, worker_token, manager_id)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             status = response.status
@@ -176,6 +182,11 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("OMASHIKI_ENROLL_SECRET"),
         help="Bearer secret for POST /internal/enroll (default: $OMASHIKI_ENROLL_SECRET)",
     )
+    parser.add_argument(
+        "--manager-id",
+        default=os.environ.get("OMASHIKI_MANAGER_ID"),
+        help="House id on the worker; enrolling it again replaces it (default: URL host)",
+    )
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument(
         "--health-timeout",
@@ -223,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
             manager_url=manager_url,
             worker_token=worker_token,
             timeout=args.timeout,
+            manager_id=args.manager_id,
         )
     except EnrollError as error:
         print(f"enroll failed: {error}", file=sys.stderr)

@@ -30,6 +30,29 @@ defmodule OmashikiWeb.OverviewLiveTest do
     assert visible_text(html) =~ "0 / 0"
   end
 
+  # Presence is per house: a machine polling this manager is "live" here, and
+  # its silence here says nothing about the other houses it serves.
+  test "workers that polled this house are listed with liveness", %{conn: conn} do
+    Omashiki.Worker.Presence.reset()
+    on_exit(fn -> Omashiki.Worker.Presence.reset() end)
+
+    Omashiki.Worker.Presence.touch("vps-1", %{free_slots: 3})
+
+    Omashiki.Worker.Presence.touch("vps-2", %{
+      free_slots: 0,
+      last_poll_at: DateTime.add(DateTime.utc_now(), -120, :second)
+    })
+
+    {:ok, _lv, html} = live(conn, ~p"/")
+    text = visible_text(html)
+
+    assert text =~ "vps-1"
+    assert text =~ "3 free"
+    assert text =~ "vps-2"
+    assert text =~ "stale"
+    assert text =~ "live"
+  end
+
   test "primary nav is only Home and Config", %{conn: conn} do
     {:ok, _lv, html} = live(conn, ~p"/")
 
