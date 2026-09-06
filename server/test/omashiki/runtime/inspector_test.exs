@@ -295,7 +295,9 @@ defmodule Omashiki.Runtime.InspectorTest do
           registry_digest: @old
         })
 
-      snapshot = Inspector.build({__MODULE__, :no_census, []})
+      # Pinned rather than read from `Config`: every DataCase test resets and
+      # reloads that global, and this module runs async alongside them.
+      snapshot = Inspector.build({__MODULE__, :no_census, []}, live_digest: @live)
       row = Enum.find(snapshot.rows, &(&1.attempt_id == attempt.id))
 
       refute is_nil(row), "the running attempt should appear in the census"

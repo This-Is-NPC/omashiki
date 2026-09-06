@@ -217,9 +217,11 @@ defmodule Omashiki.Runtime.Inspector do
   @doc false
   def build(:configured), do: build(configured_census())
 
-  def build(census) do
+  def build(census, opts \\ []) do
     machine_id = current_machine_id()
-    live_digest = live_digest()
+    # The live digest is global state; a caller that already knows which
+    # generation is live (tests, a rollout that just applied) may pin it.
+    live_digest = Keyword.get_lazy(opts, :live_digest, &live_digest/0)
 
     {containers, runtime} =
       case take_census(census) do
