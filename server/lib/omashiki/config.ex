@@ -87,9 +87,15 @@ defmodule Omashiki.Config do
     source: :empty
   }
 
-  @doc "Default path: repo-root `omashiki.toml` (two levels above `server/`)."
+  @doc "Default path: `OMASHIKI_CONFIG` when set, otherwise repo-root `omashiki.toml`."
   def default_path do
-    Path.expand("../../../omashiki.toml", __DIR__)
+    case System.get_env("OMASHIKI_CONFIG") do
+      path when is_binary(path) and path != "" ->
+        Path.expand(path)
+
+      _ ->
+        Path.expand("../../../omashiki.toml", __DIR__)
+    end
   end
 
   @doc """
