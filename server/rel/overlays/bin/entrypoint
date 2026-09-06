@@ -1,0 +1,16 @@
+#!/bin/sh
+# Production release entrypoint.
+# Workers start immediately; manager/embedded roles migrate first.
+set -e
+
+cd "$(dirname "$0")/.."
+
+case "${OMASHIKI_ROLE:-embedded}" in
+  worker)
+    exec ./bin/omashiki start "$@"
+    ;;
+  *)
+    ./bin/omashiki eval 'Omashiki.Release.migrate()'
+    exec ./bin/omashiki start "$@"
+    ;;
+esac

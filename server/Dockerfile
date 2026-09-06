@@ -25,9 +25,10 @@ RUN mix assets.deploy
 RUN mix compile
 RUN mix release
 
-FROM alpine:3.19
+FROM alpine:3.22
 
-RUN apk add --no-cache libstdc++ openssl ncurses-libs
+RUN apk add --no-cache libstdc++ openssl ncurses-libs git \
+ && git config --system --add safe.directory '*'
 
 WORKDIR /app
 
@@ -36,4 +37,5 @@ COPY --from=builder /app/_build/prod/rel/omashiki ./
 ENV HOME=/app
 EXPOSE 4000
 
-CMD ["bin/migrate"]
+CMD ["bin/entrypoint"]
+
