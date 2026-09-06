@@ -27,7 +27,7 @@ defmodule Omashiki.Runtime.Claims do
           "issued_at" => DateTime.utc_now(:second) |> DateTime.to_unix()
         })
 
-      {:ok, Phoenix.Token.sign(OmashikiWeb.Endpoint, salt(kind), claims)}
+      {:ok, Phoenix.Token.sign(signing_context(), salt(kind), claims)}
     end
   end
 
@@ -36,7 +36,7 @@ defmodule Omashiki.Runtime.Claims do
   @doc "Verify a token's signature, kind, shape, and short lifetime."
   def verify(kind, token) when kind in @kinds and is_binary(token) do
     with {:ok, claims} <-
-           Phoenix.Token.verify(OmashikiWeb.Endpoint, salt(kind), token,
+           Phoenix.Token.verify(signing_context(), salt(kind), token,
              max_age: @max_age_seconds
            ),
          :ok <- validate_claims(kind, claims) do
@@ -229,4 +229,28 @@ defmodule Omashiki.Runtime.Claims do
   end
 
   defp salt(kind), do: "omashiki.runtime." <> kind
+
+  # Workers mint claim tokens without starting Endpoint; read :secret_key_base from
+  # application env (same key the manager verifies) instead of Endpoint's ETS table.
+  defp signing_context do
+    case secret_key_base() do
+      key when is_binary(key) and byte_size(key) >= 20 ->
+        key
+
+      _ ->
+        if Process.whereis(OmashikiWeb.Endpoint),
+          do: OmashikiWeb.Endpoint,
+          else: raise_missing_signing_key!()
+    end
+  end
+
+  defp secret_key_base do
+    Application.get_env(:omashiki, OmashikiWeb.Endpoint, [])[:secret_key_base]
+  end
+
+  defp raise_missing_signing_key! do
+    raise ArgumentError,
+          "runtime claim signing requires SECRET_KEY_BASE in endpoint config " <>
+            "(worker nodes need the same value as the manager)"
+  end
 end

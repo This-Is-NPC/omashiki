@@ -331,6 +331,100 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
       assert npm =~ "manager.test:9090"
       assert npm =~ "/api/v1/supply-chain/deps/npm/"
     end
+
+    test "remote supply chain mints token from in-memory job without Repo lookup" do
+      Application.put_env(:omashiki, :manager_url, "http://manager.test:9090/")
+
+      job = %Job{
+        id: Ecto.UUID.generate(),
+        user_id: Ecto.UUID.generate(),
+        admitted_environment_digest: String.duplicate("c", 64),
+        status: "running"
+      }
+
+      policy =
+        Policy.parse!(%{"mode" => "allowlist", "packages" => %{"npm" => %{"left-pad" => "1.0.0"}}})
+
+      group = %CacheGroup{name: "deps", policy: policy}
+
+      delivery = ContainerManager.supply_chain_delivery("scope-1", job, [group], 1000, 1000)
+
+      npm = registry_env(delivery.env)
+      assert npm =~ "manager.test:9090"
+      assert npm =~ "/api/v1/supply-chain/deps/npm/"
+      refute npm =~ "npm//"
+    end
+  end
+
+  describe "active_job_scope_ids/0" do
+    alias Omashiki.Jobs.JobAttempt
+
+    setup do
+      original = Application.get_env(:omashiki, :boot_role)
+
+      on_exit(fn ->
+        if original,
+          do: Application.put_env(:omashiki, :boot_role, original),
+          else: Application.delete_env(:omashiki, :boot_role)
+      end)
+
+      :ok
+    end
+    test "returns [] when boot_role is :worker without querying Repo" do
+      Application.put_env(:omashiki, :boot_role, :worker)
+
+      assert ContainerManager.active_job_scope_ids() == []
+    end
+
+    test "returns active attempt scope ids when Repo is available" do
+      Application.put_env(:omashiki, :boot_role, :embedded)
+      job = job_fixture()
+      now = DateTime.utc_now(:microsecond)
+
+      attempt =
+        %JobAttempt{}
+        |> JobAttempt.changeset(%{
+          job_id: job.id,
+          number: 1,
+          status: "running",
+          lease_token: "lease",
+          lease_expires_at: DateTime.add(now, 60, :second),
+          heartbeat_at: now,
+          claimed_at: now,
+          capacity_reserved: true,
+          started_at: now
+        })
+        |> Repo.insert!()
+
+      assert ContainerManager.active_job_scope_ids() == ["job-#{attempt.id}"]
+    end
+  end
+
+  describe "harness_egress_delivery/4" do
+    test "remote manager egress uses HTTPS_PROXY without minting local claims" do
+      manager_url = "http://manager.test:4013"
+      job = %Job{id: Ecto.UUID.generate(), user_id: Ecto.UUID.generate(), status: "running"}
+
+      supply_env = ["npm_config_registry=http://manager.test:4013/api/v1/supply-chain/deps/npm/"]
+
+      delivery =
+        ContainerManager.harness_egress_delivery(:engine, supply_env, job, manager_url)
+
+      assert delivery.labels == %{"omashiki.llm_egress" => "restricted"}
+
+      https_proxy =
+        Enum.find_value(delivery.env, fn entry ->
+          case String.split(entry, "=", parts: 2) do
+            ["HTTPS_PROXY", url] -> url
+            _ -> nil
+          end
+        end)
+
+      assert https_proxy == manager_url
+      refute Enum.any?(delivery.env, &String.starts_with?(&1, "OMASHIKI_LLM_EGRESS_TOKEN="))
+      refute Enum.any?(delivery.env, &String.starts_with?(&1, "OMASHIKI_LLM_EGRESS_SOCKET="))
+      assert delivery.binds == []
+    end
   end
   defp runtime(handler) do
     %Spec{

@@ -180,6 +180,7 @@ defmodule Omashiki.Runtime.ContainerManager do
     do: {:reply, :ok, state}
 
   def handle_call({:cancel_scope, scope_id}, from, state) do
+    ensure_cancellation_table()
     :ets.insert(@cancellation_table, {scope_id})
     async_reply(from, fn -> state.operations.op_cancel_scope(scope_id) end)
     {:noreply, state}
@@ -621,14 +622,17 @@ defmodule Omashiki.Runtime.ContainerManager do
       end
 
       token_env =
-        case runtime_job do
-          %Job{} = job ->
-            case Omashiki.Runtime.Claims.issue("egress", job, %{}) do
+        cond do
+          remote? ->
+            []
+
+          match?(%Job{}, runtime_job) ->
+            case Omashiki.Runtime.Claims.issue("egress", runtime_job, %{}) do
               {:ok, token} -> ["OMASHIKI_LLM_EGRESS_TOKEN=#{token}"]
               _ -> raise ArgumentError, "isolated engine egress requires an active job"
             end
 
-          _ ->
+          true ->
             []
         end
 
@@ -681,14 +685,18 @@ defmodule Omashiki.Runtime.ContainerManager do
       [group | _] ->
         policy = group.policy
 
+        policy_digest = policy.digest || Policy.digest(policy)
+
         token =
-          Omashiki.SupplyChain.Proxy.sign_token(
-            job.id,
-            job.user_id,
-            job.admitted_environment_digest,
-            group.name,
-            policy.digest || Policy.digest(policy)
-          )
+          case Omashiki.Runtime.Claims.issue("supply_chain", job, %{
+                 token_owner: job.user_id,
+                 admitted_environment_digest: job.admitted_environment_digest,
+                 cache_group: group.name,
+                 policy_digest: policy_digest
+               }) do
+            {:ok, token} -> token
+            {:error, reason} -> raise ArgumentError, "supply chain token: #{inspect(reason)}"
+          end
 
         isolated? = policy.mode == :allowlist
         remote? = DataPlane.remote?(host_base_url)
@@ -1711,37 +1719,54 @@ defmodule Omashiki.Runtime.ContainerManager do
     end
   end
 
-  defp ensure_cancellation_table do
+  @doc false
+  def ensure_cancellation_table do
     case :ets.whereis(@cancellation_table) do
-      :undefined -> :ets.new(@cancellation_table, [:named_table, :public, :set])
-      _table -> @cancellation_table
+      :undefined ->
+        try do
+          :ets.new(@cancellation_table, [:named_table, :public, :set])
+        rescue
+          ArgumentError -> :ok
+        end
+
+        @cancellation_table
+
+      _table ->
+        @cancellation_table
     end
   end
 
   defp cancelled_scope?(scope_id) do
+    ensure_cancellation_table()
     :ets.member(@cancellation_table, scope_id)
   rescue
     ArgumentError -> false
   end
 
   defp clear_cancelled_scope(scope_id) do
+    ensure_cancellation_table()
     :ets.delete(@cancellation_table, scope_id)
     :ok
   rescue
     ArgumentError -> :ok
   end
+  @doc false
+  def active_job_scope_ids do
+    if Omashiki.Application.boot_role() == :worker or is_nil(Process.whereis(Omashiki.Repo)) do
+      []
+    else
+      import Ecto.Query
 
-  defp active_job_scope_ids do
-    import Ecto.Query
-
-    Omashiki.Repo.all(
-      from(attempt in Omashiki.Jobs.JobAttempt,
-        where: attempt.status in ["provisioning", "running"],
-        select: attempt.id
+      Omashiki.Repo.all(
+        from(attempt in Omashiki.Jobs.JobAttempt,
+          where: attempt.status in ["provisioning", "running"],
+          select: attempt.id
+        )
       )
-    )
-    |> Enum.map(&"job-#{&1}")
+      |> Enum.map(&"job-#{&1}")
+    end
   end
+
 
   # --- Compose helpers ---
 
