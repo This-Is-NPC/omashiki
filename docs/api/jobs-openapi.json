@@ -5,95 +5,1248 @@
     "version": "1.0.0",
     "description": "Authenticated queue admission and job runtime operations. Clients own jobs through the submitting bearer token; the local operator can inspect jobs owned by that operator."
   },
-  "servers": [{"url": "/api/v1"}],
-  "security": [{"bearerAuth": []}],
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
   "paths": {
     "/health": {
       "get": {
         "security": [],
-        "responses": {"200": {"description": "Service is healthy", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Health"}}}}}
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/repositories": {
-      "get": {"responses": {"200": {"$ref": "#/components/responses/DataRepositories"}, "401": {"$ref": "#/components/responses/Error"}}}
+      "get": {
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/DataRepositories"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     },
     "/environments": {
-      "get": {"responses": {"200": {"$ref": "#/components/responses/DataEnvironments"}, "401": {"$ref": "#/components/responses/Error"}}}
+      "get": {
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/DataEnvironments"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     },
     "/jobs": {
       "get": {
-        "parameters": [{"$ref": "#/components/parameters/Limit"}, {"$ref": "#/components/parameters/Status"}],
-        "responses": {"200": {"$ref": "#/components/responses/DataJobs"}, "400": {"$ref": "#/components/responses/Error"}, "401": {"$ref": "#/components/responses/Error"}}
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Status"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/DataJobs"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       },
       "post": {
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SubmitJob"}}}},
-        "responses": {"202": {"$ref": "#/components/responses/DataJob"}, "401": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}, "413": {"$ref": "#/components/responses/Error"}, "422": {"$ref": "#/components/responses/Error"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitJob"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "$ref": "#/components/responses/DataJob"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/jobs/batch": {
       "post": {
-        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SubmitBatch"}}}},
-        "responses": {"202": {"$ref": "#/components/responses/DataJobs"}, "401": {"$ref": "#/components/responses/Error"}, "413": {"$ref": "#/components/responses/Error"}, "422": {"$ref": "#/components/responses/Error"}}
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitBatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "$ref": "#/components/responses/DataJobs"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/jobs/{id}": {
-      "parameters": [{"$ref": "#/components/parameters/JobId"}],
-      "get": {"responses": {"200": {"$ref": "#/components/responses/DataJob"}, "401": {"$ref": "#/components/responses/Error"}, "403": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}}}
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/JobId"
+        }
+      ],
+      "get": {
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/DataJob"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     },
     "/jobs/{id}/result": {
-      "get": {"parameters": [{"$ref": "#/components/parameters/JobId"}], "responses": {"200": {"$ref": "#/components/responses/DataResult"}, "409": {"$ref": "#/components/responses/Error"}}}
+      "get": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/DataResult"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     },
     "/jobs/{id}/cancel": {
-      "post": {"parameters": [{"$ref": "#/components/parameters/JobId"}], "responses": {"200": {"$ref": "#/components/responses/DataJob"}, "403": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}}}
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/DataJob"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     },
     "/jobs/{id}/retry": {
-      "post": {"parameters": [{"$ref": "#/components/parameters/JobId"}], "responses": {"202": {"$ref": "#/components/responses/DataJob"}, "403": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}}}
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobId"
+          }
+        ],
+        "responses": {
+          "202": {
+            "$ref": "#/components/responses/DataJob"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     },
     "/jobs/{id}/events": {
-      "get": {"parameters": [{"$ref": "#/components/parameters/JobId"}, {"$ref": "#/components/parameters/LastEventId"}], "responses": {"200": {"description": "Replayable SSE stream", "content": {"text/event-stream": {"schema": {"type": "string"}}}}, "400": {"$ref": "#/components/responses/Error"}, "403": {"$ref": "#/components/responses/Error"}}}
+      "get": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobId"
+          },
+          {
+            "$ref": "#/components/parameters/LastEventId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Replayable SSE stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     },
     "/jobs/{id}/events/stream": {
-      "get": {"parameters": [{"$ref": "#/components/parameters/JobId"}, {"$ref": "#/components/parameters/LastEventId"}], "responses": {"200": {"description": "Replayable SSE stream", "content": {"text/event-stream": {"schema": {"type": "string"}}}}, "400": {"$ref": "#/components/responses/Error"}, "403": {"$ref": "#/components/responses/Error"}}}
+      "get": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobId"
+          },
+          {
+            "$ref": "#/components/parameters/LastEventId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Replayable SSE stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     },
     "/jobs/{id}/events/history": {
-      "get": {"parameters": [{"$ref": "#/components/parameters/JobId"}, {"$ref": "#/components/parameters/LastEventId"}], "responses": {"200": {"description": "Durable event history", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DataEvents"}}}}, "400": {"$ref": "#/components/responses/Error"}}}
+      "get": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobId"
+          },
+          {
+            "$ref": "#/components/parameters/LastEventId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Durable event history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataEvents"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     },
     "/jobs/{id}/webhook-deliveries": {
-      "get": {"parameters": [{"$ref": "#/components/parameters/JobId"}], "responses": {"200": {"description": "Operator-safe webhook delivery status", "content": {"application/json": {"schema": {"type": "object", "required": ["data"], "properties": {"data": {"type": "array", "items": {"type": "object"}}}}}}}, "403": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}}}
+      "get": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Operator-safe webhook delivery status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sessions/signup": {
+      "post": {
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Signup"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Token issued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataToken"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session request refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Session request refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Session request refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Session request refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/issue_token": {
+      "post": {
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCredentials"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Token issued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataToken"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Session request refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Session request refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Session request refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
-    "securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}},
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
     "parameters": {
-      "JobId": {"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}},
-      "Limit": {"in": "query", "name": "limit", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}},
-      "Status": {"in": "query", "name": "status", "schema": {"type": "string", "enum": ["blocked", "queued", "provisioning", "running", "succeeded", "failed", "cancelled"]}},
-      "LastEventId": {"in": "header", "name": "Last-Event-ID", "schema": {"type": "string", "format": "uuid"}}
+      "JobId": {
+        "in": "path",
+        "name": "id",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "Limit": {
+        "in": "query",
+        "name": "limit",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50
+        }
+      },
+      "Status": {
+        "in": "query",
+        "name": "status",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "blocked",
+            "queued",
+            "provisioning",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled"
+          ]
+        }
+      },
+      "LastEventId": {
+        "in": "header",
+        "name": "Last-Event-ID",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
     },
     "responses": {
-      "Error": {"description": "Stable API error", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
-      "DataJob": {"description": "Job", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DataJob"}}}},
-      "DataJobs": {"description": "Jobs", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DataJobs"}}}},
-      "DataResult": {"description": "Terminal result", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DataResult"}}}},
-      "DataRepositories": {"description": "Registered repositories", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DataRepositories"}}}},
-      "DataEnvironments": {"description": "Registered environments", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DataEnvironments"}}}}
+      "Error": {
+        "description": "Stable API error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "DataJob": {
+        "description": "Job",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DataJob"
+            }
+          }
+        }
+      },
+      "DataJobs": {
+        "description": "Jobs",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DataJobs"
+            }
+          }
+        }
+      },
+      "DataResult": {
+        "description": "Terminal result",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DataResult"
+            }
+          }
+        }
+      },
+      "DataRepositories": {
+        "description": "Registered repositories",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DataRepositories"
+            }
+          }
+        }
+      },
+      "DataEnvironments": {
+        "description": "Registered environments",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DataEnvironments"
+            }
+          }
+        }
+      }
     },
     "schemas": {
-      "Health": {"type": "object", "required": ["status"], "properties": {"status": {"const": "ok"}}},
-      "Error": {"type": "object", "required": ["error"], "properties": {"error": {"type": "object", "required": ["code", "message", "details"], "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "details": {"type": "object", "additionalProperties": true}}}}},
-      "Job": {"type": "object", "required": ["id", "status", "attempt", "idempotency_key", "repo", "environment"], "properties": {"id": {"type": "string", "format": "uuid"}, "schema_version": {"type": "integer"}, "idempotency_key": {"type": "string"}, "correlation_id": {"type": "string"}, "repo": {"type": "string"}, "environment": {"type": "string"}, "payload": {}, "priority": {"type": "integer", "minimum": 0, "maximum": 3}, "status": {"type": "string"}, "attempt": {"type": "integer", "minimum": 1}, "parent_job_id": {"type": ["string", "null"], "format": "uuid"}, "submitted_at": {"type": ["string", "null"], "format": "date-time"}, "queued_at": {"type": ["string", "null"], "format": "date-time"}, "started_at": {"type": ["string", "null"], "format": "date-time"}, "finished_at": {"type": ["string", "null"], "format": "date-time"}}},
-      "DataJob": {"type": "object", "required": ["data"], "properties": {"data": {"$ref": "#/components/schemas/Job"}}},
-      "DataJobs": {"type": "object", "required": ["data"], "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Job"}}}},
-      "SubmitJob": {"type": "object", "required": ["schema_version", "idempotency_key", "correlation_id", "repo", "environment", "payload", "priority"], "properties": {"schema_version": {"const": 1}, "idempotency_key": {"type": "string", "minLength": 1}, "correlation_id": {"type": "string", "minLength": 1}, "repo": {"type": "string", "minLength": 1}, "environment": {"type": "string", "minLength": 1}, "payload": {}, "priority": {"type": "integer", "minimum": 0, "maximum": 3}}},
-      "SubmitBatch": {"type": "object", "required": ["schema_version", "correlation_id", "jobs"], "properties": {"schema_version": {"const": 1}, "correlation_id": {"type": "string", "minLength": 1}, "jobs": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "object"}}}},
-      "Result": {"type": "object", "properties": {"job_id": {"type": "string", "format": "uuid"}, "attempt": {"type": "integer"}, "status": {"type": "string"}, "result": {}, "error": {}, "finished_at": {"type": ["string", "null"], "format": "date-time"}}},
-      "DataResult": {"type": "object", "required": ["data"], "properties": {"data": {"$ref": "#/components/schemas/Result"}}},
-      "Event": {"type": "object", "required": ["event_id", "job_id", "sequence", "status"], "properties": {"event_id": {"type": "string", "format": "uuid"}, "job_id": {"type": "string", "format": "uuid"}, "attempt": {"type": "integer"}, "sequence": {"type": "integer"}, "type": {"type": "string"}, "status": {"type": "string"}, "data": {"type": "object"}}},
-      "DataEvents": {"type": "object", "required": ["data"], "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Event"}}}},
-      "Repository": {"type": "object", "required": ["name", "base_branch"], "properties": {"name": {"type": "string"}, "base_branch": {"type": "string"}}},
-      "Environment": {"type": "object", "required": ["name", "preset", "plugin", "runtime", "backend", "distribution", "image"], "properties": {"name": {"type": "string"}, "preset": {"type": "string"}, "plugin": {"type": "string"}, "runtime": {"type": "string"}, "backend": {"type": "string"}, "distribution": {"type": "string"}, "image": {"type": "string"}, "timeout_ms": {"type": "integer"}, "network": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "resources": {"type": "object"}}},
-      "DataRepositories": {"type": "object", "required": ["data"], "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Repository"}}}},
-      "DataEnvironments": {"type": "object", "required": ["data"], "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Environment"}}}}
+      "Health": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "const": "ok"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "details"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "attempt",
+          "idempotency_key",
+          "repo",
+          "environment"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "schema_version": {
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "correlation_id": {
+            "type": "string"
+          },
+          "repo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "environment": {
+            "type": "string"
+          },
+          "payload": {},
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "blocked",
+              "queued",
+              "provisioning",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "attempt": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "submitted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "queued_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "DataJob": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Job"
+          }
+        }
+      },
+      "DataJobs": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            }
+          }
+        }
+      },
+      "SubmitJob": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "idempotency_key",
+          "correlation_id",
+          "environment",
+          "payload",
+          "priority"
+        ],
+        "properties": {
+          "schema_version": {
+            "const": 1
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "correlation_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "repo": {
+            "type": "string",
+            "minLength": 1
+          },
+          "environment": {
+            "type": "string",
+            "minLength": 1
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Payload"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Dependency"
+            }
+          },
+          "base": {
+            "type": "string",
+            "description": "Optional Git base selection."
+          }
+        },
+        "additionalProperties": false,
+        "description": "A Git environment requires repo and payload.title or payload.branch. Files and none environments permit omitted repo."
+      },
+      "SubmitBatch": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "correlation_id",
+          "jobs"
+        ],
+        "properties": {
+          "schema_version": {
+            "const": 1
+          },
+          "correlation_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "jobs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/BatchJob"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "Result": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attempt": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "result": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Sink-specific metadata. Files results include blob_digest and manager-local blob_path. None results include sink, job_id, and changed_bytes."
+          },
+          "error": {},
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "base_sha": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "head_sha": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "worktree_clean": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        }
+      },
+      "DataResult": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Result"
+          }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "required": [
+          "event_id",
+          "job_id",
+          "sequence",
+          "status"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attempt": {
+            "type": "integer"
+          },
+          "sequence": {
+            "type": "integer"
+          },
+          "type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object"
+          }
+        }
+      },
+      "DataEvents": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            }
+          }
+        }
+      },
+      "Repository": {
+        "type": "object",
+        "required": [
+          "name",
+          "base_branch"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "base_branch": {
+            "type": "string"
+          }
+        }
+      },
+      "Environment": {
+        "type": "object",
+        "required": [
+          "name",
+          "preset",
+          "plugin",
+          "runtime",
+          "backend",
+          "distribution",
+          "image"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "preset": {
+            "type": "string"
+          },
+          "plugin": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "backend": {
+            "type": "string"
+          },
+          "distribution": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string"
+          },
+          "timeout_ms": {
+            "type": "integer"
+          },
+          "network": {
+            "type": "string"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "resources": {
+            "type": "object"
+          },
+          "handler": {
+            "type": "string"
+          }
+        }
+      },
+      "DataRepositories": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Repository"
+            }
+          }
+        }
+      },
+      "DataEnvironments": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Environment"
+            }
+          }
+        }
+      },
+      "Payload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "instruction"
+        ],
+        "description": "Neutral V2 payload. Maximum encoded size: 1 MiB. Git admission requires title or branch.",
+        "properties": {
+          "instruction": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Nonblank UTF-8 instruction."
+          },
+          "context": {
+            "type": "object"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Task title. Must produce a nonempty branch slug and cannot contain a slash."
+          },
+          "branch": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Valid Git branch name. Takes precedence over title."
+          }
+        }
+      },
+      "Dependency": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1
+          },
+          "on_failure": {
+            "enum": [
+              "cancel",
+              "block",
+              "proceed"
+            ],
+            "default": "cancel"
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "id"
+            ],
+            "not": {
+              "required": [
+                "ref"
+              ]
+            }
+          },
+          {
+            "required": [
+              "ref"
+            ],
+            "not": {
+              "required": [
+                "id"
+              ]
+            }
+          }
+        ]
+      },
+      "BatchJob": {
+        "type": "object",
+        "required": [
+          "ref",
+          "idempotency_key",
+          "environment",
+          "payload",
+          "priority"
+        ],
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "repo": {
+            "type": "string",
+            "minLength": 1
+          },
+          "environment": {
+            "type": "string",
+            "minLength": 1
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Payload"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Dependency"
+            }
+          },
+          "base": {
+            "type": "string",
+            "description": "Optional Git base selection."
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false,
+        "description": "A Git environment requires repo and payload.title or payload.branch. Files and none environments permit omitted repo."
+      },
+      "SessionCredentials": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "Signup": {
+        "type": "object",
+        "required": [
+          "email",
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        }
+      },
+      "SessionError": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "detail": {},
+          "retry_after_ms": {
+            "type": "integer"
+          }
+        }
+      },
+      "DataToken": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "token"
+            ],
+            "properties": {
+              "token": {
+                "type": "string",
+                "description": "Plaintext returned once."
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "expires_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
