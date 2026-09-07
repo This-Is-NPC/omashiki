@@ -241,6 +241,12 @@ the **manager** API after the worker disk is wiped.
 
 ### Phase 2 — Worker owns the slot
 
+**Status (2026-09-06): shipped.** `Omashiki.Worker.Slots` is the
+authority; poll carries `free_slots`; accept/reject is atomic on the
+worker; manager `execution_capacity` counts in-flight attempts and stamps
+the worker id on the attempt. Evidence: `test/omashiki/worker/poller_test.exs`
+(max=2 accepts two, rejects a third) and `mise run e2e:two-houses`.
+
 Local semaphore is the authority. `execution_capacity` on the manager
 becomes "attempts this manager currently has on workers", not "containers
 on this box". `Accept` / reject is atomic on the worker. `Poll` carries
@@ -255,6 +261,13 @@ by keeping a Postgres capacity row that looks like today's
 `max_concurrent_containers`.
 
 ### Phase 3 — N:1 and N:M
+
+**Status (2026-09-06): shipped.** Managers are a list (bootstrap env merged
+under persisted enrollment), round-robin poll, mirrors keyed by manager id,
+`Complete` and blobs only to the owner, heartbeat/cancel on the right
+manager. Evidence: `mise run e2e:two-houses` — two managers, one worker,
+one job each in parallel, the other house answers 404, kill/restart of one
+house leaves the other untouched.
 
 Worker config is a list of managers. Round-robin poll, isolated
 workspaces, `Complete` only to the owner, heartbeat/cancel on the right
@@ -285,6 +298,28 @@ budget as cluster truth):
 Secrets: LLM keys stay on the manager as `${env:VAR}`. Git push
 credentials stay on the worker host (already forbidden inside the
 container). A missing `${env:VAR}` still aborts boot.
+
+Packaged operator starting points: [examples/compose.manager.yml](../examples/compose.manager.yml),
+[examples/compose.worker.yml](../examples/compose.worker.yml), and
+[examples/worker.toml](../examples/worker.toml). After both containers are up,
+run `mise run worker:enroll` from the laptop to POST manager credentials to the
+worker enroll listener. Enrollment is a list keyed by house id: run
+`worker:enroll` once per house with a distinct `--manager-id`, and
+`DELETE /internal/enroll/:id` on the worker to leave one house without
+touching the others.
+
+The worker Compose file requires `OMASHIKI_HOST_HOME` (this machine's home
+directory) so Git mirrors under `~/.cache/omashiki` resolve to the same paths
+inside the worker container and on the host Docker daemon. The enroll
+`--manager-url` must be reachable **from the worker container** — use
+`host.docker.internal`, a LAN address, Tailscale, or a public URL, not the
+laptop's `127.0.0.1`. `enroll_worker.py` rejects loopback manager URLs unless
+`--allow-localhost` is passed explicitly. `mise run e2e:compose-worker` proves
+the packaged manager+worker path end-to-end.
+
+Two houses on one **host** (not Compose) each need their own
+`OMASHIKI_SUPPLY_CHAIN_SOCKET_PATH`; the supply-chain bridge binds a Unix
+socket at a fixed per-user path otherwise.
 
 ## What This Replaces
 
@@ -333,8 +368,8 @@ environments. Fan-in does not change the worker protocol.
 | --- | --- |
 | 0 | Mix tests: `LocalWorker` for `git`, `files`, `none`; existing dispatch durability tests still pass; `mise run e2e:overture` |
 | 1 | One manager + one remote worker process (second BEAM or VM); `git` result on the canonical remote; `files` result on manager after worker tmp wipe; refuse path when the snapshot image is missing |
-| 2 | Two manager apps, two test databases, one worker with `max=2`; over-accept is impossible; lease expiry is per manager |
-| 3 | Same as 2 plus concurrent A+B jobs and independent recovery |
+| 2 | Two manager apps, two test databases, one worker with `max=2`; over-accept is impossible; lease expiry is per manager — `mise run e2e:two-houses` |
+| 3 | Same as 2 plus concurrent A+B jobs and independent recovery — `mise run e2e:two-houses` (kill/restart of one house) |
 
 VM E2E (`mise run e2e:vm`) is the place for 1:N across hosts. N:1 can stay
 in mix with two Repo configs until a second VM manager is worth the cost.

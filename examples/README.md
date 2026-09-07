@@ -9,12 +9,69 @@ templates to copy, not files it will find on its own.
 | [single-node.omashiki.toml](single-node.omashiki.toml) | One machine runs PostgreSQL, the API, the UI, and every container. What `mise run up` expects. |
 | [multi-node.omashiki.toml](multi-node.omashiki.toml) | Several machines share one PostgreSQL queue: declared `[nodes.*]`, a canonical Git remote, per-machine capacity. |
 | [loadtest.omashiki.toml](loadtest.omashiki.toml) | Appendable fragment: the load-test presets, credentials, and environments driven by `.scripts/loadtest/drive.py`. |
+| [compose.manager.yml](compose.manager.yml) | Docker Compose for the manager control plane (PostgreSQL + `OMASHIKI_ROLE=manager`). |
+| [compose.worker.yml](compose.worker.yml) | Docker Compose for a remote worker (`OMASHIKI_ROLE=worker`, enroll listener on 4012). |
+| [worker.toml](worker.toml) | Machine file for workers: host limits and Docker socket path. Manager URL and token arrive via enrollment. |
+| [handler/github_issue_handler.py](handler/github_issue_handler.py) | A client at the door: verifies a GitHub webhook, turns a labelled issue into one `POST /api/v1/jobs` envelope, verifies the signed terminal webhook. Stdlib only, with tests. |
 
 ```bash
 cp examples/single-node.omashiki.toml omashiki.toml
 cp .env.example .env
 mise run up
 ```
+
+## Manager and worker Compose
+
+The walking-skeleton split uses the same release image twice:
+
+```bash
+cp examples/single-node.omashiki.toml omashiki.toml
+cp .env.example .env   # set OMASHIKI_WORKER_TOKEN and OMASHIKI_ENROLL_SECRET
+
+docker compose -f examples/compose.manager.yml up -d --build
+docker compose -f examples/compose.worker.yml up -d --build
+
+# laptop → worker enroll listener
+mise run worker:enroll
+```
+
+`compose.manager.yml` mounts `omashiki.toml` from the repository root.
+`compose.worker.yml` mounts [worker.toml](worker.toml), the host Docker
+socket, and `${OMASHIKI_HOST_HOME}/.cache/omashiki` at the same absolute path
+so Git mirrors match the host daemon. Set `OMASHIKI_HOST_HOME` in `.env` to
+this machine's home directory before starting the worker stack. Enrollment is a
+one-shot HTTP POST from the laptop; see
+[distributed execution](../docs/distributed-execution.md).
+
+When the worker runs on another machine, `--manager-url` (and
+`OMASHIKI_MANAGER_URL` in `.env`) cannot be `127.0.0.1` or `localhost` on the
+laptop — the worker host and the job containers it starts must be able to reach
+the manager over the network (LAN, Tailscale, `host.docker.internal`, or a public
+address). Pass `--allow-localhost` to `enroll_worker.py` only for same-host
+tests that deliberately use loopback.
+
+`mise run e2e:compose-worker` exercises the packaged Compose path end-to-end.
+
+### Many houses, the same machines
+
+Run `compose.manager.yml` once per house under its own Compose project name,
+port, registry and worker token, then enroll the same worker into each house
+with a distinct `--manager-id` (the header of that file shows the exact
+commands). The worker keeps mirrors, state and results apart per house id and
+completes each job only to its own house. `mise run e2e:two-houses` proves it
+on one host, including killing and restarting one house.
+
+## Agent identities and the handler at the door
+
+`[identities.<name>]` in the house registry gives the agent a face (first kind:
+`github-app`, key as `${env:VAR}` only); a preset wears it with
+`identities = ["ana-bot"]`, and while a job runs the sandbox reaches that
+identity as an MCP server named `ana-bot` on the tools data plane. The house
+acts as the App; the sandbox and the worker never see the key.
+
+The handler in [handler/](handler/github_issue_handler.py) is the other side:
+GitHub events become job envelopes carrying only an environment name,
+instruction and context, and the signed terminal webhook comes back to it.
 
 ## Secrets
 

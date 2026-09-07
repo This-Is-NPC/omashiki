@@ -68,6 +68,10 @@ Install the hook once per checkout with `mise run hooks:install`.
 | `mise run ci:server:fast` | ExUnit excluding `:integration`, `:real_opencode`, `:real_claude`, and `:real_jcode`. |
 | `mise run ci:server:integration` | ExUnit `--only integration` (no real provider). |
 | `mise run e2e:overture` | Standard runc/jcode E2E with an owned deterministic LLM stub. |
+| `mise run e2e:host-worker` | Two-process host manager+worker path with host Docker (port 4011, DB `omashiki_host_e2e`). |
+| `mise run e2e:compose-worker` | Packaged Compose manager+worker path (ports 4013/4014, release images, HTTP enroll). |
+| `mise run e2e:two-houses` | Two managers, one worker enrolled into both (ports 4021/4022, enroll 4023): isolation plus kill/restart of one house. |
+| `mise run worker:enroll` | POST manager URL and worker token to a worker enroll listener (reads `OMASHIKI_*` from `.env`; `--manager-id` per house). |
 | `mise run e2e:overture:runc:opencode` | Opt-in OpenCode E2E with Docker `runc` using isolated host snapshots. |
 | `mise run e2e:overture:runc:claude` | Opt-in Claude Code E2E with Docker `runc` using the isolated credentials snapshot. |
 | `mise run e2e:overture:jcode:lmstudio` | Opt-in jcode E2E against `OMASHIKI_LOCAL_LLM_BASE_URL`. |
