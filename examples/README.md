@@ -41,7 +41,7 @@ socket, and `${OMASHIKI_HOST_HOME}/.cache/omashiki` at the same absolute path
 so Git mirrors match the host daemon. Set `OMASHIKI_HOST_HOME` in `.env` to
 this machine's home directory before starting the worker stack. Enrollment is a
 one-shot HTTP POST from the laptop; see
-[distributed execution](../docs/distributed-execution.md).
+[distributed execution](../docs/internal/distributed-execution.md).
 
 When the worker runs on another machine, `--manager-url` (and
 `OMASHIKI_MANAGER_URL` in `.env`) cannot be `127.0.0.1` or `localhost` on the
@@ -116,7 +116,7 @@ relative to single node:
 Implemented today: the canonical remote, node identity, and per-node capacity
 rows — still one process shape, every node mounting the same PostgreSQL.
 The target is a manager that owns the database and workers that pull snapshots
-without `Repo`. See [manager and worker plan](../docs/distributed-execution.md).
+without `Repo`. See [manager and worker plan](../docs/internal/distributed-execution.md).
 
 ## `mcp.json.example`
 

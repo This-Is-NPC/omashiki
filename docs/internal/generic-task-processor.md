@@ -164,11 +164,11 @@ that is one branch in provisioning plus one relaxed validation.
 
 ## References
 
-- [V1 job envelope](../server/lib/omashiki/jobs/contract/v1.ex)
-- [V2 neutral payload](../server/lib/omashiki/jobs/contract/payload_v2.ex)
-- [Job lifecycle](../server/lib/omashiki/jobs.ex)
-- [Git artifact boundary](../server/lib/omashiki/jobs/git_artifact.ex)
-- [Tool proxy](../server/lib/omashiki/tools/proxy.ex)
-- [MCP configuration](../server/lib/omashiki/tools/mcp_config.ex)
-- [Configuration registry](../server/lib/omashiki/config/registry.ex)
+- [V1 job envelope](../../server/lib/omashiki/jobs/contract/v1.ex)
+- [V2 neutral payload](../../server/lib/omashiki/jobs/contract/payload_v2.ex)
+- [Job lifecycle](../../server/lib/omashiki/jobs.ex)
+- [Git artifact boundary](../../server/lib/omashiki/jobs/git_artifact.ex)
+- [Tool proxy](../../server/lib/omashiki/tools/proxy.ex)
+- [MCP configuration](../../server/lib/omashiki/tools/mcp_config.ex)
+- [Configuration registry](../../server/lib/omashiki/config/registry.ex)
 - [Requirements](requirements.md)

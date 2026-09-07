@@ -193,13 +193,13 @@ argument inside `oban_jobs.args` is JSON and is not a relational foreign key.
 
 ## Code References
 
-- [Initial schema](../server/priv/repo/migrations/20260101000000_initial_schema.exs)
-- [Job schema](../server/lib/omashiki/jobs/job.ex)
-- [Attempt schema](../server/lib/omashiki/jobs/job_attempt.ex)
-- [Step schema](../server/lib/omashiki/jobs/job_step.ex)
-- [Event schema](../server/lib/omashiki/jobs/job_event.ex)
-- [Delivery schema](../server/lib/omashiki/jobs/webhook_delivery.ex)
-- [Admission](../server/lib/omashiki/jobs/admission.ex)
-- [V1 job envelope](../server/lib/omashiki/jobs/contract/v1.ex)
-- [V2 neutral payload](../server/lib/omashiki/jobs/contract/payload_v2.ex)
-- [Declared configuration](../omashiki.toml)
+- [Initial schema](../../server/priv/repo/migrations/20260101000000_initial_schema.exs)
+- [Job schema](../../server/lib/omashiki/jobs/job.ex)
+- [Attempt schema](../../server/lib/omashiki/jobs/job_attempt.ex)
+- [Step schema](../../server/lib/omashiki/jobs/job_step.ex)
+- [Event schema](../../server/lib/omashiki/jobs/job_event.ex)
+- [Delivery schema](../../server/lib/omashiki/jobs/webhook_delivery.ex)
+- [Admission](../../server/lib/omashiki/jobs/admission.ex)
+- [V1 job envelope](../../server/lib/omashiki/jobs/contract/v1.ex)
+- [V2 neutral payload](../../server/lib/omashiki/jobs/contract/payload_v2.ex)
+- [Declared configuration](../../omashiki.toml)

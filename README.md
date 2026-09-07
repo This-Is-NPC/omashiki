@@ -141,7 +141,7 @@ ports 4013/4014), run `mise run e2e:compose-worker`.
 
 Distributed manager and worker Compose examples live under [`examples/`](examples/README.md); enroll a remote worker with `mise run worker:enroll` after both stacks are up. One worker can be enrolled into many houses; `mise run e2e:two-houses` proves two managers sharing one worker in isolation.
 
-The intended product shape — one house per developer, a shared machine fleet, agent identities declared in the house — is written up in [`docs/omashiki-to-be.md`](docs/omashiki-to-be.md), with the phased work order and status in [`docs/omashiki-to-be-implementation.md`](docs/omashiki-to-be-implementation.md).
+The product, feature by feature — one house per developer, a shared machine fleet, agent identities declared in the house — is walked through in [`docs/omashiki-to-be.md`](docs/omashiki-to-be.md). Technical documentation lives under [`docs/internal/`](docs/internal/README.md).
 
 Real providers remain explicit opt-ins: use `e2e:overture:runc:opencode`,
 `e2e:overture:runc:claude`, or `e2e:overture:jcode:lmstudio`. To validate Kata,
@@ -153,10 +153,10 @@ and credential-rotation details.
 ## Documentation
 
 - [Documentation index and ownership](docs/README.md)
-- [Product requirements](docs/prd.md)
-- [Architecture](docs/architecture.md)
-- [Current requirements](docs/requirements.md)
-- [Data model](docs/data-model.md)
+- [Product requirements](docs/internal/prd.md)
+- [Architecture](docs/internal/architecture.md)
+- [Current requirements](docs/internal/requirements.md)
+- [Data model](docs/internal/data-model.md)
 - [Contributing](CONTRIBUTING.md)
 - [Agent images](agent/README.md)
 - [Example configurations](examples/README.md)

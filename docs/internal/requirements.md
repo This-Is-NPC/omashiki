@@ -115,12 +115,12 @@ contract vocabulary.
 
 ## References
 
-- [V1 job envelope](../server/lib/omashiki/jobs/contract/v1.ex)
-- [V2 neutral payload](../server/lib/omashiki/jobs/contract/payload_v2.ex)
-- [Admission and lifecycle](../server/lib/omashiki/jobs/admission.ex)
-- [Job state machine](../server/lib/omashiki/jobs.ex)
-- [Runner safeguards](../server/lib/omashiki/jobs/runner.ex)
-- [Network safeguards](../server/lib/omashiki/security/network.ex)
-- [API routes](../server/lib/omashiki_web/router.ex)
-- [Configuration](../omashiki.toml)
-- [Release validation tests](../server/test/integration/queue_load_test.exs)
+- [V1 job envelope](../../server/lib/omashiki/jobs/contract/v1.ex)
+- [V2 neutral payload](../../server/lib/omashiki/jobs/contract/payload_v2.ex)
+- [Admission and lifecycle](../../server/lib/omashiki/jobs/admission.ex)
+- [Job state machine](../../server/lib/omashiki/jobs.ex)
+- [Runner safeguards](../../server/lib/omashiki/jobs/runner.ex)
+- [Network safeguards](../../server/lib/omashiki/security/network.ex)
+- [API routes](../../server/lib/omashiki_web/router.ex)
+- [Configuration](../../omashiki.toml)
+- [Release validation tests](../../server/test/integration/queue_load_test.exs)

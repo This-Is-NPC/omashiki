@@ -7,7 +7,7 @@ errada, o resto pode estar errado com ela.
 Não há código aqui. Há pessoas, casas, máquinas, um trabalho, e sistemas à porta da casa.
 
 **Estado (2026-09-06).** As seis fases de
-[omashiki-to-be-implementation.md](omashiki-to-be-implementation.md) estão
+[omashiki-to-be-implementation.md](internal/house-fleet-implementation.md) estão
 merged em `master`. A checklist no fim diz, item a item, o que o código já
 sustenta e o que ainda é promessa. Duas lacunas conhecidas: o broker da
 identity só foi provado contra um GitHub simulado, e só o harness opencode

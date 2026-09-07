@@ -21,7 +21,7 @@
 # rows. This file is the transitional layout: every machine still runs the
 # full release against one PostgreSQL. The target is a manager that owns
 # the database and workers that pull job snapshots without Repo — see
-# docs/distributed-execution.md.
+# docs/internal/distributed-execution.md.
 #
 # Until those roles exist, every extra node still starts HTTP and LiveView —
 # give it a distinct [app].port or a firewall. `docker_socket_path` is still

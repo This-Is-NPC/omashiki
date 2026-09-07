@@ -2,7 +2,7 @@
 
 This directory builds the disposable harness images provisioned by Omashiki.
 System behavior and security boundaries are documented in
-[`docs/architecture.md`](../docs/architecture.md); this file covers only image
+[`docs/internal/architecture.md`](../docs/internal/architecture.md); this file covers only image
 builds and container entrypoints.
 
 ## Build

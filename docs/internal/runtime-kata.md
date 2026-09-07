@@ -233,12 +233,12 @@ strong. Keep any such backend pure I/O; never shell out to a runtime binary.
 
 ## References
 
-- [Container boundary](../server/lib/omashiki/runtime/container_manager.ex)
-- [Container manager behaviour](../server/lib/omashiki/runtime/container_manager_behaviour.ex)
-- [Runtime capability](../server/lib/omashiki/runtime/capability.ex)
-- [Runtime value helpers](../server/lib/omashiki/runtimes.ex)
-- [Runtime schema](../server/lib/omashiki/runtimes/runtime.ex)
-- [Preset registry](../server/lib/omashiki/presets.ex)
-- [Harness types](../server/lib/omashiki/harness/types.ex)
-- [Declarative configuration](../omashiki.toml)
+- [Container boundary](../../server/lib/omashiki/runtime/container_manager.ex)
+- [Container manager behaviour](../../server/lib/omashiki/runtime/container_manager_behaviour.ex)
+- [Runtime capability](../../server/lib/omashiki/runtime/capability.ex)
+- [Runtime value helpers](../../server/lib/omashiki/runtimes.ex)
+- [Runtime schema](../../server/lib/omashiki/runtimes/runtime.ex)
+- [Preset registry](../../server/lib/omashiki/presets.ex)
+- [Harness types](../../server/lib/omashiki/harness/types.ex)
+- [Declarative configuration](../../omashiki.toml)
 - [Requirements](requirements.md)

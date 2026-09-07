@@ -299,9 +299,9 @@ Secrets: LLM keys stay on the manager as `${env:VAR}`. Git push
 credentials stay on the worker host (already forbidden inside the
 container). A missing `${env:VAR}` still aborts boot.
 
-Packaged operator starting points: [examples/compose.manager.yml](../examples/compose.manager.yml),
-[examples/compose.worker.yml](../examples/compose.worker.yml), and
-[examples/worker.toml](../examples/worker.toml). After both containers are up,
+Packaged operator starting points: [examples/compose.manager.yml](../../examples/compose.manager.yml),
+[examples/compose.worker.yml](../../examples/compose.worker.yml), and
+[examples/worker.toml](../../examples/worker.toml). After both containers are up,
 run `mise run worker:enroll` from the laptop to POST manager credentials to the
 worker enroll listener. Enrollment is a list keyed by house id: run
 `worker:enroll` once per house with a distinct `--manager-id`, and
@@ -387,17 +387,17 @@ until 2 forbids over-reservation.
 
 ## References
 
-- [Job lifecycle](../server/lib/omashiki/jobs.ex)
-- [Durable dispatch](../server/lib/omashiki/jobs/dispatch_worker.ex)
-- [Admission snapshots](../server/lib/omashiki/jobs/admission.ex)
-- [Git artefact](../server/lib/omashiki/jobs/git_artifact.ex)
-- [Non-Git artefact](../server/lib/omashiki/jobs/work_artifact.ex)
-- [Sink-independent validate](../server/lib/omashiki/jobs/validate.ex)
-- [Stale-attempt recovery](../server/lib/omashiki/jobs/recovery.ex)
-- [Lease renewer](../server/lib/omashiki/runtime/lease_renewer.ex)
-- [Container boundary](../server/lib/omashiki/runtime/container_manager.ex)
-- [Config rollout](../server/lib/omashiki/config/rollout.ex)
-- [V2 payload](../server/lib/omashiki/jobs/contract/payload_v2.ex)
+- [Job lifecycle](../../server/lib/omashiki/jobs.ex)
+- [Durable dispatch](../../server/lib/omashiki/jobs/dispatch_worker.ex)
+- [Admission snapshots](../../server/lib/omashiki/jobs/admission.ex)
+- [Git artefact](../../server/lib/omashiki/jobs/git_artifact.ex)
+- [Non-Git artefact](../../server/lib/omashiki/jobs/work_artifact.ex)
+- [Sink-independent validate](../../server/lib/omashiki/jobs/validate.ex)
+- [Stale-attempt recovery](../../server/lib/omashiki/jobs/recovery.ex)
+- [Lease renewer](../../server/lib/omashiki/runtime/lease_renewer.ex)
+- [Container boundary](../../server/lib/omashiki/runtime/container_manager.ex)
+- [Config rollout](../../server/lib/omashiki/config/rollout.ex)
+- [V2 payload](../../server/lib/omashiki/jobs/contract/payload_v2.ex)
 - [Generic task processor](generic-task-processor.md)
 - [Requirements](requirements.md)
 - [Architecture](architecture.md)
