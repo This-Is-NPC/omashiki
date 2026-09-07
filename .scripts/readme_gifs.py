@@ -310,6 +310,48 @@ def framed(cx: float, cy: float, w: float, h: float, stroke: str, opacity: float
                 opacity=opacity, dash=dash)
 
 
+def curve(x1: float, y1: float, x2: float, y2: float, color: str, width: float = 2,
+          opacity: float = 1.0, head: float = 6.5) -> str:
+    """A horizontal-tangent bezier with an arrowhead, core -> worker style."""
+    c1, c2 = x1 + (x2 - x1) * 0.45, x2 - (x2 - x1) * 0.45
+    points = f"{x2},{y2} {x2 - head * 1.7},{y2 - head} {x2 - head * 1.7},{y2 + head}"
+    return (
+        f'<path d="M{x1},{y1} C{c1},{y1} {c2},{y2} {x2 - head * 1.2},{y2}" fill="none" '
+        f'stroke="{color}" stroke-width="{width}" opacity="{opacity:.3f}"/>'
+        f'<polygon points="{points}" fill="{color}" opacity="{opacity:.3f}"/>'
+    )
+
+
+def node_box(cx: float, cy: float, w: float, h: float, name: str, color: str,
+             opacity: float, fill: str = INSET, size: float = 10.5) -> list[str]:
+    """A named Omashiki node: hard-cornered box, brand square, mono label."""
+    return [
+        rect(cx - w / 2, cy - h / 2, w, h, fill=fill, stroke=color, stroke_width=1.5,
+             opacity=opacity),
+        square(cx - w / 2 + 14, cy, color, 7, opacity),
+        text(cx - w / 2 + 26, cy + 4, name, size, INK, 700, mono=True, opacity=opacity),
+    ]
+
+
+def container_tree(x: float, y: float, count: int, reveal: float, color: str,
+                   opacity: float, spread: float = 26) -> list[str]:
+    """Small Docker marks fanned out to the right of a worker, joined like a tree."""
+    out = []
+    for i in range(count):
+        show = clamp((reveal - i * (1.0 / count)) * count)
+        if show <= 0:
+            continue
+        cy = y + (i - (count - 1) / 2) * spread
+        cx = x + 34
+        out += [
+            line(x, y, x + 14, y, color, 1.2, opacity * show * 0.8),
+            line(x + 14, y, x + 14, cy, color, 1.2, opacity * show * 0.8),
+            line(x + 14, cy, cx - 10, cy, color, 1.2, opacity * show * 0.8),
+            icon("docker", cx, cy, 16, color, opacity * show),
+        ]
+    return out
+
+
 def beat_of(frame: int) -> tuple[int, float, float, float]:
     t = frame / FRAMES
     beat = min(BEATS - 1, int(t * BEATS))
@@ -334,17 +376,21 @@ def travel(x1: float, x2: float, y: float, amount: float, color: str,
 # ---------------------------------------------------------------------------
 
 SOURCE_ICONS = [("jira", AMBER), ("github", INK), ("gitlab", ORANGE), ("linear", VIOLET)]
+ACTIVE_SOURCE = 1  # GitHub
 
 INTAKE_STEPS = [
-    "An event fires in your tracker.",
+    "An issue is labelled on GitHub.",
     "Your handler sends one envelope.",
-    "The house admits it and freezes the snapshot.",
-    "A free machine picks it up and runs the sandbox.",
-    "The result returns to the house: branch, files, or actions.",
-    "A signed webhook closes the loop on your side.",
+    "Omashiki-Core admits it and freezes the snapshot.",
+    "A worker with a free slot takes it and runs the container.",
+    "The result returns to the core: branch, files, or actions.",
+    "A signed webhook closes the loop on GitHub.",
 ]
 
-SRC_X, HANDLER_X, HOUSE_X, MACHINE_X = 150, 400, 700, 985
+SRC_X, HANDLER_X = 150, 400
+CORE_X, CORE_Y = 690, 350
+WORKER_X, WORKER_Y = 950, [250, 350, 450]
+ACTIVE_WORKER = 1
 ROW_Y = 350
 GATE_X = 548
 
@@ -368,18 +414,25 @@ def intake_frame(frame: int) -> str:
         tag(864, 138, "OMASHIKI", BRAND, SURFACE),
     ]
 
-    # 01 sources: four tracker glyphs, the first one fires
+    # 01 sources: four trackers, GitHub fires
+    positions = [(SRC_X - 45, 250), (SRC_X + 45, 250), (SRC_X - 45, 346), (SRC_X + 45, 346)]
     for i, (name, color) in enumerate(SOURCE_ICONS):
-        cx, cy = SRC_X + (i % 2) * 90 - 45, 250 + (i // 2) * 96
-        active = i == 0
+        cx, cy = positions[i]
+        active = i == ACTIVE_SOURCE
         op = a[0] * (1.0 if active else 0.45)
         svg += [
             framed(cx, cy, 72, 72, color if active and lit[0] else LINE, op, INSET),
-            icon(name, cx, cy, 34, color if active else FAINT, op, glow=active and beat == 0),
+            icon(name, cx, cy, 34, color if active else FAINT, op,
+                 glow=active and beat in (0, 5)),
         ]
+    gx, gy = positions[ACTIVE_SOURCE]
     if beat == 0:
-        svg.append(dot(SRC_X - 45 + 30, 250 - 30, AMBER, 5 + 3 * pulse))
+        svg.append(dot(gx + 30, gy - 30, BRAND, 5 + 3 * pulse))
     svg.append(label(SRC_X, 452, "tracker event", MUTED, a[0]))
+    # elbow from GitHub to the flow line
+    elbow = BRAND if lit[1] else LINE
+    svg += [line(gx + 36, gy, SRC_X + 95, gy, elbow, 2, 0.6 if lit[1] else 0.35),
+            line(SRC_X + 95, gy, SRC_X + 95, ROW_Y, elbow, 2, 0.6 if lit[1] else 0.35)]
 
     # 02 handler
     svg += [
@@ -388,65 +441,65 @@ def intake_frame(frame: int) -> str:
         label(HANDLER_X, 452, "your handler", MUTED, a[1]),
     ]
 
-    # 03 house
-    svg += [
-        framed(HOUSE_X, ROW_Y, 150, 150, BRAND if lit[2] else BRAND_DIM, a[2], INSET),
-        glyph_house(HOUSE_X, ROW_Y - 14, 56, BRAND if lit[2] else BRAND_DIM, a[2]),
-        icon("postgresql", HOUSE_X, ROW_Y + 42, 26, INFO if lit[2] else FAINT, a[2]),
-        label(HOUSE_X, 452, "house", BRAND_SOFT, a[2]),
-    ]
+    # 03 Omashiki-Core
+    core_color = BRAND if lit[2] else BRAND_DIM
+    svg += node_box(CORE_X, CORE_Y, 150, 60, "Omashiki-Core", core_color, a[2], PANEL, 11)
+    svg.append(glyph_house(CORE_X, CORE_Y - 52, 26, core_color, a[2]))
+    if beat == 2:
+        svg.append(dot(CORE_X + 62, CORE_Y - 18, BRAND, 4 + 2 * pulse))
 
-    # 04 machines: three, one lights and grows a sandbox
-    for i in range(3):
-        cx, cy = MACHINE_X + (i - 1) * 80, ROW_Y - 40
-        won = i == 1 and lit[3]
-        op = a[3] * (1.0 if won or not lit[3] else 0.5)
-        svg += [
-            framed(cx, cy, 64, 64, INFO if won else LINE, op, INSET),
-            icon("docker", cx, cy, 34, INFO if won else FAINT, op, glow=won and beat == 3),
-        ]
-    if lit[3]:
-        grow = local if beat == 3 else 1.0
-        svg.append(glyph_box(MACHINE_X, ROW_Y + 48, 30 + 14 * grow, BRAND, a[3]))
-    svg.append(label(MACHINE_X, 452, "machines", BRAND_SOFT, a[3]))
+    # 04 workers as a tree hanging off the core
+    for i, wy in enumerate(WORKER_Y):
+        won = i == ACTIVE_WORKER and lit[3]
+        op = a[3] * (1.0 if won or not lit[3] else 0.45)
+        color = INFO if won else (BRAND_DIM if lit[2] else LINE)
+        svg.append(curve(CORE_X + 75, CORE_Y, WORKER_X - 95, wy, color, 1.6, op * 0.9))
+        svg += node_box(WORKER_X, wy, 190, 40, f"Omashiki-Worker:Node-00{i + 1}", color, op, INSET, 9.5)
+        if won:
+            grow = local if beat == 3 else 1.0
+            svg += container_tree(WORKER_X + 95, wy, 3, grow, INFO, a[3])
+    svg.append(label(WORKER_X, 496, "workers", BRAND_SOFT, a[3]))
 
     # flow line and the travelling job
-    svg += [line(SRC_X + 95, ROW_Y, MACHINE_X - 120, ROW_Y, LINE, 2, 0.5, "4 8"),
+    svg += [line(SRC_X + 95, ROW_Y, CORE_X - 75, ROW_Y, LINE, 2, 0.5, "4 8"),
             crossing(GATE_X, ROW_Y, BRAND if beat >= 2 else OUTLINE)]
     if beat == 1:
         svg += travel(SRC_X + 95, HANDLER_X - 48, ROW_Y, local, VIOLET)
     elif beat == 2:
-        svg += travel(HANDLER_X + 48, HOUSE_X - 75, ROW_Y, local, BRAND, "POST /jobs")
+        svg += travel(HANDLER_X + 48, CORE_X - 75, ROW_Y, local, BRAND, "POST /jobs")
     elif beat == 3:
-        svg += travel(HOUSE_X + 75, MACHINE_X - 120, ROW_Y, local, INFO, "offer")
+        wy = WORKER_Y[ACTIVE_WORKER]
+        svg.append(dot(mix(CORE_X + 75, WORKER_X - 95, local), wy, INFO, 6))
+        svg.append(tag(mix(CORE_X + 75, WORKER_X - 95, local), wy - 26, "offer", INFO, SURFACE, size=10))
 
-    # 05 result glyphs under the machine, lighting one of three
+    # 05 result glyphs under the workers, one of three lit, back to the core
     results = [("git", glyph_branch), ("files", glyph_bundle), ("none", glyph_actions)]
     for i, (name, fn) in enumerate(results):
-        cx = MACHINE_X + (i - 1) * 60
+        cx = WORKER_X + (i - 1) * 60
         chosen = i == 0
         op = a[4] * (1.0 if chosen or not lit[4] else 0.35)
-        svg += [fn(cx, 520, 26, BRAND if chosen and lit[4] else FAINT, op),
-                label(cx, 548, name, BRAND_SOFT if chosen and lit[4] else FAINT, op, 9)]
+        svg += [fn(cx, 530, 26, BRAND if chosen and lit[4] else FAINT, op),
+                label(cx, 558, name, BRAND_SOFT if chosen and lit[4] else FAINT, op, 9)]
     if lit[4]:
         amt = local if beat == 4 else 1.0
-        svg += [line(MACHINE_X - 60, 520, HOUSE_X + 40, 520, BRAND, 2.5, 0.9),
-                arrow(HOUSE_X + 40, 520, HOUSE_X + 40, ROW_Y + 80, BRAND, 2.5, 0.9),
-                dot(mix(MACHINE_X - 60, HOUSE_X + 40, amt), 520, BRAND, 6)]
+        svg += [line(WORKER_X - 100, 530, CORE_X + 40, 530, BRAND, 2.5, 0.9),
+                arrow(CORE_X + 40, 530, CORE_X + 40, CORE_Y + 34, BRAND, 2.5, 0.9),
+                dot(mix(WORKER_X - 100, CORE_X + 40, amt), 530, BRAND, 6)]
 
-    # 06 webhook back across the line to the ticket
+    # 06 webhook back across the line to GitHub
     if lit[5]:
-        x = mix(HOUSE_X - 75, SRC_X + 45, local if beat == 5 else 1.0)
+        x = mix(CORE_X - 40, SRC_X + 95, local if beat == 5 else 1.0)
         svg += [
-            line(HOUSE_X - 75, 520, x, 520, BRAND, 2.5, 0.9),
-            crossing(GATE_X, 520, BRAND),
-            dot(x, 520, BRAND, 6),
-            tag(x, 494, "webhook", BRAND, SURFACE, size=10),
+            line(CORE_X - 40, CORE_Y + 30, CORE_X - 40, 530, BRAND, 2.5, 0.9),
+            line(CORE_X - 40, 530, x, 530, BRAND, 2.5, 0.9),
+            crossing(GATE_X, 530, BRAND),
+            dot(x, 530, BRAND, 6),
+            tag(x, 504, "webhook", BRAND, SURFACE, size=10),
         ]
-        if local > 0.9 or beat > 5:
-            svg.append(icon("jira", SRC_X - 45 + 0, 250, 34, AMBER, 1.0, glow=True))
+        if beat == 5 and local > 0.95:
+            svg.append(line(SRC_X + 95, 530, SRC_X + 95, ROW_Y, BRAND, 2, 0.6))
     else:
-        svg.append(line(HOUSE_X - 75, 520, SRC_X + 45, 520, LINE, 2, 0.35, "4 8"))
+        svg.append(line(CORE_X - 40, 530, SRC_X + 95, 530, LINE, 2, 0.35, "4 8"))
 
     svg += narration(beat + 1, BEATS, INTAKE_STEPS[beat])
     svg.append("</svg>")
@@ -458,12 +511,12 @@ def intake_frame(frame: int) -> str:
 # ---------------------------------------------------------------------------
 
 LIFECYCLE_STEPS = [
-    "The machine polls the house and accepts into a free slot.",
+    "The worker polls the core and accepts into a free slot.",
     "The snapshot frozen at admission decides everything.",
     "A workspace is prepared for the sink.",
-    "One agent turn runs. Model, tools and identity go through the house.",
+    "One agent turn runs. Model, tools and identity go through the core.",
     "The result is verified: a branch, a bundle, or the actions taken.",
-    "The house records it and signs the webhook.",
+    "The core records it and signs the webhook.",
 ]
 
 STAGE_X = [150, 330, 510, 690, 870, 1050]
@@ -476,7 +529,7 @@ def lifecycle_frame(frame: int) -> str:
     svg = base(
         "Inside the boundary",
         "One offer becomes one governed sandbox run.",
-        "Everything on this frame is Omashiki. Nothing here came from the payload.",
+        "One worker, one offer. Nothing here came from the payload.",
     )
     lit = [beat >= i for i in range(6)]
     a = [1.0 if on else DIM for on in lit]
@@ -484,12 +537,11 @@ def lifecycle_frame(frame: int) -> str:
     TL_Y = 236
     Y = 430
 
-    # the house: a strip across the top that every upward link reaches
+    # the core: a strip across the top that every upward link reaches
     svg += [
         rect(56, STRIP_Y - 16, 1088, 32, fill=BRAND_TINT, stroke=BRAND_DIM, dash="5 7"),
         glyph_house(80, STRIP_Y, 22, BRAND, 1.0),
-        text(100, STRIP_Y + 4, "HOUSE", 10.5, BRAND, 800, mono=True, spacing=1.4),
-        icon("postgresql", 1120, STRIP_Y, 20, INFO, 0.9),
+        text(100, STRIP_Y + 4, "OMASHIKI-CORE", 10.5, BRAND, 800, mono=True, spacing=1.4),
     ]
 
     # timeline
@@ -504,13 +556,13 @@ def lifecycle_frame(frame: int) -> str:
                 label(x, TL_Y + 28, STAGE_LABEL[i],
                       BRAND if beat == i else (INK if lit[i] else FAINT), 1.0, 11)]
 
-    # 01 accept: the machine polls the house and takes a slot
+    # 01 accept: the worker polls the core and takes a slot
     x = STAGE_X[0]
-    svg += [
-        framed(x, Y, 130, 150, INFO if lit[0] else LINE, a[0], INSET),
-        icon("docker", x, Y - 16, 52, INFO if lit[0] else FAINT, a[0], glow=beat == 0),
-        label(x, Y + 40, "slot 1 / 2", INFO if lit[0] else FAINT, a[0], 10),
-    ]
+    wcolor = INFO if lit[0] else LINE
+    svg.append(framed(x, Y, 130, 150, wcolor, a[0], INSET))
+    svg += node_box(x - 8, Y - 38, 96, 30, "Worker", wcolor, a[0], PANEL, 9.5)
+    svg += container_tree(x + 40, Y - 38, 2, 1.0 if lit[0] else 0.0, INFO, a[0], 22)
+    svg.append(label(x, Y + 40, "slot 1 / 2", INFO if lit[0] else FAINT, a[0], 10))
     for i in range(2):
         svg.append(square(x - 10 + i * 20, Y + 56, INFO if (i == 0 and lit[0]) else OUTLINE, 9, a[0]))
     if beat == 0:
@@ -521,11 +573,13 @@ def lifecycle_frame(frame: int) -> str:
     # 02 snapshot: what was frozen at admission
     x = STAGE_X[1]
     svg.append(framed(x, Y, 130, 150, BRAND if lit[1] else LINE, a[1], INSET))
-    rows = [("git", "repo"), ("docker", "runtime"), ("github", "identity"), ("jira", "context")]
+    rows = [("git", "repo"), ("box", "runtime"), ("github", "identity"), ("jira", "context")]
     for r, (ic, lab) in enumerate(rows):
         cy = Y - 48 + r * 30
         reveal = clamp((local - r * 0.18) / 0.3) if beat == 1 else float(lit[1])
-        svg += [icon(ic, x - 38, cy, 18, INK if lit[1] else FAINT, a[1] * reveal),
+        mark = (glyph_box(x - 38, cy, 18, INK if lit[1] else FAINT, a[1] * reveal) if ic == "box"
+                else icon(ic, x - 38, cy, 18, INK if lit[1] else FAINT, a[1] * reveal))
+        svg += [mark,
                 text(x - 20, cy + 4, lab, 10, INK if lit[1] else FAINT, 600, mono=True,
                      opacity=a[1] * reveal)]
     svg.append(label(x, Y + 62, "frozen", BRAND_SOFT if lit[1] else FAINT, a[1], 9))
@@ -565,11 +619,11 @@ def lifecycle_frame(frame: int) -> str:
     if lit[4]:
         svg.append(square(x + 50, Y - 60, BRAND, 9 * (pulse if beat == 4 else 1.0)))
 
-    # 06 return: the house records it, the webhook leaves
+    # 06 return: the core records it, the webhook leaves
     x = STAGE_X[5]
     svg += [
         framed(x, Y, 130, 150, BRAND if lit[5] else LINE, a[5], INSET),
-        icon("postgresql", x, Y - 14, 48, INFO if lit[5] else FAINT, a[5], glow=beat == 5),
+        glyph_house(x, Y - 14, 52, BRAND if lit[5] else FAINT, a[5]),
         label(x, Y + 46, "event + outbox", BRAND_SOFT if lit[5] else FAINT, a[5], 9),
     ]
     if beat == 5:
