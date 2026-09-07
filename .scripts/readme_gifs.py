@@ -422,8 +422,6 @@ def intake_frame(frame: int) -> str:
 
     # one outer box for everything that runs, split by dashed machine boundaries
     svg += box_zone(OUTER, "", OUTLINE, OUTSIDE_TINT)
-    for dx in DIVIDERS:
-        svg.append(line(dx, OUTER[1], dx, OUTER[3], OUTLINE, 1.2, 0.9, "5 6"))
     cols = [(OUTER[0], DIVIDERS[0], "any machine", VIOLET if lit[1] else OUTLINE),
             (DIVIDERS[0], DIVIDERS[1], "your machine", BRAND_DIM if lit[2] else OUTLINE),
             (DIVIDERS[1], OUTER[2], "your machine · a vps · anything you enrol",
@@ -432,6 +430,8 @@ def intake_frame(frame: int) -> str:
         svg.append(label((x1 + x2) / 2, OUTER[1] + 20, title, color, 1.0, 10))
     svg += box_zone(OMASHIKI, "omashiki", BRAND if lit[2] else BRAND_DIM, BRAND_TINT,
                     title_anchor="start")
+    for dx in DIVIDERS:
+        svg.append(line(dx, OUTER[1], dx, OUTER[3], OUTLINE, 1.2, 0.9, "5 6"))
     svg += box_zone(YOURS, "yours", OUTLINE, "none")
 
     # 01 sources: four trackers, GitHub fires
@@ -557,15 +557,23 @@ def lifecycle_frame(frame: int) -> str:
     )
     lit = [beat >= i for i in range(6)]
     a = [1.0 if on else DIM for on in lit]
-    STRIP_Y = 156
-    TL_Y = 236
-    Y = 430
+    STRIP_Y = 150
+    TL_Y = 252
+    Y = 436
 
     # the core: a strip across the top that every upward link reaches
     svg += [
         rect(56, STRIP_Y - 16, 1088, 32, fill=BRAND_TINT, stroke=BRAND_DIM, dash="5 7"),
         glyph_house(80, STRIP_Y, 22, BRAND, 1.0),
         text(100, STRIP_Y + 4, "OMASHIKI-CORE", 10.5, BRAND, 800, mono=True, spacing=1.4),
+    ]
+
+    # the worker: everything below the core strip happens on one worker node
+    svg += [
+        rect(56, TL_Y - 34, 1088, Y + 95 - (TL_Y - 34), fill=OUTSIDE_TINT, stroke=INFO,
+             stroke_width=1.5, opacity=0.95, dash="5 7"),
+        square(74, TL_Y - 18, INFO, 8),
+        text(88, TL_Y - 14, "OMASHIKI-WORKER:NODE-002", 10.5, INFO, 800, mono=True, spacing=1.4),
     ]
 
     # timeline
@@ -584,15 +592,15 @@ def lifecycle_frame(frame: int) -> str:
     x = STAGE_X[0]
     wcolor = INFO if lit[0] else LINE
     svg.append(framed(x, Y, 130, 150, wcolor, a[0], INSET))
-    svg += node_box(x - 8, Y - 38, 96, 30, "Worker", wcolor, a[0], PANEL, 9.5)
-    svg += container_tree(x + 40, Y - 38, 2, 1.0 if lit[0] else 0.0, INFO, a[0], 22)
+    svg.append(square(x - 30, Y - 30, wcolor, 12, a[0]))
+    svg += container_tree(x - 30, Y - 30, 2, 1.0 if lit[0] else 0.0, INFO, a[0], 26)
     svg.append(label(x, Y + 40, "slot 1 / 2", INFO if lit[0] else FAINT, a[0], 10))
     for i in range(2):
         svg.append(square(x - 10 + i * 20, Y + 56, INFO if (i == 0 and lit[0]) else OUTLINE, 9, a[0]))
     if beat == 0:
         y0 = mix(Y - 75, STRIP_Y + 16, local)
         svg += [line(x, Y - 75, x, STRIP_Y + 16, BRAND_DIM, 1.5, 0.6, "3 6"),
-                dot(x, y0, BRAND, 5), tag(x + 52, STRIP_Y + 38, "poll", BRAND, SURFACE, size=9)]
+                dot(x, y0, BRAND, 5), tag(x + 52, STRIP_Y + 30, "poll", BRAND, SURFACE, size=9)]
 
     # 02 snapshot: what was frozen at admission
     x = STAGE_X[1]
@@ -654,13 +662,13 @@ def lifecycle_frame(frame: int) -> str:
         out = clamp((local - 0.5) / 0.5)
         svg += [line(x, Y - 75, x, STRIP_Y + 16, BRAND, 2, 0.9),
                 dot(x, mix(Y - 75, STRIP_Y + 16, min(1.0, local * 2)), BRAND, 5),
-                arrow(x, Y + 75, x, 565, BRAND, 2.5, 0.35 + 0.65 * out),
-                crossing(x, 548, BRAND, 0.4 + 0.6 * out)]
+                arrow(x, Y + 75, x, 578, BRAND, 2.5, 0.35 + 0.65 * out),
+                crossing(x, Y + 95, BRAND, 0.4 + 0.6 * out)]
         if out > 0:
-            svg += [dot(x, mix(Y + 75, 548, out), BRAND, 6),
-                    tag(x - 62, 548, "webhook", BRAND, SURFACE, size=9, opacity=out)]
+            svg += [dot(x, mix(Y + 75, 560, out), BRAND, 6),
+                    tag(x - 62, 560, "webhook", BRAND, SURFACE, size=9, opacity=out)]
 
-    svg.append(text(520, 552, "failure is also a result · retry reopens the same job",
+    svg.append(text(520, 566, "failure is also a result · retry reopens the same job",
                     9.5, FAINT, 600, anchor="middle", mono=True))
 
     svg += narration(beat + 1, BEATS, LIFECYCLE_STEPS[beat])
