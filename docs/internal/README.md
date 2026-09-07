@@ -2,7 +2,7 @@
 
 Technical documentation: how the system is built, what it guarantees, and
 the design records behind it. The product itself is described in
-[../omashiki-to-be.md](../omashiki-to-be.md).
+[../walkthrough.md](../walkthrough.md).
 
 ## Reading Order
 

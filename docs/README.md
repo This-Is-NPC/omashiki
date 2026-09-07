@@ -5,7 +5,7 @@ Start with the product. Everything technical lives under
 
 ## Product
 
-- [Omashiki to-be](omashiki-to-be.md): the product, feature by feature — houses,
+- [Walkthrough](walkthrough.md): the product, feature by feature — houses,
   machines, a job's day, paying for the model, agent identities, the client
   at the door, what never happens, and the guarantees with where the code
   backs each one.

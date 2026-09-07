@@ -1,8 +1,8 @@
-# Omashiki to-be — plano de implementação
+# Casas e frota — registo de implementação
 
-Isto é **como** chegamos a [omashiki-to-be.md](../omashiki-to-be.md).
+Isto é **como** chegámos ao produto descrito em [walkthrough.md](../walkthrough.md). Foi escrito como plano quando o produto ainda era «to-be»; fica como registo de engenharia, com a nota de fecho de cada fase.
 
-- [omashiki-to-be.md](../omashiki-to-be.md) é o **produto**. Este ficheiro é a **ordem de trabalho**.
+- [walkthrough.md](../walkthrough.md) é o **produto**. Este ficheiro é a **ordem de trabalho** que o produziu.
 - [distributed-execution.md](distributed-execution.md) já é dono do protocolo manager/worker. Não o replaneamos aqui. As fases 2 e 3 daquele doc são uma **pista de dependência** (ferro), não greenfield neste plano.
 - **Hoje vs to-be** é nomeado com honestidade: o que já corre em produção vs o que ainda não existe.
 - **Estado (2026-09-06):** as seis fases estão merged em `master`; cada fase tem abaixo a sua nota de fecho. O que ficou de fora está em «Lacunas conhecidas» no fim.
@@ -254,7 +254,7 @@ flowchart TD
 | Caminho | Papel |
 | --- | --- |
 | `examples/handler/` | Sketch operável |
-| `docs/omashiki-to-be.md` | Já descreve o modelo |
+| `docs/walkthrough.md` | Já descreve o modelo |
 | `server/lib/omashiki/jobs/webhooks.ex` | Entrega já existe |
 
 **Feito quando.**
@@ -335,11 +335,11 @@ Não copiamos a lista de tarefas daquele doc — só citamos a dependência.
 Cada fase fecha com:
 
 1. **Testes** nas costuras nomeadas acima.
-2. **Nota** de uma linha neste ficheiro **ou** comentário no item correspondente da checklist do [omashiki-to-be.md](../omashiki-to-be.md) (itens 13–17) a dizer que já há código.
+2. **Nota** de uma linha neste ficheiro **ou** comentário no item correspondente das garantias do [walkthrough.md](../walkthrough.md) a dizer que já há código.
 
-**Não** marcar o to-be como «hoje» até a fase estar merged.
+**Não** marcar uma garantia como «hoje» até a fase estar merged.
 
-| Fase | Checklist to-be |
+| Fase | Garantias no walkthrough |
 | --- | --- |
 | 1 | 13, 14 |
 | 2 | 16 |
