@@ -387,12 +387,26 @@ INTAKE_STEPS = [
     "A signed webhook closes the loop on GitHub.",
 ]
 
-SRC_X, HANDLER_X = 150, 400
-CORE_X, CORE_Y = 690, 350
-WORKER_X, WORKER_Y = 950, [250, 350, 450]
+SRC_X, HANDLER_X = 150, 325
+CORE_X, CORE_Y = 615, 350
+WORKER_X, WORKER_Y = 985, [250, 350, 450]
 ACTIVE_WORKER = 1
 ROW_Y = 350
-GATE_X = 548
+EDGE_X = 785          # where the machines end and the network may begin
+
+YOURS = (44, 190, 380, 470)         # x1, y1, x2, y2
+MACHINE = (270, 150, 770, 560)
+FLEET = (800, 150, 1156, 560)
+
+
+def box_zone(z: tuple, title: str, color: str, fill: str, opacity: float = 1.0,
+             dash: str | None = None) -> list[str]:
+    x1, y1, x2, y2 = z
+    return [
+        rect(x1, y1, x2 - x1, y2 - y1, fill=fill, stroke=color, stroke_width=1.5,
+             opacity=opacity, dash=dash),
+        label((x1 + x2) / 2, y1 + 20, title, color, opacity, 10),
+    ]
 
 
 def intake_frame(frame: int) -> str:
@@ -400,22 +414,19 @@ def intake_frame(frame: int) -> str:
     svg = base(
         "Event-driven intake",
         "Your tracker fires. A result comes back.",
-        "Grey is yours. Green is Omashiki. Two arrows cross the line.",
+        "Handler and core live on your machine. Workers live wherever you put them.",
     )
     lit = [beat >= i for i in range(6)]
     a = [1.0 if on else DIM for on in lit]
 
-    # zones
-    svg += [
-        rect(44, 138, 480, 440, fill=OUTSIDE_TINT, stroke=OUTLINE, dash="5 7"),
-        rect(572, 138, 584, 440, fill=BRAND_TINT,
-             stroke=BRAND if beat in (2, 3, 4) else BRAND_DIM, stroke_width=1.5, dash="5 7"),
-        tag(284, 138, "YOURS", OUTLINE, SURFACE),
-        tag(864, 138, "OMASHIKI", BRAND, SURFACE),
-    ]
+    # three machines, drawn as containers; the handler sits where yours meets your machine
+    svg += box_zone(MACHINE, "your machine", BRAND_DIM if lit[2] else OUTLINE, OUTSIDE_TINT)
+    svg += box_zone(FLEET, "your machine · a vps · anything you enrol",
+                    INFO if lit[3] else OUTLINE, OUTSIDE_TINT)
+    svg += box_zone(YOURS, "yours", OUTLINE, "none")
 
     # 01 sources: four trackers, GitHub fires
-    positions = [(SRC_X - 45, 250), (SRC_X + 45, 250), (SRC_X - 45, 346), (SRC_X + 45, 346)]
+    positions = [(SRC_X - 45, 265), (SRC_X + 45, 265), (SRC_X - 45, 361), (SRC_X + 45, 361)]
     for i, (name, color) in enumerate(SOURCE_ICONS):
         cx, cy = positions[i]
         active = i == ACTIVE_SOURCE
@@ -428,49 +439,50 @@ def intake_frame(frame: int) -> str:
     gx, gy = positions[ACTIVE_SOURCE]
     if beat == 0:
         svg.append(dot(gx + 30, gy - 30, BRAND, 5 + 3 * pulse))
-    svg.append(label(SRC_X, 452, "tracker event", MUTED, a[0]))
-    # elbow from GitHub to the flow line
+    svg.append(label(SRC_X, 440, "tracker event", MUTED, a[0]))
     elbow = BRAND if lit[1] else LINE
     svg += [line(gx + 36, gy, SRC_X + 95, gy, elbow, 2, 0.6 if lit[1] else 0.35),
             line(SRC_X + 95, gy, SRC_X + 95, ROW_Y, elbow, 2, 0.6 if lit[1] else 0.35)]
 
-    # 02 handler
+    # 02 handler, in the overlap of yours and your machine
     svg += [
         framed(HANDLER_X, ROW_Y, 96, 96, VIOLET if lit[1] else LINE, a[1], INSET),
         glyph_handler(HANDLER_X, ROW_Y, 30, VIOLET if lit[1] else FAINT, a[1]),
-        label(HANDLER_X, 452, "your handler", MUTED, a[1]),
+        label(HANDLER_X, 440, "your handler", MUTED, a[1]),
     ]
 
     # 03 Omashiki-Core
     core_color = BRAND if lit[2] else BRAND_DIM
     svg += node_box(CORE_X, CORE_Y, 150, 60, "Omashiki-Core", core_color, a[2], PANEL, 11)
-    svg.append(glyph_house(CORE_X, CORE_Y - 52, 26, core_color, a[2]))
+    svg.append(glyph_house(CORE_X, CORE_Y - 58, 26, core_color, a[2]))
     if beat == 2:
         svg.append(dot(CORE_X + 62, CORE_Y - 18, BRAND, 4 + 2 * pulse))
 
-    # 04 workers as a tree hanging off the core
+    # 04 workers: a tree off the core; the one that took the job gets its containers
     for i, wy in enumerate(WORKER_Y):
         won = i == ACTIVE_WORKER and lit[3]
         op = a[3] * (1.0 if won or not lit[3] else 0.45)
         color = INFO if won else (BRAND_DIM if lit[2] else LINE)
+        if won:
+            svg.append(rect(878, wy - 34, 272, 68, fill=INSET, stroke=INFO, opacity=a[3], dash="3 5"))
         svg.append(curve(CORE_X + 75, CORE_Y, WORKER_X - 95, wy, color, 1.6, op * 0.9))
         svg += node_box(WORKER_X, wy, 190, 40, f"Omashiki-Worker:Node-00{i + 1}", color, op, INSET, 9.5)
         if won:
             grow = local if beat == 3 else 1.0
-            svg += container_tree(WORKER_X + 95, wy, 3, grow, INFO, a[3])
-    svg.append(label(WORKER_X, 496, "workers", BRAND_SOFT, a[3]))
+            svg += container_tree(WORKER_X + 95, wy, 3, grow, INFO, a[3], 22)
+    svg += [crossing(EDGE_X, ROW_Y, INFO if lit[3] else OUTLINE),
+            label(EDGE_X, ROW_Y - 18, "network", INFO if lit[3] else FAINT, 1.0, 8)]
 
     # flow line and the travelling job
-    svg += [line(SRC_X + 95, ROW_Y, CORE_X - 75, ROW_Y, LINE, 2, 0.5, "4 8"),
-            crossing(GATE_X, ROW_Y, BRAND if beat >= 2 else OUTLINE)]
+    svg.append(line(SRC_X + 95, ROW_Y, CORE_X - 75, ROW_Y, LINE, 2, 0.5, "4 8"))
     if beat == 1:
         svg += travel(SRC_X + 95, HANDLER_X - 48, ROW_Y, local, VIOLET)
     elif beat == 2:
         svg += travel(HANDLER_X + 48, CORE_X - 75, ROW_Y, local, BRAND, "POST /jobs")
     elif beat == 3:
         wy = WORKER_Y[ACTIVE_WORKER]
-        svg.append(dot(mix(CORE_X + 75, WORKER_X - 95, local), wy, INFO, 6))
-        svg.append(tag(mix(CORE_X + 75, WORKER_X - 95, local), wy - 26, "offer", INFO, SURFACE, size=10))
+        x = mix(CORE_X + 75, WORKER_X - 95, local)
+        svg += [dot(x, wy, INFO, 6), tag(x, wy - 26, "offer", INFO, SURFACE, size=10)]
 
     # 05 result glyphs under the workers, one of three lit, back to the core
     results = [("git", glyph_branch), ("files", glyph_bundle), ("none", glyph_actions)]
@@ -478,28 +490,31 @@ def intake_frame(frame: int) -> str:
         cx = WORKER_X + (i - 1) * 60
         chosen = i == 0
         op = a[4] * (1.0 if chosen or not lit[4] else 0.35)
-        svg += [fn(cx, 530, 26, BRAND if chosen and lit[4] else FAINT, op),
-                label(cx, 558, name, BRAND_SOFT if chosen and lit[4] else FAINT, op, 9)]
+        svg += [fn(cx, 512, 26, BRAND if chosen and lit[4] else FAINT, op),
+                label(cx, 540, name, BRAND_SOFT if chosen and lit[4] else FAINT, op, 9)]
     if lit[4]:
         amt = local if beat == 4 else 1.0
-        svg += [line(WORKER_X - 100, 530, CORE_X + 40, 530, BRAND, 2.5, 0.9),
-                arrow(CORE_X + 40, 530, CORE_X + 40, CORE_Y + 34, BRAND, 2.5, 0.9),
-                dot(mix(WORKER_X - 100, CORE_X + 40, amt), 530, BRAND, 6)]
+        svg += [line(WORKER_X - 100, 512, CORE_X + 40, 512, BRAND, 2.5, 0.9),
+                crossing(EDGE_X, 512, BRAND),
+                arrow(CORE_X + 40, 512, CORE_X + 40, CORE_Y + 34, BRAND, 2.5, 0.9),
+                dot(mix(WORKER_X - 100, CORE_X + 40, amt), 512, BRAND, 6)]
 
-    # 06 webhook back across the line to GitHub
+    # 06 webhook from the core back to GitHub
     if lit[5]:
         x = mix(CORE_X - 40, SRC_X + 95, local if beat == 5 else 1.0)
         svg += [
-            line(CORE_X - 40, CORE_Y + 30, CORE_X - 40, 530, BRAND, 2.5, 0.9),
-            line(CORE_X - 40, 530, x, 530, BRAND, 2.5, 0.9),
-            crossing(GATE_X, 530, BRAND),
-            dot(x, 530, BRAND, 6),
-            tag(x, 504, "webhook", BRAND, SURFACE, size=10),
+            line(CORE_X - 40, CORE_Y + 30, CORE_X - 40, 512, BRAND, 2.5, 0.9),
+            line(CORE_X - 40, 512, x, 512, BRAND, 2.5, 0.9),
+            dot(x, 512, BRAND, 6),
+            tag(x, 486, "webhook", BRAND, SURFACE, size=10),
         ]
         if beat == 5 and local > 0.95:
-            svg.append(line(SRC_X + 95, 530, SRC_X + 95, ROW_Y, BRAND, 2, 0.6))
+            svg.append(line(SRC_X + 95, 512, SRC_X + 95, ROW_Y, BRAND, 2, 0.6))
     else:
-        svg.append(line(CORE_X - 40, 530, SRC_X + 95, 530, LINE, 2, 0.35, "4 8"))
+        svg.append(line(CORE_X - 40, 512, SRC_X + 95, 512, LINE, 2, 0.35, "4 8"))
+
+    svg.append(text(600, 578, "single box: core and a worker on the same machine · fleet: workers on any machine you enrol",
+                    9, FAINT, 600, anchor="middle", mono=True))
 
     svg += narration(beat + 1, BEATS, INTAKE_STEPS[beat])
     svg.append("</svg>")
