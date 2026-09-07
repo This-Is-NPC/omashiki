@@ -50,5 +50,5 @@ Wave 2 does not start. After `CliJson`, the adapter centre that a declarative ma
 
 At measurement time, nine existing `docs/` files still taught pre-plugin
 vocabulary. This was an inventory of the pre-cutover tree, not current usage;
-`plugins-e-ciclo-de-vida.md` was the canonical design-direction source for the
+`plugins-and-task-lifecycle.md` was the canonical design-direction source for the
 plugin phase.
