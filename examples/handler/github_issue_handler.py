@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """A client at the door: GitHub issues become Omashiki jobs, and back.
 
-This is the "client at the door" from docs/concepts/client-at-the-door.md. It is not part of
-Omashiki. It is what *you* run in front of a house, and it is the whole
-integration surface:
+See docs/how-to-connect-an-issue-tracker.md for setup.
+Run this integration client in front of a house:
 
     GitHub  --(webhook)-->  this handler  --(POST /api/v1/jobs)-->  Omashiki
     Omashiki --(signed terminal webhook)--> this handler --> your ticket

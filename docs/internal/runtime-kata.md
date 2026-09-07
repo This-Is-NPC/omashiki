@@ -1,244 +1,63 @@
-# Kata Containers Runtime Handler
+# Kata runtime
 
-Design and deployment notes for the Docker `kata` runtime handler, which gives
-each sandbox its own kernel without rewriting the mount and secret boundary.
-Docker API/configuration support for both `runc` and `kata` is implemented; the
-normal environment default remains `docker.runc.debian`.
+Kata is a Docker runtime handler, selected as `docker.kata.debian`.
+The host must install and register the handler before Omashiki can use it.
+Configuration support does not establish full workload compatibility.
 
-Kata does not solve the microVM gaps in the filesystem and secret boundary — it
-does not create them. It implements the containerd shim v2 interface and
-registers as a Docker runtime class, so bind mounts, the read-only secret file,
-and uid/gid ownership keep working. NFR-004 and NFR-007 survive without a
-rewrite.
+## Host installer
 
-Status: **Docker API/configuration implemented and host smoke passed.** On
-2026-08-28, the manifest-pinned Kata 4.1.0 runtime was installed and registered
-on the development host, then `mise run kata:smoke` started exactly one jcode
-container, verified `HostConfig.Runtime=kata`, executed a command in the guest,
-and removed the container. The broader compatibility gate for mounts,
-networking, credentials, and resource limits remains separate.
+`.scripts/kata_install.sh` reads pinned version, archive, checksum, and path settings from `vm/manifest.toml`.
+It verifies the archive before installation.
+It validates the candidate Docker daemon configuration.
+It restarts Docker only when the configuration requires a change.
+The installer uses administrator privileges.
 
-## The Seam Already Exists
+The repository task is:
 
-- `Omashiki.Runtime.ContainerManagerBehaviour` declares six callbacks, and
-  `provision_result` already speaks `sandbox_id` rather than `container_id`,
-  with optional `host`/`port` and a map `transport`.
-- `Omashiki.Runtime.Capability` hands adapters only `transport`, `endpoint`,
-  and `exec`. No Docker concept crosses that line.
-- `runtime` belongs to an environment. Normal environments select
-  `runtime = "docker.runc.debian"`; `docker.kata.debian` is also a valid
-  handler-aware selection, and the plugin image is resolved from the matching
-  runtime catalog.
-
-Harness adapters do not change. `ContainerManager` keeps talking the Docker API
-over the same Mint socket; what changes at the wire level is one `HostConfig`
-field.
-
-## Configuration
-
-### Host
-
-The host installer registers the pinned runtime-rs shim and configuration in
-`daemon.json` without replacing unrelated daemon settings:
-
-```json
-{
-  "runtimes": {
-    "kata": {
-      "runtimeType": "/opt/kata/runtime-rs/bin/containerd-shim-kata-v2",
-      "options": {
-        "ConfigPath": "/opt/kata/share/defaults/kata-containers/runtime-rs/configuration-clh-runtime-rs.toml"
-      }
-    }
-  }
-}
+```bash
+mise run kata:install
 ```
 
-Prerequisite: KVM available, either bare metal or nested virtualization.
+The host needs hardware virtualization and access to KVM.
+VM-based tests additionally need nested virtualization.
+Use the checked-in manifest for the exact archive pin.
 
-Upstream is the monorepo at
-<https://github.com/kata-containers/kata-containers>. The `kata-containers/
-runtime`, `/agent`, `/proxy`, and `/shim` repositories were archived around
-2020 and still rank high in search results; ignore them.
+## Runtime selection
 
-Release 4.0.0 rewrote the runtime from Go to Rust and made `runtime-rs` the
-default. Omashiki pins **4.1.0**, its archive URL, and SHA-256 in
-`vm/manifest.toml`; the installer rejects a changed release identity or path.
+The environment selects `docker.kata.debian`.
+The runtime catalog maps its plugin to an image tag.
+The Docker request selects handler `kata`.
+The same agent image family also supports the runc catalog.
 
-**VMM: Cloud Hypervisor**, the documented Kata default and the better performer.
-**Do not
-use Firecracker as the backend** — it has no virtio-fs, only block devices,
-which removes exactly the bind mounts that motivate this route.
+The sandbox receives the normal admitted launch plan.
+The runtime handler does not permit the caller to change credentials, mounts, or network policy.
 
-### Omashiki
+## Host smoke test
 
-Current configuration declares both Docker handler catalogs and defaults the
-environment to runc:
-
-```toml
-[runtimes.docker.runc.debian.images]
-opencode = "omashiki/agent:latest"
-
-[runtimes.docker.kata.debian.images]
-opencode = "omashiki/agent:latest"
-
-[environments.opencode]
-runtime = "docker.runc.debian"
+```bash
+mise run kata:smoke
 ```
 
-Before selecting `docker.kata.debian` for Omashiki jobs on a host:
+This task builds jcode and starts one disposable labelled container.
+It checks runtime selection and Docker exec.
+It removes that container after the check.
+The smoke test uses host Docker, not a VM.
 
-1. Run `mise run kata:install` with interactive sudo available.
-2. Run `mise run kata:smoke` to prove Docker advertises and selects `kata`.
-3. Verify the remaining KVM, VMM, kernel, and virtio-fs prerequisites.
-4. Run the compatibility gate for filesystem, credentials, networking, exec,
-   and resource-limit behavior before treating the environment as ready.
+## Compatibility checks
 
-The Kata smoke is intentionally not a VM test. VM tasks are reserved for the
-distributed execution harness.
+Before a deployment claim, check the actual workload against these requirements:
 
-### Host smoke evidence
+| Area | Required check |
+| --- | --- |
+| Filesystem | Read-only root, temporary storage, worktree visibility, and ownership IDs. |
+| Mounts | Declared files, cache directories, and required Unix sockets. |
+| Credentials | Private copies, writable OAuth state, and cleanup. |
+| Network | Gateway, tool proxy, package access, and egress policy. |
+| Process control | Readiness, exec, timeout, cancellation, and cleanup. |
+| Resources | CPU, memory, and PID behavior for the selected handler. |
+| Results | Git publication or archive delivery through the normal finalization checks. |
 
-The passing host smoke establishes only this narrow chain:
-
-- Docker advertises the registered `kata` runtime while retaining `runc` as
-  the default.
-- A jcode image starts with `--runtime kata` and reports
-  `HostConfig.Runtime=kata`.
-- `docker exec` succeeds inside the running Kata sandbox.
-- The labelled smoke container is removed and post-cleanup discovery returns
-  no container.
-
-It does not mark the filesystem, credential, network, or resource checks below
-as complete.
-
-## What Must Be Re-Verified
-
-This is the part with real work in it. None of it is rewiring; all of it is
-revalidating a guarantee.
-
-### NFR-004 — Filesystem safety
-
-Mounts arrive over virtio-fs instead of a direct bind mount. Re-test:
-
-- [ ] The parent repository is genuinely read-only inside the guest
-- [ ] Path-escape and symlink-component rejection still hold
-- [ ] Repository owner uid/gid are preserved through virtio-fs
-- [ ] Cache mounts (`/omashiki-cache/*`) keep the same semantics
-
-### NFR-007 — Credential handling
-
-- [ ] The host temporary file bind-mounted `:ro` under `/tmp`
-      (`container_manager.ex:1728`) still arrives with the same permissions
-- [ ] Removal after harness readiness remains effective
-- [ ] `/run/omashiki/state`, the single writable point used for rotating OAuth
-      state, works through virtio-fs
-
-### NFR-003 — Isolation
-
-This should continue to hold inside the guest, but confirm that the Docker API
-propagates `CapDrop`, `no-new-privileges`, `ReadonlyRootfs`, and `PidsLimit`
-(`container_manager.ex:1738`) to the microVM.
-
-### Network
-
-- [ ] `ExtraHosts` with `host.docker.internal` — traffic now leaves through a
-      virtual NIC. This is the network item most likely to break, because the
-      LLM gateway and the tool proxy live on the host
-- [ ] Port publishing on 127.0.0.1 for HTTP harness transports
-- [ ] `NetworkMode: none` still means total isolation
-
-**`network = "host"` has no microVM equivalent.** A guest with its own kernel
-cannot share the host network namespace, so that mode cannot be carried over as
-written. The scope of that loss is narrow: all six declarations of
-`network = "host"` are load-test tiers — `[environments.loadtest]`
-(`omashiki.toml:183`) and the five `lt-*` tiers (`:223`, `:252`, `:281`,
-`:314`, `:345`). The environments meant for real work use `none`
-(`[environments.opencode]`, `:110`) and `restricted`
-(`[environments.codex]`, `:154`), and both have microVM equivalents. Kata
-therefore does not block the production environments; it does block re-running
-the load-test tiers unchanged, which matters because those tiers are the
-comparison baseline.
-
-### `exec`
-
-`op_execute` will use the Kata guest transport when the host deployment supports
-it. Validate its behavior and latency against the `pre_steps` and `post_steps`
-timeouts; no passing Kata E2E result is claimed here.
-
-## Behavior That Changes
-
-**tmpfs comes out of guest RAM, not host RAM.** Today `/tmp` is a 512 MB tmpfs
-(`container_manager.ex:1742`) inside a 512 MB cgroup. A microVM gets fixed RAM
-and the tmpfs is carved out of it, so guest memory must be
-`>= tmpfs + workload` or the process OOMs inside the VM. Review
-`[environments.*.resources].memory` together with `agent_tmp_size_mb`.
-
-**The density arithmetic changes.** Each sandbox gains a guest kernel plus the
-kata-agent, on the order of 100-150 MB of overhead against the few MB a
-container costs. The concurrent-sandbox ceiling per host drops substantially.
-Redo the load-test arithmetic before comparing any number to the Docker
-baseline.
-
-## Mandatory Benchmark
-
-**virtio-fs with many small files is the known weak point of Kata, and
-`git worktree add` is exactly that pattern.**
-
-Measure against the Docker baseline:
-
-1. `provision_worktree` plus checkout time
-2. Total provisioning time to harness readiness
-3. Memory overhead per sandbox
-4. `op_execute` throughput for `pre_steps`
-
-If (1) degrades badly, the mitigation is to move the worktree out of virtio-fs:
-mount it as a block device, or perform the checkout inside the guest from a
-remote — which becomes natural after Phase 1 of the
-[distributed execution roadmap](distributed-execution.md).
-
-## Alternatives Considered
-
-**gVisor**, if KVM is unavailable. Also a drop-in runtime, bind mounts work
-normally, and it needs no nested virtualization. But it gives no hardware
-boundary, and its syscall-interception cost is worst under heavy filesystem
-load — the worktree again. Plan B only.
-
-**A sandbox platform (CubeSandbox / E2B)** fits behind the same behaviour as a
-third backend, for when the goal is density and tens-of-milliseconds cold start
-rather than isolation with a minimal diff. These are different goals: Kata does
-not deliver 60 ms starts or snapshot forking, and the platform does not deliver
-bind mounts for free. If that route is taken, write the adapter against the
-**E2B API**, not against Cube — the Cube API is compatible by design, and
-targeting the interface avoids coupling to a young project.
-
-A REST backend is also more favourable to the BEAM than Docker is: it trades a
-single daemon socket that serializes container create/start for a Finch pool,
-and concurrent provisioning becomes processes, which is where the BEAM is
-strong. Keep any such backend pure I/O; never shell out to a runtime binary.
-
-## Do Not Do
-
-- **Kata over Firecracker.** No virtio-fs means no bind mounts, which removes
-  the reason for choosing Kata at all.
-- **MMDS for secret delivery.** It looks like the native microVM primitive, but
-  it lives at `169.254.169.254`, the single most probed SSRF target on the
-  internet — and this system runs model-generated code. Worse than the current
-  bind mount.
-- **Kernel cmdline for secret delivery.** Visible in `/proc/cmdline`.
-- **Replacing `LlmEgress.Proxy` / `SupplyChain.Proxy`** with whatever the
-  runtime offers. Policy is bound to the captured environment digest;
-  delegating it moves policy outside the component that captures it and couples
-  the guarantee to the runtime.
-
-## References
-
-- [Container boundary](../../server/lib/omashiki/runtime/container_manager.ex)
-- [Container manager behaviour](../../server/lib/omashiki/runtime/container_manager_behaviour.ex)
-- [Runtime capability](../../server/lib/omashiki/runtime/capability.ex)
-- [Runtime value helpers](../../server/lib/omashiki/runtimes.ex)
-- [Runtime schema](../../server/lib/omashiki/runtimes/runtime.ex)
-- [Preset registry](../../server/lib/omashiki/presets.ex)
-- [Harness types](../../server/lib/omashiki/harness/types.ex)
-- [Declarative configuration](../../omashiki.toml)
-- [Requirements](requirements.md)
+A passing smoke test proves only the checks that it executes.
+It does not establish all rows above.
+Use [distributed tests](how-to-run-distributed-tests.md) for the VM runtime matrix.
+Record the exact host and runtime versions with new evidence.

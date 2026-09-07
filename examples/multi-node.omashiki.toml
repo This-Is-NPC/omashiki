@@ -15,18 +15,12 @@
 # that differs between machines means two jobs admitted against "the same"
 # environment did not run the same thing.
 #
-# --- What works today, and what does not ------------------------------------
+# --- Deployment model -------------------------------------------------------
 #
-# Implemented: the canonical remote, node identity, and per-node capacity
-# rows. This file is the transitional layout: every machine still runs the
-# full release against one PostgreSQL. The target is a manager that owns
-# the database and workers that pull job snapshots without Repo — see
-# docs/internal/distributed-execution.md.
+# This example runs embedded nodes that share PostgreSQL.
+# Manager and worker roles also exist. They use the separate Compose examples.
+# See docs/how-to-add-a-worker.md for that deployment.
 #
-# Until those roles exist, every extra node still starts HTTP and LiveView —
-# give it a distinct [app].port or a firewall. `docker_socket_path` is still
-# compile-time, so every node must reach Docker at the default socket.
-
 # ---------------------------------------------------------------------------
 # Infrastructure
 # ---------------------------------------------------------------------------

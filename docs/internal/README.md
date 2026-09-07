@@ -1,64 +1,37 @@
 # Internal documentation
 
-Technical documentation: how the system is built, what it guarantees, and
-the design records behind it. The product itself is described in
-[../README.md](../README.md).
+Use these pages to develop, test, or change Omashiki.
+For installation operation, use the [public documentation](../README.md).
 
-## Reading Order
+## Start development
 
-1. [Product requirements](prd.md): purpose, users, delivered features,
-   guarantees, and scope.
-2. [Architecture](architecture.md): runtime shape, trust boundaries,
-   harnesses, and code references.
-3. [Current requirements](requirements.md): implemented business,
-   functional, and non-functional requirements.
-4. [Data model](data-model.md): persisted entities, invariants, and
-   lifecycle relationships.
+1. Read [contributing](contributing.md).
+2. [Set up the development environment](how-to-set-up-development.md).
+3. [Run the tests](how-to-run-tests.md).
 
-## Design Records
+## Development procedures
 
-Grounded in the current code; each carries its own status notes.
+| Task | Page |
+| --- | --- |
+| Check manager and worker behavior | [Run distributed tests](how-to-run-distributed-tests.md) |
+| Measure queue and container capacity | [Run load tests](how-to-run-load-tests.md) |
+| Build or change sandbox images | [Build agent images](how-to-build-agent-images.md) |
+| Add an agent integration | [Add a plugin](how-to-add-a-plugin.md) |
 
-- [Casas e frota — registo de implementação](house-fleet-implementation.md):
-  the six-phase work order that produced the house/fleet product, with a
-  closing note per phase and the known gaps.
-- [Manager and worker plan](distributed-execution.md): control plane owns
-  PostgreSQL and the product registry; workers pull snapshots and never mount
-  the database. 1:N, N:1 and N:M plus `git` / `files` / `none` sinks.
-- [Kata Containers runtime handler](runtime-kata.md): Docker API and
-  configuration support plus host deployment for per-sandbox kernels.
-- [Generic task processor](generic-task-processor.md): structured non-Git
-  results and optional repositories, without weakening the caller boundary.
-- [Plugins and task lifecycle](plugins-and-task-lifecycle.md): declarative
-  plugin manifests, harness cost model, and Wave 2 gate criteria.
-- [Harness next-cost measurement](harness-next-cost.md): post-CliJson
-  re-measurement and Wave 2 gate verdict.
+## System references
 
-## Engineering Records
+- [Architecture](architecture.md): components, process roles, and trust boundaries.
+- [Requirements](requirements.md): product scope and implementation requirements.
+- [Data model](data-model.md): tables, fields, relationships, and invariants.
+- [Job lifecycle](job-lifecycle.md): admission, dependencies, attempts, results, and recovery.
+- [Distributed execution](distributed-execution.md): worker protocol, leases, slots, and result delivery.
+- [Kata runtime](runtime-kata.md): installation implementation and compatibility checks.
+- [Design decisions](design-decisions.md): accepted choices and deferred proposals.
+- [Validation results](validation-results.md): dated measurements and evidence limits.
 
-- [Load test, wave 1](loadtest-wave1-400-durability.md): the 400-job
-  durability run and what it proved about NFR-001.
-- [CI baseline](ci-baseline.md): exit code and headline result of every
-  local CI target at a named commit, plus the standing gaps.
+## Documentation ownership
 
-## Component Documentation
-
-- [Agent images](../../agent/README.md): building and maintaining the
-  sandbox images.
-- [Example configurations](../../examples/README.md): registries, Compose
-  stacks, the handler example, and the secret model.
-- [Load test harness](../../.scripts/loadtest/README.md): prerequisites,
-  tier stanzas, and how to drive a run.
-- [VM orchestration](../../vm/README.md): the disposable VMs used for
-  distributed execution tests.
-
-## Documentation Ownership
-
-- `docs/concepts/` owns product behaviour as the user meets it.
-- `docs/internal/` owns architecture, contracts, security guarantees, and
-  cross-component operational concepts.
-- The root [`README.md`](../../README.md) owns project discovery and quick
-  start; [`CONTRIBUTING.md`](../../CONTRIBUTING.md) owns contributor
-  workflow, local secrets, tests, and hooks.
-- Component READMEs own only component-specific build and runtime
-  instructions and link back here for system behaviour.
+Keep development setup, tests, architecture, and requirements in this directory.
+Keep installation configuration and user procedures directly in `docs/`.
+Use component READMEs only to identify the component and link to its procedure.
+Do not duplicate the same procedure in several files.

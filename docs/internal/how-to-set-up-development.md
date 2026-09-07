@@ -1,0 +1,81 @@
+# How to set up development
+
+Use this procedure for source changes and local tests.
+For installation operation, use [install and stop](../how-to-install-and-stop.md).
+
+## Before you start
+
+You need Git, Docker with Compose support, and mise.
+Your account must have access to Docker.
+Run repository tasks from the checkout root.
+
+## 1. Install tools
+
+```bash
+mise install
+```
+
+The root `mise.toml` pins the project tools.
+Use those versions when you compare local test results.
+
+## 2. Prepare configuration
+
+Keep an existing `omashiki.toml` if it contains required local settings.
+For a new setup, copy the single-node example.
+If `.env` does not exist, copy `.env.example` to `.env`.
+
+```bash
+cp examples/single-node.omashiki.toml omashiki.toml
+cp .env.example .env
+```
+
+The development configuration uses HTTP port `4010` and database host port `5442`.
+Set credential variables only for the environments you will use.
+Missing `${env:VAR}` references stop configuration loading.
+
+## 3. Start the development server
+
+```bash
+mise run up
+```
+
+The task prepares dependencies, migrations, assets, and missing images.
+It starts Phoenix in the foreground.
+Open <http://127.0.0.1:4010>.
+
+For a database-only task:
+
+```bash
+mise run db-up
+mise run migrate
+```
+
+Use the [test procedure](how-to-run-tests.md) to validate source changes.
+
+## 4. Install the repository hook
+
+```bash
+mise run hooks:install
+```
+
+The pre-push hook runs the same local CI script as `mise run ci`.
+It can take longer than a focused test.
+
+## 5. Stop local services
+
+Press `Ctrl+C` in the server terminal.
+Then run:
+
+```bash
+mise run stop
+```
+
+Keep the database volume when you need the existing queue and account state.
+Do not use `up:fresh` unless you intend to delete local state.
+
+## Generated files
+
+`omashiki.e2e.toml` is a generated, ignored test configuration.
+Credential snapshots under `.omashiki/e2e/` are also local artifacts.
+Do not commit either location.
+The standard E2E runner uses a lock because preparation updates shared fixture files.
