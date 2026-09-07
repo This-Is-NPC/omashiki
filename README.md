@@ -28,7 +28,7 @@ environment; the payload carries the instruction and the ticket context, and
 nothing else. Every job ends in a signed terminal webhook, so the same handler
 can post the resulting branch back onto the ticket.
 
-![A tracker event crosses into Omashiki, the view cuts inside the worker that took the job, and cuts back out as the signed webhook closes the loop on GitHub](docs/assets/job-journey.gif)
+![Overview on top: a tracker event crosses into Omashiki through your handler and the core to a worker with a free slot, and a signed webhook returns to GitHub. Detail below, on the same clock: inside that worker, the frozen snapshot, the workspace, the sandbox run served by the core, and the verified result completed back](docs/assets/job-journey.gif)
 
 In the animation the neon green is Omashiki and the grey is yours. Omashiki starts at admission and ends at the signed webhook; the two arrows that cross the boundary are the whole integration surface.
 

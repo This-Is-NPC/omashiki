@@ -25,17 +25,37 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "docs" / "assets"
 WIDTH = 1200
-HEIGHT = 640
+HEIGHT = 1220
+DETAIL_DY = 592            # the detail view sits under the overview
 FPS = 12
 FRAMES_PER_BEAT = 16
-# One animation, three acts: the job enters (outer view), the worker runs it
-# (inside view), the result leaves (outer view).
-SCENES = [("intake", 0), ("intake", 1), ("intake", 2), ("intake", 3),
-          ("life", 1), ("life", 2), ("life", 3), ("life", 4),
-          ("intake", 5)]
-BEATS = len(SCENES)
+# One clock, two views. Each beat says where the overview and the detail are:
+# (overview beat, overview progress, detail beat, detail progress). None means
+# "not started yet"; 1.0 means "hold the finished pose".
+CLOCK = [
+    (0, None, -1, None),   # the issue is labelled
+    (1, None, -1, None),   # the handler sends the envelope
+    (2, None, -1, None),   # the core admits it
+    (3, None, 0, None),    # offer · accept into a slot
+    (3, 1.0, 1, None),     # snapshot travels down
+    (3, 1.0, 2, None),     # workspace
+    (3, 1.0, 3, None),     # run
+    (4, None, 4, None),    # verified · complete · result back to the core
+    (5, None, 4, 1.0),     # webhook back to GitHub
+]
+STEPS = [
+    "An issue is labelled on GitHub.",
+    "Your handler sends one envelope.",
+    "Omashiki-Core admits it and freezes the snapshot.",
+    "A worker with a free slot takes the offer.",
+    "The frozen snapshot came with the offer. The worker runs exactly that.",
+    "The worker cuts a clean workspace for the sink.",
+    "One agent turn runs. Model, tools and identity are served by the core.",
+    "The worker verifies the result and completes back to the core.",
+    "The core records it; a signed webhook closes the loop on GitHub.",
+]
+BEATS = len(CLOCK)
 FRAMES = BEATS * FRAMES_PER_BEAT
-FADE_FRAMES = 0
 
 # --- Design tokens (tokens.css). Sharp corners and neon green are identity. ---
 SURFACE = "#0e0e0e"          # neutral-5
@@ -204,20 +224,25 @@ def base(eyebrow: str, title: str, subtitle: str) -> list[str]:
         <rect width="{WIDTH}" height="{HEIGHT}" fill="url(#grid)"/>
         <circle cx="1090" cy="-60" r="300" fill="{BRAND}" opacity=".030"/>
         """,
-        text(56, 50, eyebrow.upper(), 12, BRAND, 700, mono=True, spacing=2.2),
-        text(56, 90, title, 31, INK, 700),
-        text(56, 116, subtitle, 14, MUTED, 400),
         text(1132, 55, "OMASHIKI", 13, INK, 800, anchor="end", mono=True, spacing=1.8),
         f'<rect x="1140" y="45" width="10" height="10" fill="{BRAND}"/>',
     ]
 
 
-def narration(step: int, total: int, message: str) -> list[str]:
+def section(eyebrow: str, title: str, subtitle: str) -> list[str]:
     return [
-        line(56, 592, 1144, 592, LINE, 1, 0.8),
-        square(62, 613, BRAND, 8),
-        text(78, 617, f"{step}/{total}", 11, BRAND, 800, mono=True, spacing=1.2),
-        text(118, 617, message, 13, INK, 500),
+        text(56, 50, eyebrow.upper(), 12, BRAND, 700, mono=True, spacing=2.2),
+        text(56, 90, title, 31, INK, 700),
+        text(56, 116, subtitle, 14, MUTED, 400),
+    ]
+
+
+def narration(step: int, total: int, message: str, y: float = 592) -> list[str]:
+    return [
+        line(56, y, 1144, y, LINE, 1, 0.8),
+        square(62, y + 21, BRAND, 8),
+        text(78, y + 25, f"{step}/{total}", 11, BRAND, 800, mono=True, spacing=1.2),
+        text(118, y + 25, message, 13, INK, 500),
     ]
 
 
@@ -416,9 +441,9 @@ def box_zone(z: tuple, title: str, color: str, fill: str, opacity: float = 1.0,
     ]
 
 
-def intake_scene(beat: int, local: float, pulse: float, step: int, total: int) -> list[str]:
-    svg = base(
-        "Event-driven intake",
+def intake_scene(beat: int, local: float, pulse: float) -> list[str]:
+    svg = section(
+        "Overview",
         "Your tracker fires. A result comes back.",
         "Handler, core and workers each run where you put them: one box or many.",
     )
@@ -531,7 +556,6 @@ def intake_scene(beat: int, local: float, pulse: float, step: int, total: int) -
     svg.append(text(703, 578, "dashed lines are machine boundaries you may or may not have · one box or a fleet, same picture",
                     9, FAINT, 600, anchor="middle", mono=True))
 
-    svg += narration(step, total, INTAKE_STEPS[beat])
     return svg
 
 
@@ -550,7 +574,7 @@ LIFECYCLE_STEPS = [
 STAGE_X = [170, 385, 600, 815, 1030]
 STAGE_LABEL = ["accept", "snapshot", "workspace", "run", "result"]
 CORE_LANE = (56, 140, 1144, 296)
-WORKER_LANE = (56, 348, 1144, 562)
+WORKER_LANE = (56, 348, 1144, 550)
 CY, WY = 226, 462          # box centres in each lane
 TL_Y = 322                 # timeline between the lanes
 
@@ -575,9 +599,9 @@ def down(x: float, y1: float, y2: float, color: str, amount: float, chip: str | 
     return out
 
 
-def lifecycle_scene(beat: int, local: float, pulse: float, step: int, total: int) -> list[str]:
-    svg = base(
-        "Inside the worker",
+def lifecycle_scene(beat: int, local: float, pulse: float) -> list[str]:
+    svg = section(
+        "Detail · inside the worker that took the job",
         "One offer becomes one governed sandbox run.",
         "What the core does stays on the core. What the worker does stays on the worker.",
     )
@@ -589,7 +613,9 @@ def lifecycle_scene(beat: int, local: float, pulse: float, step: int, total: int
 
     # timeline between the lanes
     svg.append(line(STAGE_X[0], TL_Y, STAGE_X[-1], TL_Y, LINE, 2, 0.7))
-    if beat < len(STAGE_X) - 1:
+    if beat < 0:
+        pass
+    elif beat < len(STAGE_X) - 1:
         svg.append(line(STAGE_X[0], TL_Y, mix(STAGE_X[beat], STAGE_X[beat + 1], local), TL_Y, BRAND, 2.5))
     else:
         svg.append(line(STAGE_X[0], TL_Y, STAGE_X[-1], TL_Y, BRAND, 2.5))
@@ -693,10 +719,9 @@ def lifecycle_scene(beat: int, local: float, pulse: float, step: int, total: int
                   BRAND_SOFT if lit[4] else FAINT, a[4], 9),
             label(x, CY + 36, "job row", BRAND_SOFT if lit[4] else FAINT, a[4], 9)]
 
-    svg.append(text(600, 578, "failure is also a result · retry reopens the same job",
+    svg.append(text(600, 566, "failure is also a result · retry reopens the same job",
                     9.5, FAINT, 600, anchor="middle", mono=True))
 
-    svg += narration(step, total, LIFECYCLE_STEPS[beat])
     return svg
 
 
@@ -708,24 +733,17 @@ def lifecycle_scene(beat: int, local: float, pulse: float, step: int, total: int
 def journey_frame(frame: int) -> str:
     step = min(BEATS - 1, frame // FRAMES_PER_BEAT)
     within = frame - step * FRAMES_PER_BEAT
-    local = ease(within / FRAMES_PER_BEAT)
+    progress = ease(within / FRAMES_PER_BEAT)
     pulse = 0.55 + 0.45 * math.sin((frame / FRAMES) * math.tau * 3) ** 2
-    scene, beat = SCENES[step]
+    ov_beat, ov_hold, dt_beat, dt_hold = CLOCK[step]
 
-    if scene == "intake":
-        svg = intake_scene(beat, local, pulse, step + 1, BEATS)
-    else:
-        svg = lifecycle_scene(beat, local, pulse, step + 1, BEATS)
-
-    # fade to surface across a cut so the change of view reads as a cut
-    fade = 0.0
-    if step > 0 and SCENES[step - 1][0] != scene and within < FADE_FRAMES:
-        fade = 1.0 - (within + 1) / (FADE_FRAMES + 1)
-    if step < BEATS - 1 and SCENES[step + 1][0] != scene and within >= FRAMES_PER_BEAT - FADE_FRAMES:
-        fade = (within - (FRAMES_PER_BEAT - FADE_FRAMES) + 1) / (FADE_FRAMES + 1)
-    if fade > 0:
-        svg.append(rect(0, 0, WIDTH, HEIGHT, fill=SURFACE, stroke="none", opacity=fade * 0.92))
-
+    svg = base("", "", "")
+    svg += intake_scene(ov_beat, progress if ov_hold is None else ov_hold, pulse)
+    svg.append(line(56, DETAIL_DY - 8, 1144, DETAIL_DY - 8, LINE, 1, 0.8, "2 6"))
+    svg.append(f'<g transform="translate(0,{DETAIL_DY})">')
+    svg += lifecycle_scene(dt_beat, progress if dt_hold is None else dt_hold, pulse)
+    svg.append("</g>")
+    svg += narration(step + 1, BEATS, STEPS[step], HEIGHT - 48)
     svg.append("</svg>")
     return "".join(svg)
 
