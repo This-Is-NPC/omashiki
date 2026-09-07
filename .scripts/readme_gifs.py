@@ -567,8 +567,8 @@ def down(x: float, y1: float, y2: float, color: str, amount: float, chip: str | 
     y = mix(y1, y2, ease(amount))
     out = [line(x, y1, x, y2, color, 1.5, 0.5, "3 6"), dot(x, y, color, 5)]
     if chip:
-        # chips sit in the gap between the lanes, beside the crossing, never on a title
-        out.append(tag(x + 58, 308, chip, color, SURFACE, size=9))
+        # labels sit in the gap between the lanes, beside the crossing, never on a title
+        out.append(text(x + 12, 313, chip, 9, color, 800, mono=True, spacing=1.0))
     return out
 
 
@@ -660,14 +660,14 @@ def lifecycle_frame(frame: int) -> str:
         glyph_box(x, WY - 12, 64, BRAND if lit[3] else FAINT, a[3]),
         label(x, WY + 50, "sandbox", BRAND_SOFT if lit[3] else FAINT, a[3], 9),
     ]
-    services = [("model", -52, "gateway"), ("tools", 0, "MCP proxy"), ("identity", 52, "broker")]
-    svg.append(framed(x, CY, 180, 100, BRAND if lit[3] else LINE, a[3], INSET))
+    services = [("model", -64, "gateway"), ("tools", 0, "proxy"), ("identity", 64, "broker")]
+    svg.append(framed(x, CY, 216, 100, BRAND if lit[3] else LINE, a[3], INSET))
     for i, (lab, dx, sub) in enumerate(services):
         on = lit[3] and (beat > 3 or local > 0.2 + i * 0.25)
-        svg += [rect(x + dx - 24, CY - 30, 48, 44, fill=PANEL, stroke=BRAND if on else OUTLINE,
+        svg += [rect(x + dx - 30, CY - 34, 60, 46, fill=PANEL, stroke=BRAND if on else OUTLINE,
                      opacity=a[3]),
-                label(x + dx, CY - 12, lab, BRAND_SOFT if on else FAINT, a[3], 8),
-                label(x + dx, CY + 4, sub, MUTED if on else FAINT, a[3], 7),
+                label(x + dx, CY - 16, lab, BRAND_SOFT if on else FAINT, a[3], 7.5),
+                label(x + dx, CY + 1, sub, MUTED if on else FAINT, a[3], 6.5),
                 line(x + dx, WY - 75, x + dx, CY + 50, BRAND if on else LINE, 1.5,
                      0.8 if on else 0.25, "3 6")]
         if on and beat == 3:
@@ -686,9 +686,10 @@ def lifecycle_frame(frame: int) -> str:
         svg.append(square(x + 50, WY - 60, BRAND, 9 * (pulse if beat == 4 else 1.0)))
         svg += down(x, WY - 75, CY + 50, BRAND, 1.0 if beat > 4 else local, "complete")
     svg.append(framed(x, CY, 130, 100, BRAND if lit[4] else LINE, a[4], INSET))
-    svg.append(label(x, CY + 4, "attempt 1 · succeeded" if lit[4] else "attempt 1 · running",
-                     BRAND_SOFT if lit[4] else FAINT, a[4], 8.5))
-    svg.append(label(x, CY + 36, "job row", BRAND_SOFT if lit[4] else FAINT, a[4], 9))
+    svg += [label(x, CY - 12, "attempt 1", INK if lit[4] else FAINT, a[4], 9),
+            label(x, CY + 6, "succeeded" if lit[4] else "running",
+                  BRAND_SOFT if lit[4] else FAINT, a[4], 9),
+            label(x, CY + 36, "job row", BRAND_SOFT if lit[4] else FAINT, a[4], 9)]
 
     # ---- 06 return: core only, webhook leaves the core --------------------------
     x = STAGE_X[5]
@@ -699,11 +700,12 @@ def lifecycle_frame(frame: int) -> str:
     ]
     if beat == 5:
         out = clamp((local - 0.3) / 0.7)
-        svg += [arrow(x + 65, CY, 1140, CY, BRAND, 2.5, 0.35 + 0.65 * out),
-                crossing(1128, CY, BRAND, 0.4 + 0.6 * out)]
+        svg += [arrow(x + 65, CY, 1178, CY, BRAND, 2.5, 0.35 + 0.65 * out),
+                crossing(CORE_LANE[2], CY, BRAND, 0.4 + 0.6 * out)]
         if out > 0:
-            svg += [dot(mix(x + 65, 1128, out), CY, BRAND, 6),
-                    tag(x + 40, CY - 34, "webhook", BRAND, SURFACE, size=9, opacity=out)]
+            svg += [dot(mix(x + 65, 1170, out), CY, BRAND, 6),
+                    text(1152, CY - 14, "webhook", 8.5, BRAND, 800, anchor="middle",
+                         mono=True, opacity=out, spacing=1.0)]
 
     svg.append(text(600, 578, "failure is also a result · retry reopens the same job",
                     9.5, FAINT, 600, anchor="middle", mono=True))
