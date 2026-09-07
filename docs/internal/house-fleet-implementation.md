@@ -1,345 +1,347 @@
-# Casas e frota — registo de implementação
+# Houses and fleet: implementation record
 
-Isto é **como** chegámos ao produto descrito em [walkthrough.md](../walkthrough.md). Foi escrito como plano quando o produto ainda era «to-be»; fica como registo de engenharia, com a nota de fecho de cada fase.
+This is **how** we reached the product described in [docs/concepts/](../README.md).
+It was written as a plan when the product was still a target. It stays as an
+engineering record, with a closing note for each phase.
 
-- [walkthrough.md](../walkthrough.md) é o **produto**. Este ficheiro é a **ordem de trabalho** que o produziu.
-- [distributed-execution.md](distributed-execution.md) já é dono do protocolo manager/worker. Não o replaneamos aqui. As fases 2 e 3 daquele doc são uma **pista de dependência** (ferro), não greenfield neste plano.
-- **Hoje vs to-be** é nomeado com honestidade: o que já corre em produção vs o que ainda não existe.
-- **Estado (2026-09-06):** as seis fases estão merged em `master`; cada fase tem abaixo a sua nota de fecho. O que ficou de fora está em «Lacunas conhecidas» no fim.
+- [docs/concepts/](../README.md) is the **product**. This file is the **work order** that produced it.
+- [distributed-execution.md](distributed-execution.md) owns the manager/worker protocol. We did not plan it again here. Phases 2 and 3 of that document are a **dependency track** (the fleet), not new work in this plan.
+- **Today vs target** is named honestly: what already runs vs what did not exist yet.
+- **Status (2026-09-06):** the six phases are merged in `master`. Each phase has its closing note below. What stayed out is in "Known gaps" at the end.
 
 ---
 
-## Já corre hoje (não reimplementar)
+## Already running before this plan (not reimplemented)
 
-| Área | O que já existe |
+| Area | What existed |
 | --- | --- |
-| **Admissão** | `POST /api/v1/jobs`: o cliente escolhe o **nome** do environment; payload só `instruction` + `context`; sem harness/provider/model/auth no payload |
-| **Snapshots** | `admitted_environment` / `admitted_repository` / `admitted_plugin` + digests; o worker executa o snapshot, não o registry vivo |
-| **Boot** | Papéis `embedded` / `manager` / `worker`; `worker.toml` = limites + Docker; `Config.reset!()` no worker |
-| **Gateway** | Chaves LLM na casa; job token no contentor |
-| **Host credentials** | Cópia por tentativa para `/run/omashiki/state` (single-node) |
-| **Webhooks** | Outbox terminal; um handler pode subscrever como cliente |
-| **Dist-exec** | Protocolo poll/offer/accept/heartbeat/complete, enroll, scaffolding N:1 poll |
+| **Admission** | `POST /api/v1/jobs`: the client selects the **name** of the environment; the payload is only `instruction` + `context`; no harness, provider, model, or auth in the payload |
+| **Snapshots** | `admitted_environment` / `admitted_repository` / `admitted_plugin` + digests; the worker runs the snapshot, not the live registry |
+| **Boot** | Roles `embedded` / `manager` / `worker`; `worker.toml` = limits + Docker; `Config.reset!()` on the worker |
+| **Gateway** | LLM keys in the house; job token in the container |
+| **Host credentials** | Copy per attempt to `/run/omashiki/state` (single node) |
+| **Webhooks** | Terminal outbox; a handler can subscribe as a client |
+| **Dist-exec** | Protocol poll/offer/accept/heartbeat/complete, enroll, N:1 poll scaffolding |
 
 ---
 
-## Duas pistas, um produto
+## Two tracks, one product
 
-| Pista | Dono | Doc |
+| Track | Owner | Document |
 | --- | --- | --- |
-| **Casa** | registry de produto, identidades, `include`, broker | **este ficheiro** |
-| **Ferro** | slots, isolamento N:M, endurecimento do protocolo | [distributed-execution.md](distributed-execution.md) fases 2–3 |
+| **House** | product registry, identities, `include`, broker | **this file** |
+| **Fleet** | slots, N:M isolation, protocol hardening | [distributed-execution.md](distributed-execution.md) phases 2–3 |
 
-As fases 1–2 **deste** ficheiro podem começar enquanto ferro 2–3 ainda estão abertas. A fase 6 (multi-casa como produto) **espera** por ferro 2–3.
+Phases 1–2 of **this** file could start while fleet phases 2–3 were open. Phase 6 (many houses as a product) **waits** for fleet phases 2–3.
 
 ---
 
-## Ordem de trabalho
+## Work order
 
 ```mermaid
 flowchart TD
-  P1[Fase 1 — include]
-  P2[Fase 2 — ~/ no ferro]
-  P3[Fase 3 — identities]
-  P4[Fase 4 — broker]
-  P5[Fase 5 — handler exemplo]
-  P6[Fase 6 — multi-casa]
-  DE2[dist-exec fase 2 — slots]
-  DE3[dist-exec fase 3 — N:M]
+  P1[Phase 1 — include]
+  P2[Phase 2 — ~/ on the machine]
+  P3[Phase 3 — identities]
+  P4[Phase 4 — broker]
+  P5[Phase 5 — example handler]
+  P6[Phase 6 — many houses]
+  DE2[dist-exec phase 2 — slots]
+  DE3[dist-exec phase 3 — N:M]
 
   P1 --> P3
-  P2 -.->|paralelo com 1| P1
+  P2 -.->|parallel with 1| P1
   P3 --> P4
-  P3 -.->|pode antes de 4| P5
+  P3 -.->|can come before 4| P5
   P2 --> P6
   DE2 --> DE3
   DE2 --> P6
   DE3 --> P6
 ```
 
-| Fase | Depende de |
+| Phase | Depends on |
 | --- | --- |
 | 1 include | — |
-| 2 `~/` ferro | — (paralelo com 1) |
+| 2 `~/` on the machine | — (parallel with 1) |
 | 3 identities | 1 |
-| 4 broker | 3 + gateway data-plane (já existe) |
-| 5 handler exemplo | API jobs (já existe); melhor após 3 |
-| 6 multi-casa | dist-exec 2–3 + fase 2 (subscrição no ferro) |
+| 4 broker | 3 + gateway data plane (already existed) |
+| 5 example handler | jobs API (already existed); better after 3 |
+| 6 many houses | dist-exec 2–3 + phase 2 (subscription on the machine) |
 
 ---
 
-## Fase 1 — `include` (split opcional)
+## Phase 1: `include` (optional split)
 
-**Objetivo.** A casa pode ficar num só ficheiro **ou** partir-se. O snapshot unido é o mesmo.
+**Goal.** The house can be one file **or** several. The united snapshot is the same.
 
-**Porque agora.** Tudo o que vem a seguir (ficheiros `identities/`, perfis de agente) precisa deste loader. Sem `include`, comportamento igual ao de hoje.
+**Why now.** Everything after this (`identities/` files, agent profiles) needs this loader. Without `include`, the behavior is the same as before.
 
-**Mudanças.**
+**Changes.**
 
-| Regra | Detalhe |
+| Rule | Detail |
 | --- | --- |
-| Onde | `include` só na raiz `omashiki.toml` |
-| Profundidade | 1 — peças não incluem peças |
-| Paths | Só dentro do diretório da casa (sem URL, sem escape) |
-| Forma | Ficheiro ou diretório (`identities/` carrega `*.toml`) |
-| União | Mesmo nome em dois sítios → **falha boot** (sem overlay) |
-| Fica na raiz | `[app]` `[db]` `[auth]` `[reload]` `[runtimes]` `[limits]` `[nodes]` + lista `include` (`runtime.exs` continua a ler **este** ficheiro antes de `Config.load!`) |
-| Partível | `identities`, `presets`, `environments`, `credentials`, `host_credentials`, `repositories`, `caches` |
-| Digest | Do snapshot **unido** |
-| Loadtest | O fragmento passa a ser um `include` (acabar com `cat >>`) |
+| Where | `include` only in the root `omashiki.toml` |
+| Depth | 1: pieces do not include pieces |
+| Paths | Only inside the house directory (no URL, no escape) |
+| Form | File or directory (`identities/` loads `*.toml`) |
+| Union | Same name in two places → **boot fails** (no overlay) |
+| Stays in the root | `[app]` `[db]` `[auth]` `[reload]` `[runtimes]` `[limits]` `[nodes]` + the `include` list (`runtime.exs` still reads **this** file before `Config.load!`) |
+| Splittable | `identities`, `presets`, `environments`, `credentials`, `host_credentials`, `repositories`, `caches` |
+| Digest | Of the **united** snapshot |
+| Loadtest | The fragment becomes an `include` (no more `cat >>`) |
 
-**Costuras.**
+**Seams.**
 
-| Caminho | Papel |
+| Path | Role |
 | --- | --- |
-| `server/lib/omashiki/config.ex` | Orquestração do load unido |
-| `server/lib/omashiki/config/include.ex` | Loader de includes (novo) |
-| `server/test/omashiki/config/` | Testes ao lado dos existentes |
+| `server/lib/omashiki/config.ex` | Orchestration of the united load |
+| `server/lib/omashiki/config/include.ex` | Include loader (new) |
+| `server/test/omashiki/config/` | Tests next to the existing ones |
 
-**Feito quando.**
+**Done when.**
 
-- Casa só com `omashiki.toml` arranca.
-- Casa com `include` de `identities/` + `presets/` produz o **mesmo digest** que o monólito equivalente.
-- Colisão de `[presets.x]` em dois ficheiros → `Config.Error`.
-- Path fora do diretório da casa → falha boot.
-- Reload continua atómico (include falhado deixa a geração anterior).
+- A house with only `omashiki.toml` boots.
+- A house with `include` of `identities/` + `presets/` produces the **same digest** as the equivalent single file.
+- A collision of `[presets.x]` in two files → `Config.Error`.
+- A path outside the house directory → boot fails.
+- Reload stays atomic (a failed include leaves the previous generation).
 
-**Fora desta fase.** Tabela `identities` em si (fase 3); mudar `runtime.exs` para ler fragmentos.
+**Out of this phase.** The `identities` table itself (phase 3); changing `runtime.exs` to read fragments.
 
-**Fechada.** `feat(config): split omashiki.toml with include` — `server/lib/omashiki/config/include.ex`, testes em `test/omashiki/config/include_test.exs`. O fragmento do loadtest continua a ser colado à mão (README do loadtest); passa a `include` quando alguém tocar nesse fluxo.
+**Closed.** `feat(config): split omashiki.toml with include`: `server/lib/omashiki/config/include.ex`, tests in `test/omashiki/config/include_test.exs`. The loadtest fragment is still pasted by hand (loadtest README); it becomes an `include` when somebody touches that flow.
 
 ---
 
-## Fase 2 — `~/` expande na máquina que corre o Docker
+## Phase 2: `~/` expands on the machine that runs Docker
 
-**Objetivo.** O login de subscrição do harness é **do ferro**, com utilizadores Unix diferentes.
+**Goal.** The subscription login of the harness belongs to the **machine**, with different Unix users.
 
-**Porque depois / em paralelo com 1.** Independente de `include`; desbloqueia Claude/Codex remoto sem depender de `/home/howl` coincidente.
+**Why after / parallel with 1.** Independent of `include`; unblocks remote Claude/Codex without a matching `/home/<user>`.
 
-**Mudanças.**
+**Changes.**
 
-| Regra | Detalhe |
+| Rule | Detail |
 | --- | --- |
-| TOML | Guarda a forma declarada (`~/.claude/.credentials.json`) |
-| Load da casa | **Não** expandir `~/` em `HostCredential.origin!` |
-| Snapshot | Leva a forma com tilde (digest estável entre nós) |
-| Materialize | `HostCredentials.materialize/3` expande `~/` para o home **deste** processo (manager embedded **ou** worker) |
-| Absolutos | Ainda permitidos; não cruzam utilizadores |
-| Relativos | Rejeitar `./` e `../` no load |
-| worker.toml | Continua **sem** credentials |
-| Ficheiro em falta | Tentativa falha `host_credential_unavailable`; sem procurar noutro sítio |
-| OAuth write-back | **Fora** — explicitamente indeterminado no to-be |
+| TOML | Keeps the declared form (`~/.claude/.credentials.json`) |
+| House load | **Do not** expand `~/` in `HostCredential.origin!` |
+| Snapshot | Carries the form with the tilde (stable digest across nodes) |
+| Materialize | `HostCredentials.materialize/3` expands `~/` to the home of **this** process (embedded manager **or** worker) |
+| Absolute | Still allowed; do not cross users |
+| Relative | Reject `./` and `../` at load |
+| worker.toml | Still **without** credentials |
+| Missing file | The attempt fails with `host_credential_unavailable`; no search in another place |
+| OAuth write-back | **Out**: explicitly undecided |
 
-**Costuras.**
+**Seams.**
 
-| Caminho | Papel |
+| Path | Role |
 | --- | --- |
-| `server/lib/omashiki/config/host_credential.ex` | Parse sem expandir `~/` |
-| `server/lib/omashiki/runtime/host_credentials.ex` | Expansão no materialize |
-| `server/lib/omashiki/jobs/admission.ex` | `snapshot_value` com paths em string não expandida |
-| `server/lib/omashiki/worker/offer.ex` | Paths como strings (agora sem expandir) |
-| `server/test/omashiki/config/host_credential_test.exs` | Testes de load |
-| `server/test/omashiki/runtime/` | Testes de materialize |
+| `server/lib/omashiki/config/host_credential.ex` | Parse without expanding `~/` |
+| `server/lib/omashiki/runtime/host_credentials.ex` | Expansion at materialize |
+| `server/lib/omashiki/jobs/admission.ex` | `snapshot_value` with unexpanded string paths |
+| `server/lib/omashiki/worker/offer.ex` | Paths as strings (now unexpanded) |
+| `server/test/omashiki/config/host_credential_test.exs` | Load tests |
+| `server/test/omashiki/runtime/` | Materialize tests |
 
-**Feito quando.**
+**Done when.**
 
-- Load de `credentials = "~/.claude/.credentials.json"` guarda essa string.
-- Worker com home `/home/ubuntu` copia `/home/ubuntu/.claude/.credentials.json`.
-- Worker sem o ficheiro → tentativa falha.
-- Single-node embedded continua a funcionar com o `~` do operador.
+- Loading `credentials = "~/.claude/.credentials.json"` keeps that string.
+- A worker with home `/home/ubuntu` copies `/home/ubuntu/.claude/.credentials.json`.
+- A worker without the file → the attempt fails.
+- Single-node embedded still works with the `~` of the operator.
 
-**Fora desta fase.** Enviar **bytes** do ficheiro da casa para o worker (não é o desenho fechado — login no ferro, não a Ana a viajar).
+**Out of this phase.** Sending the **bytes** of the file from the house to the worker (not the chosen design: login on the machine, not the developer travelling).
 
-**Fechada.** `feat(runtime): expand ~/ credentials on the copying host`. A expansão usa `HOME` do processo (o release e o Compose definem-no por processo) com fallback ao home da VM.
+**Closed.** `feat(runtime): expand ~/ credentials on the copying host`. The expansion uses the `HOME` of the process (the release and Compose set it per process) with a fallback to the home of the VM.
 
 ---
 
-## Fase 3 — identities no registry (declarar, não agir)
+## Phase 3: identities in the registry (declare, do not act)
 
-**Objetivo.** O agente tem cara no TOML da casa. GitHub App é um **tipo** de identity, não um tipo de trabalho.
+**Goal.** The agent has a face in the TOML of the house. A GitHub App is a **kind** of identity, not a kind of work.
 
-**Porque depois de 1.** Para existir `identities/ana-bot.toml`. Relação com 2: nenhuma; pode sobrepor-se, mas 3 é forma de produto.
+**Why after 1.** So that `identities/review-bot.toml` can exist. Relation with 2: none; can overlap, but 3 is product shape.
 
-**Mudanças.**
+**Changes.**
 
-| Regra | Detalhe |
+| Rule | Detail |
 | --- | --- |
-| Tabela | `[identities.<name>]` |
-| Primeiro kind | `github-app`: `app_id`, `installation_id`, `private_key` (`${env:VAR}` só; falha boot se unset, como outros segredos) |
-| Presets | `presets.*.identities = ["ana-bot", ...]` zero ou mais; nome desconhecido → falha boot |
-| Environment | **Não** ganha campo `identities` |
-| Snapshot / admissão | Nomes + kind + ids públicos; **nunca** `private_key` na row, offer, sandbox ou worker |
-| Payload | Inalterado |
-| Worker | Nunca recebe a tabela identities |
-| Sem | Secção `[github]`; sem chaves issue/event |
+| Table | `[identities.<name>]` |
+| First kind | `github-app`: `app_id`, `installation_id`, `private_key` (`${env:VAR}` only; boot fails if unset, like other secrets) |
+| Presets | `presets.*.identities = ["review-bot", ...]` zero or more; unknown name → boot fails |
+| Environment | Does **not** get an `identities` field |
+| Snapshot / admission | Names + kind + public ids; **never** `private_key` in the row, the offer, the sandbox, or the worker |
+| Payload | Unchanged |
+| Worker | Never receives the identities table |
+| Without | A `[github]` section; issue or event keys |
 
-**Costuras.**
+**Seams.**
 
-| Caminho | Papel |
+| Path | Role |
 | --- | --- |
-| `server/lib/omashiki/config/identity.ex` | Novo struct + parse |
+| `server/lib/omashiki/config/identity.ex` | New struct + parse |
 | `server/lib/omashiki/presets.ex` | `@preset_fields` + `identities` |
-| `server/lib/omashiki/config.ex` | Wire no snapshot |
-| `server/lib/omashiki/config/registry.ex` | Registry unido |
-| `server/lib/omashiki/jobs/admission.ex` | `snapshot_value` — strip `private_key` como `api_key` |
-| `server/test/omashiki/config/` | Testes de load e colisão |
+| `server/lib/omashiki/config.ex` | Wire into the snapshot |
+| `server/lib/omashiki/config/registry.ex` | United registry |
+| `server/lib/omashiki/jobs/admission.ex` | `snapshot_value`: strip `private_key` like `api_key` |
+| `server/test/omashiki/config/` | Load and collision tests |
 
-**Feito quando.**
+**Done when.**
 
-- Exemplo to-be de `ana-bot` + `presets.reviewer` carrega.
-- Dois presets podem listar a mesma identity.
-- `private_key` não está em `admitted_environment` nem no offer do worker.
-- Nome de identity desconhecido → falha boot.
-- Casa com zero identities carrega.
+- The product example of `review-bot` + `presets.reviewer` loads.
+- Two presets can list the same identity.
+- `private_key` is not in `admitted_environment` nor in the worker offer.
+- An unknown identity name → boot fails.
+- A house with zero identities loads.
 
-**Fora desta fase.** Comentar no GitHub, mint de installation tokens, ferramentas MCP GitHub (fase 4).
+**Out of this phase.** Commenting on GitHub, minting installation tokens, GitHub MCP tools (phase 4).
 
-**Fechada.** `feat(config): declare agent identities on presets` — `config/identity.ex`; o preset guarda a vista pública, a chave só em `Config.identities/0`.
-
----
-
-## Fase 4 — a casa age como a App (forma B)
-
-**Objetivo.** Enquanto o job corre, a sandbox pergunta à **casa**; a casa usa `ana-bot` para comentar/etiquetar/abrir PR. Sandbox e VPS nunca veem a chave privada.
-
-**Porque depois de 3.** Nada para vestir até estar declarado. **Gateway data-plane** já existe — mesmo padrão das chaves LLM.
-
-**Mudanças.**
-
-| Regra | Detalhe |
-| --- | --- |
-| Broker | No manager, ligado aos nomes de identity admitidos (preset capturado na admissão) |
-| Sandbox | Fala com a casa dona (data-plane / pipe MCP genérico — `url`+`headers` no environment). O **nome** continua `[identities.ana-bot]` |
-| Alcance | Worker sem reach à casa → recusa o job (regra data-plane já existe) |
-| Handler | Cliente à porta **não** é isto |
-
-**Costuras.**
-
-| Caminho | Papel |
-| --- | --- |
-| `server/lib/omashiki/identities/` | Broker (novo) |
-| Claims | Binding como no gateway |
-| Cliente GitHub App | No manager (tools proxy ou cliente dedicado) |
-| Router | Só no manager, não no worker |
-
-**Feito quando.**
-
-- Job cujo preset lista `ana-bot` provoca comentário GitHub **do processo da casa**.
-- Logs/disco do worker sem `private_key`.
-- Job sem identities no preset não chama o broker.
-
-**Fora desta fase.** Webhooks GitHub inbound (fase 5); Jira como identity (Jira fica MCP no environment).
-
-**Fechada com lacunas.** `feat(identities): act as the agent's GitHub App from the house` — `identities/broker.ex` responde como servidor MCP in-process no tools-proxy; `identities/github_app.ex` assina o JWT e cacheia o token de instalação. Provado contra um GitHub simulado (Bypass) com JWT verificado pela chave pública, **não** contra GitHub real. Só o harness opencode recebe a configuração MCP que lista a identity.
+**Closed.** `feat(config): declare agent identities on presets`: `config/identity.ex`; the preset keeps the public view, the key only in `Config.identities/0`.
 
 ---
 
-## Fase 5 — handler exemplo (forma A), fora do core
+## Phase 4: the house acts as the App (form B)
 
-**Objetivo.** GitHub/Jira como **cliente à porta**. Não é tabela de features do Omashiki.
+**Goal.** While the job runs, the sandbox asks the **house**; the house uses `review-bot` to comment, label, or open a PR. The sandbox and the machine never see the private key.
 
-**Porque depois de 3** (para a casa já poder ter identity se a forma B também existir); pode sair após 3 mesmo sem fase 4.
+**Why after 3.** Nothing to wear before it is declared. The **gateway data plane** already existed: the same pattern as the LLM keys.
 
-**Mudanças.**
+**Changes.**
 
-| Peça | Detalhe |
+| Rule | Detail |
 | --- | --- |
-| `examples/handler/` | Recebe webhook GitHub, verifica segredo, `POST /api/v1/jobs` com `instruction`+`context`, nome do environment, **sem** GitHub no payload |
-| Terminal webhook | Usa o outbox existente para ouvir fim do job |
-| Documentação | Segredo webhook e mapeamento de eventos **no handler**, nunca em `omashiki.toml` |
-| Core | Sem schema GitHub novo; talvez ponteiro no README |
+| Broker | On the manager, bound to the admitted identity names (preset captured at admission) |
+| Sandbox | Talks to the owner house (data plane / generic MCP pipe: `url` + `headers` on the environment). The **name** is still `[identities.review-bot]` |
+| Reach | A worker that cannot reach the house → refuses the job (data-plane rule already existed) |
+| Handler | The client at the door is **not** this |
 
-**Costuras.**
+**Seams.**
 
-| Caminho | Papel |
+| Path | Role |
 | --- | --- |
-| `examples/handler/` | Sketch operável |
-| `docs/walkthrough.md` | Já descreve o modelo |
-| `server/lib/omashiki/jobs/webhooks.ex` | Entrega já existe |
+| `server/lib/omashiki/identities/` | Broker (new) |
+| Claims | Binding like the gateway |
+| GitHub App client | On the manager (tools proxy or dedicated client) |
+| Router | Only on the manager, not on the worker |
 
-**Feito quando.**
+**Done when.**
 
-- Operador corre o exemplo contra uma casa, etiqueta uma issue, vê job admitido com environment `triagem`, e recebe aviso de conclusão — **sem** `[github]` no TOML da casa.
+- A job whose preset lists `review-bot` causes a GitHub comment **from the house process**.
+- Worker logs and disk have no `private_key`.
+- A job without identities in the preset does not call the broker.
 
-**Fora desta fase.** Produto GitHub App dentro do Omashiki.
+**Out of this phase.** Inbound GitHub webhooks (phase 5); Jira as identity (Jira stays MCP on the environment).
 
-**Fechada.** `feat(examples): add GitHub issue handler at the door` — `examples/handler/github_issue_handler.py`, só stdlib, com testes unitários e de socket. Não foi corrido contra uma casa real com uma issue real; o contrato dos dois webhooks está coberto por testes.
+**Closed with gaps.** `feat(identities): act as the agent's GitHub App from the house`: `identities/broker.ex` answers as an in-process MCP server on the tools proxy; `identities/github_app.ex` signs the JWT and caches the installation token. Proved against a simulated GitHub (Bypass) with the JWT verified by the public key, **not** against a real GitHub. Only the opencode harness receives the MCP configuration that lists the identity.
 
 ---
 
-## Fase 6 — muitas casas, mesmas máquinas (produto, não protocolo)
+## Phase 5: example handler (form A), outside the core
 
-**Objetivo.** A frase to-be: *«os meus devs têm cada um o seu Omashiki, e eu empresto-lhes ferro»*.
+**Goal.** GitHub or Jira as a **client at the door**. Not a feature table of Omashiki.
 
-**Depende de** [distributed-execution.md](distributed-execution.md):
+**Why after 3** (so the house can already have an identity if form B also exists); can ship after 3 even without phase 4.
 
-- **Fase 2 (ferro):** slots no worker são autoridade de capacidade; manager regista in-flight; dois managers não sobreservam.
-- **Fase 3 (ferro):** jobs de A e B não cruzam remotes/blobs/claims.
+**Changes.**
 
-Não copiamos a lista de tarefas daquele doc — só citamos a dependência.
-
-**Produto de operador** (esta fase):
-
-| Peça | Detalhe |
+| Piece | Detail |
 | --- | --- |
-| Enroll / tokens | Quais casas uma máquina pode servir — procedimento documentado, não só env vars |
-| Presença | Workers como vivacidade máquina→esta casa (não control plane de cluster) |
-| Prova | Casa da Ana + casa do João, um VPS, dois jobs, sem remotes cruzados, sem credentials cruzadas, resultados só na casa dona |
+| `examples/handler/` | Receives the GitHub webhook, verifies the secret, `POST /api/v1/jobs` with `instruction` + `context`, the environment name, **no** GitHub in the payload |
+| Terminal webhook | Uses the existing outbox to hear the end of the job |
+| Documentation | Webhook secret and event mapping **in the handler**, never in `omashiki.toml` |
+| Core | No new GitHub schema; maybe a pointer in the README |
 
-**Costuras.**
+**Seams.**
 
-| Caminho | Papel |
+| Path | Role |
 | --- | --- |
-| `server/lib/omashiki/worker/managers.ex` | Lista de managers |
+| `examples/handler/` | Runnable sketch |
+| `docs/concepts/client-at-the-door.md` | Describes the model |
+| `server/lib/omashiki/jobs/webhooks.ex` | Delivery already existed |
+
+**Done when.**
+
+- An operator runs the example against a house, labels an issue, sees a job admitted with environment `triage`, and receives the completion notice, **without** `[github]` in the TOML of the house.
+
+**Out of this phase.** A GitHub App product inside Omashiki.
+
+**Closed.** `feat(examples): add GitHub issue handler at the door`: `examples/handler/github_issue_handler.py`, stdlib only, with unit and socket tests. It was not run against a real house with a real issue; the contract of the two webhooks is covered by tests.
+
+---
+
+## Phase 6: many houses, the same machines (product, not protocol)
+
+**Goal.** The target sentence: *"my developers each have their own Omashiki, and I lend them machines"*.
+
+**Depends on** [distributed-execution.md](distributed-execution.md):
+
+- **Phase 2 (fleet):** the slots on the worker are the capacity authority; the manager records in-flight; two managers do not over-reserve.
+- **Phase 3 (fleet):** jobs of A and B do not cross remotes, blobs, or claims.
+
+We do not copy the task list of that document. We only cite the dependency.
+
+**Operator product** (this phase):
+
+| Piece | Detail |
+| --- | --- |
+| Enroll / tokens | Which houses a machine can serve: a documented procedure, not only env vars |
+| Presence | Workers as liveness machine → this house (not a cluster control plane) |
+| Proof | House A + house B, one machine, two jobs, no crossed remotes, no crossed credentials, results only in the owner house |
+
+**Seams.**
+
+| Path | Role |
+| --- | --- |
+| `server/lib/omashiki/worker/managers.ex` | List of managers |
 | `server/lib/omashiki/worker/presence.ex` | Liveness |
-| Overview LiveView | UI de presença |
-| `examples/compose*.yml` | Compose multi-casa |
-| Scripts enroll | Estender, não substituir protocolo |
+| Overview LiveView | Presence UI |
+| `examples/compose*.yml` | Multi-house Compose |
+| Enroll scripts | Extend, do not replace the protocol |
 
-**Feito quando.**
+**Done when.**
 
-- Dois processos manager reais + um worker, documentado em `examples/`, isolamento mantém-se com kill/restart de uma casa.
+- Two real manager processes + one worker, documented in `examples/`, isolation holds through kill/restart of one house.
 
-**Fora desta fase.** Ana a escolher GPU-1; App org-wide a despejar em duas casas; um Omashiki com muitos logins de developer (outro produto — o to-be diz-o).
+**Out of this phase.** A developer selecting GPU-1; an org-wide App sending to two houses; one Omashiki with many developer logins (another product).
 
-**Fechada.** `feat(worker): enroll one machine into many houses` + `test(e2e): prove two houses share one worker in isolation` — `mise run e2e:two-houses`. Descoberta: duas casas no mesmo **host** colidem no socket do supply-chain; cada uma precisa do seu `OMASHIKI_SUPPLY_CHAIN_SOCKET_PATH` (em Compose não acontece).
-
----
-
-## Explicitamente nunca neste plano
-
-- Secção `[github]`, filtros de issue, segredo webhook em `omashiki.toml`
-- Identity no environment ou no payload do job
-- `host_credentials` em `worker.toml`
-- Cadeias de `include` / merge por overlay
-- Paths de credential relativos sem `~`
-- Montar `~/.claude` da Ana no VPS
-- Enviar bytes de ficheiro de subscrição da casa para o worker como desenho
-- OAuth write-back (indeterminado)
-- Kata / Arch / judge / fan-in (outros docs)
-- Mudar quem escolhe o environment (já é o submissor)
+**Closed.** `feat(worker): enroll one machine into many houses` + `test(e2e): prove two houses share one worker in isolation`: `mise run e2e:two-houses`. Finding: two houses on the same **host** collide on the supply-chain socket; each needs its own `OMASHIKI_SUPPLY_CHAIN_SOCKET_PATH` (not an issue under Compose).
 
 ---
 
-## Lacunas conhecidas
+## Explicitly never in this plan
 
-| Lacuna | Onde | O que falta |
+- A `[github]` section, issue filters, or the webhook secret in `omashiki.toml`
+- Identity on the environment or in the job payload
+- `host_credentials` in `worker.toml`
+- `include` chains or merge by overlay
+- Relative credential paths without `~`
+- Mounting the `~/.claude` of a developer on a machine
+- Sending the bytes of a subscription file from the house to the worker as a design
+- OAuth write-back (undecided)
+- Kata / Arch / judge / fan-in (other documents)
+- Changing who selects the environment (it is already the submitter)
+
+---
+
+## Known gaps
+
+| Gap | Where | What is missing |
 | --- | --- | --- |
-| GitHub real | fase 4 | Um comentário numa issue real com uma App real; hoje o broker só foi provado contra um GitHub simulado |
-| Identity nos outros harnesses | fase 4 | O render da configuração MCP (`Tools.McpConfig`) só é chamado para opencode; Claude e jcode não veem o servidor `ana-bot` |
-| Loadtest por `include` | fase 1 | O README do loadtest ainda manda colar o fragmento; o loader já suporta `include` |
-| Handler contra casa real | fase 5 | Só testes; correr o exemplo contra uma casa e uma issue etiquetada |
+| Real GitHub | phase 4 | A comment on a real issue with a real App; the broker was proved only against a simulated GitHub |
+| Identity on the other harnesses | phase 4 | The MCP configuration render (`Tools.McpConfig`) is called only for opencode; Claude and jcode do not see the identity server |
+| Loadtest by `include` | phase 1 | The loadtest README still says to paste the fragment; the loader already supports `include` |
+| Handler against a real house | phase 5 | Tests only; run the example against a house and a labelled issue |
 
-## Como sabemos que uma fase está feita
+## How we know a phase is done
 
-Cada fase fecha com:
+Each phase closes with:
 
-1. **Testes** nas costuras nomeadas acima.
-2. **Nota** de uma linha neste ficheiro **ou** comentário no item correspondente das garantias do [walkthrough.md](../walkthrough.md) a dizer que já há código.
+1. **Tests** at the seams named above.
+2. **A note** of one line in this file **or** a comment on the matching promise in [guarantees.md](../concepts/guarantees.md) saying that code exists.
 
-**Não** marcar uma garantia como «hoje» até a fase estar merged.
+**Do not** mark a promise as "today" until the phase is merged.
 
-| Fase | Garantias no walkthrough |
+| Phase | Promises in guarantees.md |
 | --- | --- |
 | 1 | 13, 14 |
 | 2 | 16 |
