@@ -482,8 +482,11 @@ def intake_frame(frame: int) -> str:
     svg += [crossing(DIVIDERS[1], ROW_Y, INFO if lit[3] else OUTLINE),
             label(DIVIDERS[1], ROW_Y - 18, "network", INFO if lit[3] else FAINT, 1.0, 8)]
 
-    # flow line and the travelling job
-    svg.append(line(SRC_X + 95, ROW_Y, CORE_X - 75, ROW_Y, LINE, 2, 0.5, "4 8"))
+    # the travelling job; segments light only as the job passes
+    if lit[1]:
+        svg.append(line(SRC_X + 95, ROW_Y, HANDLER_X - 48, ROW_Y, VIOLET, 2, 0.5))
+    if lit[2]:
+        svg.append(line(HANDLER_X + 48, ROW_Y, CORE_X - 75, ROW_Y, BRAND, 2, 0.5))
     if beat == 1:
         svg += travel(SRC_X + 95, HANDLER_X - 48, ROW_Y, local, VIOLET)
     elif beat == 2:
@@ -519,8 +522,6 @@ def intake_frame(frame: int) -> str:
         ]
         if beat == 5 and local > 0.95:
             svg.append(line(SRC_X + 95, 512, SRC_X + 95, ROW_Y, BRAND, 2, 0.6))
-    else:
-        svg.append(line(CORE_X - 40, 512, SRC_X + 95, 512, LINE, 2, 0.35, "4 8"))
 
     svg.append(text(703, 578, "dashed lines are machine boundaries you may or may not have · one box or a fleet, same picture",
                     9, FAINT, 600, anchor="middle", mono=True))
@@ -535,17 +536,40 @@ def intake_frame(frame: int) -> str:
 # ---------------------------------------------------------------------------
 
 LIFECYCLE_STEPS = [
-    "The worker polls the core and accepts into a free slot.",
-    "The snapshot frozen at admission decides everything.",
-    "A workspace is prepared for the sink.",
-    "One agent turn runs. Model, tools and identity go through the core.",
-    "The result is verified: a branch, a bundle, or the actions taken.",
-    "The core records it and signs the webhook.",
+    "The worker polls; the core offers one queued job; the worker accepts into a free slot.",
+    "The snapshot frozen at admission travels with the offer. The worker runs exactly that.",
+    "The worker cuts a clean workspace for the sink.",
+    "One agent turn runs on the worker. Model, tools and identity are served by the core.",
+    "The worker verifies the result and completes back to the core.",
+    "The core records the event and signs the webhook.",
 ]
 
 STAGE_X = [150, 330, 510, 690, 870, 1050]
 STAGE_LABEL = ["accept", "snapshot", "workspace", "run", "result", "return"]
-STAGE_Y = 372
+CORE_LANE = (56, 140, 1144, 296)
+WORKER_LANE = (56, 348, 1144, 562)
+CY, WY = 226, 462          # box centres in each lane
+TL_Y = 322                 # timeline between the lanes
+
+
+def lane(z: tuple, title: str, color: str) -> list[str]:
+    x1, y1, x2, y2 = z
+    return [
+        rect(x1, y1, x2 - x1, y2 - y1, fill=OUTSIDE_TINT, stroke=color, stroke_width=1.5,
+             opacity=0.95, dash="5 7"),
+        square(x1 + 18, y1 + 18, color, 8),
+        text(x1 + 32, y1 + 22, title, 10.5, color, 800, mono=True, spacing=1.4),
+    ]
+
+
+def down(x: float, y1: float, y2: float, color: str, amount: float, chip: str | None = None) -> list[str]:
+    """A vertical hand-off between the lanes with a moving dot."""
+    y = mix(y1, y2, ease(amount))
+    out = [line(x, y1, x, y2, color, 1.5, 0.5, "3 6"), dot(x, y, color, 5)]
+    if chip:
+        # chips sit in the gap between the lanes, beside the crossing, never on a title
+        out.append(tag(x + 58, 308, chip, color, SURFACE, size=9))
+    return out
 
 
 def lifecycle_frame(frame: int) -> str:
@@ -553,30 +577,15 @@ def lifecycle_frame(frame: int) -> str:
     svg = base(
         "Inside the boundary",
         "One offer becomes one governed sandbox run.",
-        "One worker, one offer. Nothing here came from the payload.",
+        "What the core does stays on the core. What the worker does stays on the worker.",
     )
     lit = [beat >= i for i in range(6)]
     a = [1.0 if on else DIM for on in lit]
-    STRIP_Y = 150
-    TL_Y = 252
-    Y = 436
 
-    # the core: a strip across the top that every upward link reaches
-    svg += [
-        rect(56, STRIP_Y - 16, 1088, 32, fill=BRAND_TINT, stroke=BRAND_DIM, dash="5 7"),
-        glyph_house(80, STRIP_Y, 22, BRAND, 1.0),
-        text(100, STRIP_Y + 4, "OMASHIKI-CORE", 10.5, BRAND, 800, mono=True, spacing=1.4),
-    ]
+    svg += lane(CORE_LANE, "OMASHIKI-CORE", BRAND)
+    svg += lane(WORKER_LANE, "OMASHIKI-WORKER:NODE-002", INFO)
 
-    # the worker: everything below the core strip happens on one worker node
-    svg += [
-        rect(56, TL_Y - 34, 1088, Y + 95 - (TL_Y - 34), fill=OUTSIDE_TINT, stroke=INFO,
-             stroke_width=1.5, opacity=0.95, dash="5 7"),
-        square(74, TL_Y - 18, INFO, 8),
-        text(88, TL_Y - 14, "OMASHIKI-WORKER:NODE-002", 10.5, INFO, 800, mono=True, spacing=1.4),
-    ]
-
-    # timeline
+    # timeline between the lanes
     svg.append(line(STAGE_X[0], TL_Y, STAGE_X[-1], TL_Y, LINE, 2, 0.7))
     if beat < 5:
         svg.append(line(STAGE_X[0], TL_Y, mix(STAGE_X[beat], STAGE_X[beat + 1], local), TL_Y, BRAND, 2.5))
@@ -585,90 +594,118 @@ def lifecycle_frame(frame: int) -> str:
     for i, x in enumerate(STAGE_X):
         svg += [square(x, TL_Y, BRAND if lit[i] else OUTLINE, 10 if beat == i else 8,
                        1.0 if lit[i] else 0.6),
-                label(x, TL_Y + 28, STAGE_LABEL[i],
-                      BRAND if beat == i else (INK if lit[i] else FAINT), 1.0, 11)]
+                label(x, TL_Y + 22, STAGE_LABEL[i],
+                      BRAND if beat == i else (INK if lit[i] else FAINT), 1.0, 10)]
 
-    # 01 accept: the worker polls the core and takes a slot
+    # ---- 01 accept: core holds the queue, worker takes a slot -----------------
     x = STAGE_X[0]
-    wcolor = INFO if lit[0] else LINE
-    svg.append(framed(x, Y, 130, 150, wcolor, a[0], INSET))
-    svg.append(square(x - 30, Y - 30, wcolor, 12, a[0]))
-    svg += container_tree(x - 30, Y - 30, 2, 1.0 if lit[0] else 0.0, INFO, a[0], 26)
-    svg.append(label(x, Y + 40, "slot 1 / 2", INFO if lit[0] else FAINT, a[0], 10))
+    svg.append(framed(x, CY, 130, 100, BRAND if lit[0] else LINE, a[0], INSET))
+    for i in range(3):
+        on = lit[0] and i == 0
+        svg.append(rect(x - 45 + i * 30, CY - 14, 24, 28, fill=PANEL,
+                        stroke=BRAND if on else OUTLINE, opacity=a[0]))
+        if on:
+            svg.append(square(x - 33, CY, BRAND, 8, a[0] * (pulse if beat == 0 else 1.0)))
+    svg.append(label(x, CY + 36, "queue", BRAND_SOFT if lit[0] else FAINT, a[0], 9))
+
+    svg.append(framed(x, WY, 130, 150, INFO if lit[0] else LINE, a[0], INSET))
+    svg.append(square(x - 30, WY - 30, INFO if lit[0] else FAINT, 12, a[0]))
+    svg += container_tree(x - 30, WY - 30, 2, 1.0 if lit[0] else 0.0, INFO, a[0], 26)
+    svg.append(label(x, WY + 40, "slot 1 / 2", INFO if lit[0] else FAINT, a[0], 10))
     for i in range(2):
-        svg.append(square(x - 10 + i * 20, Y + 56, INFO if (i == 0 and lit[0]) else OUTLINE, 9, a[0]))
+        svg.append(square(x - 10 + i * 20, WY + 56, INFO if (i == 0 and lit[0]) else OUTLINE, 9, a[0]))
     if beat == 0:
-        y0 = mix(Y - 75, STRIP_Y + 16, local)
-        svg += [line(x, Y - 75, x, STRIP_Y + 16, BRAND_DIM, 1.5, 0.6, "3 6"),
-                dot(x, y0, BRAND, 5), tag(x + 52, STRIP_Y + 30, "poll", BRAND, SURFACE, size=9)]
+        if local < 0.5:
+            svg += down(x, WY - 75, CY + 50, INFO, local * 2, "poll")
+        else:
+            svg += down(x, CY + 50, WY - 75, BRAND, (local - 0.5) * 2, "offer")
 
-    # 02 snapshot: what was frozen at admission
+    # ---- 02 snapshot: frozen on the core, carried down to the worker ----------
     x = STAGE_X[1]
-    svg.append(framed(x, Y, 130, 150, BRAND if lit[1] else LINE, a[1], INSET))
     rows = [("git", "repo"), ("box", "runtime"), ("github", "identity"), ("jira", "context")]
-    for r, (ic, lab) in enumerate(rows):
-        cy = Y - 48 + r * 30
-        reveal = clamp((local - r * 0.18) / 0.3) if beat == 1 else float(lit[1])
-        mark = (glyph_box(x - 38, cy, 18, INK if lit[1] else FAINT, a[1] * reveal) if ic == "box"
-                else icon(ic, x - 38, cy, 18, INK if lit[1] else FAINT, a[1] * reveal))
-        svg += [mark,
-                text(x - 20, cy + 4, lab, 10, INK if lit[1] else FAINT, 600, mono=True,
-                     opacity=a[1] * reveal)]
-    svg.append(label(x, Y + 62, "frozen", BRAND_SOFT if lit[1] else FAINT, a[1], 9))
 
-    # 03 workspace: a clean tree cut for the sink
+    def snapshot_card(cy: float, h: float, color: str, op: float, reveal_all: bool) -> list[str]:
+        out = [framed(x, cy, 130, h, color, op, INSET)]
+        for r, (ic, lab) in enumerate(rows):
+            ry = cy - h / 2 + 22 + r * 24
+            reveal = 1.0 if reveal_all else clamp((local - r * 0.15) / 0.3)
+            mark = (glyph_box(x - 38, ry, 16, INK, op * reveal) if ic == "box"
+                    else icon(ic, x - 38, ry, 16, INK, op * reveal))
+            out += [mark, text(x - 22, ry + 4, lab, 9.5, INK, 600, mono=True, opacity=op * reveal)]
+        return out
+
+    svg += snapshot_card(CY, 110, BRAND if lit[1] else LINE, a[1], beat != 1 or True)
+    svg.append(label(x, CY + 66, "frozen at admission", BRAND_SOFT if lit[1] else FAINT, a[1], 8.5))
+    if lit[1]:
+        arrived = 1.0 if beat > 1 else clamp((local - 0.5) * 2)
+        svg += snapshot_card(WY, 120, INFO, a[1] * max(arrived, 0.15), beat > 1)
+        svg.append(label(x, WY + 72, "the worker runs this", INFO, a[1] * arrived, 8.5))
+        if beat == 1:
+            svg += down(x, CY + 55, WY - 60, BRAND, min(1.0, local * 2))
+    else:
+        svg.append(framed(x, WY, 130, 120, LINE, a[1], INSET))
+
+    # ---- 03 workspace: worker only --------------------------------------------
     x = STAGE_X[2]
     svg += [
-        framed(x, Y, 130, 150, INFO if lit[2] else LINE, a[2], INSET),
-        glyph_branch(x, Y - 12, 56, INFO if lit[2] else FAINT, a[2]),
-        label(x, Y + 46, "clean tree", INFO if lit[2] else FAINT, a[2], 9),
+        framed(x, WY, 130, 150, INFO if lit[2] else LINE, a[2], INSET),
+        glyph_branch(x, WY - 12, 56, INFO if lit[2] else FAINT, a[2]),
+        label(x, WY + 46, "clean tree", INFO if lit[2] else FAINT, a[2], 9),
     ]
 
-    # 04 run: the sandbox, with model · tools · identity going up to the house
+    # ---- 04 run: sandbox on the worker, served by the core ---------------------
     x = STAGE_X[3]
     svg += [
-        framed(x, Y, 150, 150, BRAND if lit[3] else LINE, a[3], INSET),
-        glyph_box(x, Y - 12, 64, BRAND if lit[3] else FAINT, a[3]),
-        label(x, Y + 50, "sandbox", BRAND_SOFT if lit[3] else FAINT, a[3], 9),
+        framed(x, WY, 150, 150, BRAND if lit[3] else LINE, a[3], INSET),
+        glyph_box(x, WY - 12, 64, BRAND if lit[3] else FAINT, a[3]),
+        label(x, WY + 50, "sandbox", BRAND_SOFT if lit[3] else FAINT, a[3], 9),
     ]
-    for i, (lab, dx) in enumerate([("model", -52), ("tools", 0), ("identity", 52)]):
+    services = [("model", -52, "gateway"), ("tools", 0, "MCP proxy"), ("identity", 52, "broker")]
+    svg.append(framed(x, CY, 180, 100, BRAND if lit[3] else LINE, a[3], INSET))
+    for i, (lab, dx, sub) in enumerate(services):
         on = lit[3] and (beat > 3 or local > 0.2 + i * 0.25)
-        top = STRIP_Y + 16
-        svg += [line(x + dx, Y - 75, x + dx, top, BRAND if on else LINE, 1.5,
-                     0.8 if on else 0.25, "3 6"),
-                label(x + dx, TL_Y + 46, lab, BRAND_SOFT if on else FAINT, 1.0, 8)]
+        svg += [rect(x + dx - 24, CY - 30, 48, 44, fill=PANEL, stroke=BRAND if on else OUTLINE,
+                     opacity=a[3]),
+                label(x + dx, CY - 12, lab, BRAND_SOFT if on else FAINT, a[3], 8),
+                label(x + dx, CY + 4, sub, MUTED if on else FAINT, a[3], 7),
+                line(x + dx, WY - 75, x + dx, CY + 50, BRAND if on else LINE, 1.5,
+                     0.8 if on else 0.25, "3 6")]
         if on and beat == 3:
-            svg.append(dot(x + dx, mix(Y - 75, top, (local * 1.6 + i * 0.33) % 1.0), BRAND, 4))
+            svg.append(dot(x + dx, mix(WY - 75, CY + 50, (local * 1.6 + i * 0.33) % 1.0), BRAND, 4))
+    svg.append(label(x, CY + 36, "served by the core", BRAND_SOFT if lit[3] else FAINT, a[3], 8.5))
 
-    # 05 result: one of three, verified
+    # ---- 05 result: verified on the worker, completed to the core --------------
     x = STAGE_X[4]
-    svg.append(framed(x, Y, 130, 150, BRAND if lit[4] else LINE, a[4], INSET))
+    svg.append(framed(x, WY, 130, 150, BRAND if lit[4] else LINE, a[4], INSET))
     for i, fn in enumerate([glyph_branch, glyph_bundle, glyph_actions]):
         chosen = i == 0
         op = a[4] * (1.0 if chosen or not lit[4] else 0.3)
-        svg.append(fn(x + (i - 1) * 38, Y - 14, 32, BRAND if chosen and lit[4] else FAINT, op))
-    svg.append(label(x, Y + 46, "verified", BRAND_SOFT if lit[4] else FAINT, a[4], 9))
+        svg.append(fn(x + (i - 1) * 38, WY - 14, 32, BRAND if chosen and lit[4] else FAINT, op))
+    svg.append(label(x, WY + 46, "verified", BRAND_SOFT if lit[4] else FAINT, a[4], 9))
     if lit[4]:
-        svg.append(square(x + 50, Y - 60, BRAND, 9 * (pulse if beat == 4 else 1.0)))
+        svg.append(square(x + 50, WY - 60, BRAND, 9 * (pulse if beat == 4 else 1.0)))
+        svg += down(x, WY - 75, CY + 50, BRAND, 1.0 if beat > 4 else local, "complete")
+    svg.append(framed(x, CY, 130, 100, BRAND if lit[4] else LINE, a[4], INSET))
+    svg.append(label(x, CY + 4, "attempt 1 · succeeded" if lit[4] else "attempt 1 · running",
+                     BRAND_SOFT if lit[4] else FAINT, a[4], 8.5))
+    svg.append(label(x, CY + 36, "job row", BRAND_SOFT if lit[4] else FAINT, a[4], 9))
 
-    # 06 return: the core records it, the webhook leaves
+    # ---- 06 return: core only, webhook leaves the core --------------------------
     x = STAGE_X[5]
     svg += [
-        framed(x, Y, 130, 150, BRAND if lit[5] else LINE, a[5], INSET),
-        glyph_house(x, Y - 14, 52, BRAND if lit[5] else FAINT, a[5]),
-        label(x, Y + 46, "event + outbox", BRAND_SOFT if lit[5] else FAINT, a[5], 9),
+        framed(x, CY, 130, 100, BRAND if lit[5] else LINE, a[5], INSET),
+        glyph_house(x, CY - 8, 40, BRAND if lit[5] else FAINT, a[5]),
+        label(x, CY + 36, "event + outbox", BRAND_SOFT if lit[5] else FAINT, a[5], 9),
     ]
     if beat == 5:
-        out = clamp((local - 0.5) / 0.5)
-        svg += [line(x, Y - 75, x, STRIP_Y + 16, BRAND, 2, 0.9),
-                dot(x, mix(Y - 75, STRIP_Y + 16, min(1.0, local * 2)), BRAND, 5),
-                arrow(x, Y + 75, x, 578, BRAND, 2.5, 0.35 + 0.65 * out),
-                crossing(x, Y + 95, BRAND, 0.4 + 0.6 * out)]
+        out = clamp((local - 0.3) / 0.7)
+        svg += [arrow(x + 65, CY, 1140, CY, BRAND, 2.5, 0.35 + 0.65 * out),
+                crossing(1128, CY, BRAND, 0.4 + 0.6 * out)]
         if out > 0:
-            svg += [dot(x, mix(Y + 75, 560, out), BRAND, 6),
-                    tag(x - 62, 560, "webhook", BRAND, SURFACE, size=9, opacity=out)]
+            svg += [dot(mix(x + 65, 1128, out), CY, BRAND, 6),
+                    tag(x + 40, CY - 34, "webhook", BRAND, SURFACE, size=9, opacity=out)]
 
-    svg.append(text(520, 566, "failure is also a result · retry reopens the same job",
+    svg.append(text(600, 578, "failure is also a result · retry reopens the same job",
                     9.5, FAINT, 600, anchor="middle", mono=True))
 
     svg += narration(beat + 1, BEATS, LIFECYCLE_STEPS[beat])
