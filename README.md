@@ -28,9 +28,9 @@ environment; the payload carries the instruction and the ticket context, and
 nothing else. Every job ends in a signed terminal webhook, so the same handler
 can post the resulting branch back onto the ticket.
 
-![A Jira transition becoming an envelope, an admitted job in the durable queue, a node claim, and a signed webhook back onto the ticket](docs/assets/event-driven-intake.gif)
+![A tracker event crosses into Omashiki, the view cuts inside the worker that took the job, and cuts back out as the signed webhook closes the loop on GitHub](docs/assets/job-journey.gif)
 
-In both diagrams the neon green is Omashiki and the grey is yours. Omashiki starts at admission and ends at the signed webhook; the two arrows that cross the boundary are the whole integration surface.
+In the animation the neon green is Omashiki and the grey is yours. Omashiki starts at admission and ends at the signed webhook; the two arrows that cross the boundary are the whole integration surface.
 
 ## How The Work Is Processed
 
@@ -42,7 +42,6 @@ selected plugin inside the selected Docker runtime, then returns a committed
 branch or a durable failure record. Nothing the container may touch — runtime,
 image, plugin, mounts, credentials, egress — comes from the caller's payload.
 
-![The six stages of one attempt: claim, snapshot, worktree preparation, the governed container run, commit verification, and the durable result](docs/assets/governed-job-lifecycle.gif)
 
 ## Quick Start
 

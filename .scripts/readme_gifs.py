@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Render the README architecture GIFs from deterministic SVG frames.
+"""Render the README animation from deterministic SVG frames.
 
-Two animations, one story, told with glyphs rather than prose. The first
-follows a tracker event across the Omashiki boundary — handler, house,
-machine — and back onto the ticket as one of three results. The second opens
-one offer on one machine: accept into a slot, the frozen snapshot, the
-workspace, the sandbox run talking to the house, the verified result, the
-signed webhook. Brand marks are Simple Icons (CC0).
+One animation in three acts, told with glyphs rather than prose. A tracker
+event crosses into Omashiki — handler, core, a worker with a free slot —
+then the view cuts inside that worker: the frozen snapshot, the workspace,
+the sandbox run served by the core, the verified result completed back.
+The view cuts out again for the signed webhook that closes the loop on
+GitHub. Brand marks are Simple Icons (CC0).
 
 Colours come from the product design tokens (server/assets/css/tokens.css):
 neon green is the Omashiki signature and is reserved for Omashiki itself, so
@@ -27,9 +27,15 @@ OUTPUT = ROOT / "docs" / "assets"
 WIDTH = 1200
 HEIGHT = 640
 FPS = 12
-BEATS = 6
 FRAMES_PER_BEAT = 16
+# One animation, three acts: the job enters (outer view), the worker runs it
+# (inside view), the result leaves (outer view).
+SCENES = [("intake", 0), ("intake", 1), ("intake", 2), ("intake", 3),
+          ("life", 1), ("life", 2), ("life", 3), ("life", 4),
+          ("intake", 5)]
+BEATS = len(SCENES)
 FRAMES = BEATS * FRAMES_PER_BEAT
+FADE_FRAMES = 0
 
 # --- Design tokens (tokens.css). Sharp corners and neon green are identity. ---
 SURFACE = "#0e0e0e"          # neutral-5
@@ -384,7 +390,7 @@ INTAKE_STEPS = [
     "Omashiki-Core admits it and freezes the snapshot.",
     "A worker with a free slot takes it and runs the container.",
     "The result returns to the core: branch, files, or actions.",
-    "A signed webhook closes the loop on GitHub.",
+    "The core records it; a signed webhook closes the loop on GitHub.",
 ]
 
 SRC_X, HANDLER_X = 150, 345
@@ -410,8 +416,7 @@ def box_zone(z: tuple, title: str, color: str, fill: str, opacity: float = 1.0,
     ]
 
 
-def intake_frame(frame: int) -> str:
-    beat, local, pulse, t = beat_of(frame)
+def intake_scene(beat: int, local: float, pulse: float, step: int, total: int) -> list[str]:
     svg = base(
         "Event-driven intake",
         "Your tracker fires. A result comes back.",
@@ -526,9 +531,8 @@ def intake_frame(frame: int) -> str:
     svg.append(text(703, 578, "dashed lines are machine boundaries you may or may not have · one box or a fleet, same picture",
                     9, FAINT, 600, anchor="middle", mono=True))
 
-    svg += narration(beat + 1, BEATS, INTAKE_STEPS[beat])
-    svg.append("</svg>")
-    return "".join(svg)
+    svg += narration(step, total, INTAKE_STEPS[beat])
+    return svg
 
 
 # ---------------------------------------------------------------------------
@@ -537,15 +541,14 @@ def intake_frame(frame: int) -> str:
 
 LIFECYCLE_STEPS = [
     "The worker polls; the core offers one queued job; the worker accepts into a free slot.",
-    "The snapshot frozen at admission travels with the offer. The worker runs exactly that.",
+    "Inside the worker: the snapshot frozen at admission came with the offer. It runs exactly that.",
     "The worker cuts a clean workspace for the sink.",
     "One agent turn runs on the worker. Model, tools and identity are served by the core.",
     "The worker verifies the result and completes back to the core.",
-    "The core records the event and signs the webhook.",
 ]
 
-STAGE_X = [150, 330, 510, 690, 870, 1050]
-STAGE_LABEL = ["accept", "snapshot", "workspace", "run", "result", "return"]
+STAGE_X = [170, 385, 600, 815, 1030]
+STAGE_LABEL = ["accept", "snapshot", "workspace", "run", "result"]
 CORE_LANE = (56, 140, 1144, 296)
 WORKER_LANE = (56, 348, 1144, 562)
 CY, WY = 226, 462          # box centres in each lane
@@ -572,10 +575,9 @@ def down(x: float, y1: float, y2: float, color: str, amount: float, chip: str | 
     return out
 
 
-def lifecycle_frame(frame: int) -> str:
-    beat, local, pulse, t = beat_of(frame)
+def lifecycle_scene(beat: int, local: float, pulse: float, step: int, total: int) -> list[str]:
     svg = base(
-        "Inside the boundary",
+        "Inside the worker",
         "One offer becomes one governed sandbox run.",
         "What the core does stays on the core. What the worker does stays on the worker.",
     )
@@ -587,7 +589,7 @@ def lifecycle_frame(frame: int) -> str:
 
     # timeline between the lanes
     svg.append(line(STAGE_X[0], TL_Y, STAGE_X[-1], TL_Y, LINE, 2, 0.7))
-    if beat < 5:
+    if beat < len(STAGE_X) - 1:
         svg.append(line(STAGE_X[0], TL_Y, mix(STAGE_X[beat], STAGE_X[beat + 1], local), TL_Y, BRAND, 2.5))
     else:
         svg.append(line(STAGE_X[0], TL_Y, STAGE_X[-1], TL_Y, BRAND, 2.5))
@@ -691,26 +693,39 @@ def lifecycle_frame(frame: int) -> str:
                   BRAND_SOFT if lit[4] else FAINT, a[4], 9),
             label(x, CY + 36, "job row", BRAND_SOFT if lit[4] else FAINT, a[4], 9)]
 
-    # ---- 06 return: core only, webhook leaves the core --------------------------
-    x = STAGE_X[5]
-    svg += [
-        framed(x, CY, 130, 100, BRAND if lit[5] else LINE, a[5], INSET),
-        glyph_house(x, CY - 8, 40, BRAND if lit[5] else FAINT, a[5]),
-        label(x, CY + 36, "event + outbox", BRAND_SOFT if lit[5] else FAINT, a[5], 9),
-    ]
-    if beat == 5:
-        out = clamp((local - 0.3) / 0.7)
-        svg += [arrow(x + 65, CY, 1178, CY, BRAND, 2.5, 0.35 + 0.65 * out),
-                crossing(CORE_LANE[2], CY, BRAND, 0.4 + 0.6 * out)]
-        if out > 0:
-            svg += [dot(mix(x + 65, 1170, out), CY, BRAND, 6),
-                    text(1152, CY - 14, "webhook", 8.5, BRAND, 800, anchor="middle",
-                         mono=True, opacity=out, spacing=1.0)]
-
     svg.append(text(600, 578, "failure is also a result · retry reopens the same job",
                     9.5, FAINT, 600, anchor="middle", mono=True))
 
-    svg += narration(beat + 1, BEATS, LIFECYCLE_STEPS[beat])
+    svg += narration(step, total, LIFECYCLE_STEPS[beat])
+    return svg
+
+
+# ---------------------------------------------------------------------------
+# 3. The composer: one frame index, one scene, a short fade on every cut
+# ---------------------------------------------------------------------------
+
+
+def journey_frame(frame: int) -> str:
+    step = min(BEATS - 1, frame // FRAMES_PER_BEAT)
+    within = frame - step * FRAMES_PER_BEAT
+    local = ease(within / FRAMES_PER_BEAT)
+    pulse = 0.55 + 0.45 * math.sin((frame / FRAMES) * math.tau * 3) ** 2
+    scene, beat = SCENES[step]
+
+    if scene == "intake":
+        svg = intake_scene(beat, local, pulse, step + 1, BEATS)
+    else:
+        svg = lifecycle_scene(beat, local, pulse, step + 1, BEATS)
+
+    # fade to surface across a cut so the change of view reads as a cut
+    fade = 0.0
+    if step > 0 and SCENES[step - 1][0] != scene and within < FADE_FRAMES:
+        fade = 1.0 - (within + 1) / (FADE_FRAMES + 1)
+    if step < BEATS - 1 and SCENES[step + 1][0] != scene and within >= FRAMES_PER_BEAT - FADE_FRAMES:
+        fade = (within - (FRAMES_PER_BEAT - FADE_FRAMES) + 1) / (FADE_FRAMES + 1)
+    if fade > 0:
+        svg.append(rect(0, 0, WIDTH, HEIGHT, fill=SURFACE, stroke="none", opacity=fade * 0.92))
+
     svg.append("</svg>")
     return "".join(svg)
 
@@ -739,8 +754,7 @@ def render(name: str, frame_builder) -> None:
 
 
 def main() -> None:
-    render("event-driven-intake.gif", intake_frame)
-    render("governed-job-lifecycle.gif", lifecycle_frame)
+    render("job-journey.gif", journey_frame)
 
 
 if __name__ == "__main__":
