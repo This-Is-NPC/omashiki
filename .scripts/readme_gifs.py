@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Render the README architecture GIFs from deterministic SVG frames.
 
-Two animations, one story. The first follows a tracker event across the
-Omashiki boundary and back onto the ticket. The second opens the claimed
-attempt and shows what the node actually runs.
+Two animations, one story, told with glyphs rather than prose. The first
+follows a tracker event across the Omashiki boundary — handler, house,
+machine — and back onto the ticket as one of three results. The second opens
+one offer on one machine: accept into a slot, the frozen snapshot, the
+workspace, the sandbox run talking to the house, the verified result, the
+signed webhook. Brand marks are Simple Icons (CC0).
 
 Colours come from the product design tokens (server/assets/css/tokens.css):
 neon green is the Omashiki signature and is reserved for Omashiki itself, so
@@ -213,215 +216,237 @@ def narration(step: int, total: int, message: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# 1. Event-driven intake: your tracker -> [ OMASHIKI ] -> your tracker
+
+# ---------------------------------------------------------------------------
+# Brand glyphs (Simple Icons, CC0). 24x24 view boxes, drawn as flat marks.
 # ---------------------------------------------------------------------------
 
-SOURCES = [
-    ("JIRA", "PROJ-4821 → Ready for agent", AMBER),
-    ("GITHUB", "issue #182 labeled agent", VIOLET),
-    ("AZURE DEVOPS", "work item 5507 → Active", MAGENTA),
-    ("SERVICENOW", "INC0099 → automation", ORANGE),
-]
-
-ENVELOPE = [
-    (0, 'POST /api/v1/jobs', VIOLET, True),
-    (0, '{', MUTED, False),
-    (1, '"repo": "acme/checkout",', INK, False),
-    (1, '"environment": "review-and-fix",', INK, False),
-    (1, '"idempotency_key": "PROJ-4821/1",', INK, False),
-    (1, '"payload": {', MUTED, False),
-    (2, '"instruction": "Fix the failing…",', INK, False),
-    (2, '"context": {"ticket":"PROJ-4821"}', INFO, False),
-    (1, '}', MUTED, False),
-    (0, '}', MUTED, False),
-]
-
-NODES = [
-    ("node-a", "2 / 2 busy", "", False),
-    ("node-b", "0 / 2 busy", "claims job/4f2a", True),
-    ("node-c", "1 / 1 busy", "", False),
-]
-
-INTAKE_STEPS = [
-    "A tracker event fires — PROJ-4821 moves to Ready for agent. Still entirely your side.",
-    "Your handler maps that event to one envelope. This is the last code you write.",
-    "Omashiki starts here: admission validates the contract and freezes an immutable snapshot.",
-    "The job is durable in PostgreSQL. Every healthy node may claim it — exactly one wins.",
-    "Omashiki ends here: a committed branch and one signed terminal webhook leave the boundary.",
-    "Back on your side, your handler posts the branch onto PROJ-4821 and the ticket moves on.",
-]
-
-BOX_CENTERS = [174, 464, 781, 1022]
-ZONE_A = (44, 620)      # your side
-ZONE_B = (676, 1156)    # omashiki
-GATE = (ZONE_A[1] + ZONE_B[0]) / 2
+ICONS = {
+    "jira": "M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.483V1.005A1.001 1.001 0 0 0 23.013 0Z",
+    "github": "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12",
+    "gitlab": "m23.6004 9.5927-.0337-.0862L20.3.9814a.851.851 0 0 0-.3362-.405.8748.8748 0 0 0-.9997.0539.8748.8748 0 0 0-.29.4399l-2.2055 6.748H7.5375l-2.2057-6.748a.8573.8573 0 0 0-.29-.4412.8748.8748 0 0 0-.9997-.0537.8585.8585 0 0 0-.3362.4049L.4332 9.5015l-.0325.0862a6.0657 6.0657 0 0 0 2.0119 7.0105l.0113.0087.03.0213 4.976 3.7264 2.462 1.8633 1.4995 1.1321a1.0085 1.0085 0 0 0 1.2197 0l1.4995-1.1321 2.4619-1.8633 5.006-3.7489.0125-.01a6.0682 6.0682 0 0 0 2.0094-7.003z",
+    "linear": "M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z",
+    "postgresql": "M23.5594 14.7228a.5269.5269 0 0 0-.0563-.1191c-.139-.2632-.4768-.3418-1.0074-.2321-1.6533.3411-2.2935.1312-2.5256-.0191 1.342-2.0482 2.445-4.522 3.0411-6.8297.2714-1.0507.7982-3.5237.1222-4.7316a1.5641 1.5641 0 0 0-.1509-.235C21.6931.9086 19.8007.0248 17.5099.0005c-1.4947-.0158-2.7705.3461-3.1161.4794a9.449 9.449 0 0 0-.5159-.0816 8.044 8.044 0 0 0-1.3114-.1278c-1.1822-.0184-2.2038.2642-3.0498.8406-.8573-.3211-4.7888-1.645-7.2219.0788C.9359 2.1526.3086 3.8733.4302 6.3043c.0409.818.5069 3.334 1.2423 5.7436.4598 1.5065.9387 2.7019 1.4334 3.582.553.9942 1.1259 1.5933 1.7143 1.7895.4474.1491 1.1327.1441 1.8581-.7279.8012-.9635 1.5903-1.8258 1.9446-2.2069.4351.2355.9064.3625 1.39.3772a.0569.0569 0 0 0 .0004.0041 11.0312 11.0312 0 0 0-.2472.3054c-.3389.4302-.4094.5197-1.5002.7443-.3102.064-1.1344.2339-1.1464.8115-.0025.1224.0329.2309.0919.3268.2269.4231.9216.6097 1.015.6331 1.3345.3335 2.5044.092 3.3714-.6787-.017 2.231.0775 4.4174.3454 5.0874.2212.5529.7618 1.9045 2.4692 1.9043.2505 0 .5263-.0291.8296-.0941 1.7819-.3821 2.5557-1.1696 2.855-2.9059.1503-.8707.4016-2.8753.5388-4.1012.0169-.0703.0357-.1207.057-.1362.0007-.0005.0697-.0471.4272.0307a.3673.3673 0 0 0 .0443.0068l.2539.0223.0149.001c.8468.0384 1.9114-.1426 2.5312-.4308.6438-.2988 1.8057-1.0323 1.5951-1.6698zM2.371 11.8765c-.7435-2.4358-1.1779-4.8851-1.2123-5.5719-.1086-2.1714.4171-3.6829 1.5623-4.4927 1.8367-1.2986 4.8398-.5408 6.108-.13-.0032.0032-.0066.0061-.0098.0094-2.0238 2.044-1.9758 5.536-1.9708 5.7495-.0002.0823.0066.1989.0162.3593.0348.5873.0996 1.6804-.0735 2.9184-.1609 1.1504.1937 2.2764.9728 3.0892.0806.0841.1648.1631.2518.2374-.3468.3714-1.1004 1.1926-1.9025 2.1576-.5677.6825-.9597.5517-1.0886.5087-.3919-.1307-.813-.5871-1.2381-1.3223-.4796-.839-.9635-2.0317-1.4155-3.5126zm6.0072 5.0871c-.1711-.0428-.3271-.1132-.4322-.1772.0889-.0394.2374-.0902.4833-.1409 1.2833-.2641 1.4815-.4506 1.9143-1.0002.0992-.126.2116-.2687.3673-.4426a.3549.3549 0 0 0 .0737-.1298c.1708-.1513.2724-.1099.4369-.0417.156.0646.3078.26.3695.4752.0291.1016.0619.2945-.0452.4444-.9043 1.2658-2.2216 1.2494-3.1676 1.0128zm2.094-3.988-.0525.141c-.133.3566-.2567.6881-.3334 1.003-.6674-.0021-1.3168-.2872-1.8105-.8024-.6279-.6551-.9131-1.5664-.7825-2.5004.1828-1.3079.1153-2.4468.079-3.0586-.005-.0857-.0095-.1607-.0122-.2199.2957-.2621 1.6659-.9962 2.6429-.7724.4459.1022.7176.4057.8305.928.5846 2.7038.0774 3.8307-.3302 4.7363-.084.1866-.1633.3629-.2311.5454zm7.3637 4.5725c-.0169.1768-.0358.376-.0618.5959l-.146.4383a.3547.3547 0 0 0-.0182.1077c-.0059.4747-.054.6489-.115.8693-.0634.2292-.1353.4891-.1794 1.0575-.11 1.4143-.8782 2.2267-2.4172 2.5565-1.5155.3251-1.7843-.4968-2.0212-1.2217a6.5824 6.5824 0 0 0-.0769-.2266c-.2154-.5858-.1911-1.4119-.1574-2.5551.0165-.5612-.0249-1.9013-.3302-2.6462.0044-.2932.0106-.5909.019-.8918a.3529.3529 0 0 0-.0153-.1126 1.4927 1.4927 0 0 0-.0439-.208c-.1226-.4283-.4213-.7866-.7797-.9351-.1424-.059-.4038-.1672-.7178-.0869.067-.276.1831-.5875.309-.9249l.0529-.142c.0595-.16.134-.3257.213-.5012.4265-.9476 1.0106-2.2453.3766-5.1772-.2374-1.0981-1.0304-1.6343-2.2324-1.5098-.7207.0746-1.3799.3654-1.7088.5321a5.6716 5.6716 0 0 0-.1958.1041c.0918-1.1064.4386-3.1741 1.7357-4.4823a4.0306 4.0306 0 0 1 .3033-.276.3532.3532 0 0 0 .1447-.0644c.7524-.5706 1.6945-.8506 2.802-.8325.4091.0067.8017.0339 1.1742.081 1.939.3544 3.2439 1.4468 4.0359 2.3827.8143.9623 1.2552 1.9315 1.4312 2.4543-1.3232-.1346-2.2234.1268-2.6797.779-.9926 1.4189.543 4.1729 1.2811 5.4964.1353.2426.2522.4522.2889.5413.2403.5825.5515.9713.7787 1.2552.0696.087.1372.1714.1885.245-.4008.1155-1.1208.3825-1.0552 1.717-.0123.1563-.0423.4469-.0834.8148-.0461.2077-.0702.4603-.0994.7662zm.8905-1.6211c-.0405-.8316.2691-.9185.5967-1.0105a2.8566 2.8566 0 0 0 .135-.0406 1.202 1.202 0 0 0 .1342.103c.5703.3765 1.5823.4213 3.0068.1344-.2016.1769-.5189.3994-.9533.6011-.4098.1903-1.0957.333-1.7473.3636-.7197.0336-1.0859-.0807-1.1721-.151zm.5695-9.2712c-.0059.3508-.0542.6692-.1054 1.0017-.055.3576-.112.7274-.1264 1.1762-.0142.4368.0404.8909.0932 1.3301.1066.887.216 1.8003-.2075 2.7014a3.5272 3.5272 0 0 1-.1876-.3856c-.0527-.1276-.1669-.3326-.3251-.6162-.6156-1.1041-2.0574-3.6896-1.3193-4.7446.3795-.5427 1.3408-.5661 2.1781-.463zm.2284 7.0137a12.3762 12.3762 0 0 0-.0853-.1074l-.0355-.0444c.7262-1.1995.5842-2.3862.4578-3.4385-.0519-.4318-.1009-.8396-.0885-1.2226.0129-.4061.0666-.7543.1185-1.0911.0639-.415.1288-.8443.1109-1.3505.0134-.0531.0188-.1158.0118-.1902-.0457-.4855-.5999-1.938-1.7294-3.253-.6076-.7073-1.4896-1.4972-2.6889-2.0395.5251-.1066 1.2328-.2035 2.0244-.1859 2.0515.0456 3.6746.8135 4.8242 2.2824a.908.908 0 0 1 .0667.1002c.7231 1.3556-.2762 6.2751-2.9867 10.5405zm-8.8166-6.1162c-.025.1794-.3089.4225-.6211.4225a.5821.5821 0 0 1-.0809-.0056c-.1873-.026-.3765-.144-.5059-.3156-.0458-.0605-.1203-.178-.1055-.2844.0055-.0401.0261-.0985.0925-.1488.1182-.0894.3518-.1226.6096-.0867.3163.0441.6426.1938.6113.4186zm7.9305-.4114c.0111.0792-.049.201-.1531.3102-.0683.0717-.212.1961-.4079.2232a.5456.5456 0 0 1-.075.0052c-.2935 0-.5414-.2344-.5607-.3717-.024-.1765.2641-.3106.5611-.352.297-.0414.6111.0088.6356.1851z",
+    "docker": "M13.983 11.078h2.119a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.119a.185.185 0 00-.185.185v1.888c0 .102.083.185.185.185m-2.954-5.43h2.118a.186.186 0 00.186-.186V3.574a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m0 2.716h2.118a.187.187 0 00.186-.186V6.29a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.887c0 .102.082.185.185.186m-2.93 0h2.12a.186.186 0 00.184-.186V6.29a.185.185 0 00-.185-.185H8.1a.185.185 0 00-.185.185v1.887c0 .102.083.185.185.186m-2.964 0h2.119a.186.186 0 00.185-.186V6.29a.185.185 0 00-.185-.185H5.136a.186.186 0 00-.186.185v1.887c0 .102.084.185.186.186m5.893 2.715h2.118a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m-2.93 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.083.185.185.185m-2.964 0h2.119a.185.185 0 00.185-.185V9.006a.185.185 0 00-.184-.186h-2.12a.186.186 0 00-.186.186v1.887c0 .102.084.185.186.185m-2.92 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.082.185.185.185M23.763 9.89c-.065-.051-.672-.51-1.954-.51-.338.001-.676.03-1.01.087-.248-1.7-1.653-2.53-1.716-2.566l-.344-.199-.226.327c-.284.438-.49.922-.612 1.43-.23.97-.09 1.882.403 2.661-.595.332-1.55.413-1.744.42H.751a.751.751 0 00-.75.748 11.376 11.376 0 00.692 4.062c.545 1.428 1.355 2.48 2.41 3.124 1.18.723 3.1 1.137 5.275 1.137.983.003 1.963-.086 2.93-.266a12.248 12.248 0 003.823-1.389c.98-.567 1.86-1.288 2.61-2.136 1.252-1.418 1.998-2.997 2.553-4.4h.221c1.372 0 2.215-.549 2.68-1.009.309-.293.55-.65.707-1.046l.098-.288Z",
+    "git": "M13.09 23.549a1.54 1.54 0 0 1-2.18 0L.451 13.089a1.54 1.54 0 0 1 0-2.179l7.191-7.19 2.733 2.733a1.85 1.85 0 0 0 .964 2.326v6.66a1.849 1.849 0 1 0 1.54 0V8.957l2.508 2.508a1.85 1.85 0 1 0 1.09-1.09l-2.634-2.634a1.85 1.85 0 0 0-2.378-2.377L8.73 2.63 10.91.451a1.54 1.54 0 0 1 2.179 0l10.459 10.46a1.54 1.54 0 0 1 0 2.179z",
+}
 
 
-def intake_frame(frame: int) -> str:
+def icon(name: str, cx: float, cy: float, size: float, color: str,
+         opacity: float = 1.0, glow: bool = False) -> str:
+    scale = size / 24
+    effect = ' filter="url(#glow)"' if glow else ""
+    return (
+        f'<g transform="translate({cx - size / 2:.2f},{cy - size / 2:.2f}) scale({scale:.4f})" '
+        f'opacity="{opacity:.3f}"{effect}><path d="{ICONS[name]}" fill="{color}"/></g>'
+    )
+
+
+def glyph_branch(cx: float, cy: float, size: float, color: str, opacity: float = 1.0) -> str:
+    """A git branch: two commits and a fork. Result sink `git`."""
+    s = size / 24
+    return (
+        f'<g transform="translate({cx - size / 2:.2f},{cy - size / 2:.2f}) scale({s:.4f})" '
+        f'opacity="{opacity:.3f}" fill="none" stroke="{color}" stroke-width="2.2" '
+        f'stroke-linecap="round">'
+        f'<circle cx="6" cy="4" r="2.4"/><circle cx="6" cy="20" r="2.4"/><circle cx="18" cy="8" r="2.4"/>'
+        f'<path d="M6 6.5v11M18 10.5c0 4-12 3-12 7"/></g>'
+    )
+
+
+def glyph_bundle(cx: float, cy: float, size: float, color: str, opacity: float = 1.0) -> str:
+    """A stack of files. Result sink `files`."""
+    s = size / 24
+    return (
+        f'<g transform="translate({cx - size / 2:.2f},{cy - size / 2:.2f}) scale({s:.4f})" '
+        f'opacity="{opacity:.3f}" fill="none" stroke="{color}" stroke-width="2" stroke-linejoin="round">'
+        f'<path d="M8 3h7l4 4v11H8z"/><path d="M15 3v4h4"/><path d="M5 7v13h10"/></g>'
+    )
+
+
+def glyph_actions(cx: float, cy: float, size: float, color: str, opacity: float = 1.0) -> str:
+    """A bolt: side effects through the house. Result sink `none`."""
+    s = size / 24
+    return (
+        f'<g transform="translate({cx - size / 2:.2f},{cy - size / 2:.2f}) scale({s:.4f})" '
+        f'opacity="{opacity:.3f}"><path d="M13 2 4 14h7l-1 8 9-12h-7z" fill="{color}"/></g>'
+    )
+
+
+def glyph_box(cx: float, cy: float, size: float, color: str, opacity: float = 1.0) -> str:
+    """A sandbox container."""
+    s = size / 24
+    return (
+        f'<g transform="translate({cx - size / 2:.2f},{cy - size / 2:.2f}) scale({s:.4f})" '
+        f'opacity="{opacity:.3f}" fill="none" stroke="{color}" stroke-width="2" stroke-linejoin="round">'
+        f'<path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M3 7l9 5 9-5M12 12v10"/></g>'
+    )
+
+
+def glyph_house(cx: float, cy: float, size: float, color: str, opacity: float = 1.0) -> str:
+    s = size / 24
+    return (
+        f'<g transform="translate({cx - size / 2:.2f},{cy - size / 2:.2f}) scale({s:.4f})" '
+        f'opacity="{opacity:.3f}" fill="none" stroke="{color}" stroke-width="2" stroke-linejoin="round">'
+        f'<path d="M3 11 12 3l9 8"/><path d="M5 10v11h14V10"/><path d="M10 21v-6h4v6"/></g>'
+    )
+
+
+def glyph_handler(cx: float, cy: float, size: float, color: str, opacity: float = 1.0) -> str:
+    """Curly braces: your handler, your code."""
+    return text(cx, cy + size * 0.36, "{ }", int(size), color, 800, anchor="middle",
+                mono=True, opacity=opacity)
+
+
+def label(cx: float, y: float, value: str, color: str = MUTED, opacity: float = 1.0,
+          size: float = 10) -> str:
+    return text(cx, y, value, size, color, 700, anchor="middle", mono=True,
+                opacity=opacity, spacing=1.2)
+
+
+def framed(cx: float, cy: float, w: float, h: float, stroke: str, opacity: float,
+           fill: str = PANEL, dash: str | None = None) -> str:
+    return rect(cx - w / 2, cy - h / 2, w, h, fill=fill, stroke=stroke, stroke_width=1.5,
+                opacity=opacity, dash=dash)
+
+
+def beat_of(frame: int) -> tuple[int, float, float, float]:
     t = frame / FRAMES
     beat = min(BEATS - 1, int(t * BEATS))
     local = ease((t * BEATS) - beat)
     pulse = 0.55 + 0.45 * math.sin(t * math.tau * 3) ** 2
+    return beat, local, pulse, t
 
+
+def travel(x1: float, x2: float, y: float, amount: float, color: str,
+           chip: str | None = None) -> list[str]:
+    """A lit segment plus a glowing dot moving from x1 to x2."""
+    x = mix(x1, x2, ease(amount))
+    out = [line(x1, y, x, y, color, 2.5, 0.9)]
+    out.append(dot(x, y, color, 6))
+    if chip:
+        out.append(tag(x, y - 26, chip, color, SURFACE, size=10))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 1. Event-driven intake: your tracker -> [ house ] -> [ machine ] -> back
+# ---------------------------------------------------------------------------
+
+SOURCE_ICONS = [("jira", AMBER), ("github", INK), ("gitlab", ORANGE), ("linear", VIOLET)]
+
+INTAKE_STEPS = [
+    "An event fires in your tracker.",
+    "Your handler sends one envelope.",
+    "The house admits it and freezes the snapshot.",
+    "A free machine picks it up and runs the sandbox.",
+    "The result returns to the house: branch, files, or actions.",
+    "A signed webhook closes the loop on your side.",
+]
+
+SRC_X, HANDLER_X, HOUSE_X, MACHINE_X = 150, 400, 700, 985
+ROW_Y = 350
+GATE_X = 548
+
+
+def intake_frame(frame: int) -> str:
+    beat, local, pulse, t = beat_of(frame)
     svg = base(
         "Event-driven intake",
-        "Your tracker fires. Omashiki returns a branch.",
-        "The boundary is the HTTP contract: everything green is Omashiki, everything grey stays yours.",
+        "Your tracker fires. A result comes back.",
+        "Grey is yours. Green is Omashiki. Two arrows cross the line.",
     )
+    lit = [beat >= i for i in range(6)]
+    a = [1.0 if on else DIM for on in lit]
 
-    inside = beat in (2, 3, 4)
-    lit = [beat >= index for index in range(4)]
-    alpha = [1.0 if on else DIM for on in lit]
-
-    # --- Boundary zones -----------------------------------------------------
+    # zones
     svg += [
-        rect(ZONE_A[0], 138, ZONE_A[1] - ZONE_A[0], 440, fill=OUTSIDE_TINT,
-             stroke=OUTLINE, dash="5 7"),
-        rect(ZONE_B[0], 138, ZONE_B[1] - ZONE_B[0], 440, fill=BRAND_TINT,
-             stroke=BRAND if inside else BRAND_DIM, stroke_width=1.5, dash="5 7"),
-        tag(332, 138, "YOUR SIDE", OUTLINE, SURFACE),
-        tag(916, 138, "OMASHIKI", BRAND, SURFACE),
-        text(332, 566, "your event handlers, your ticket updates", 10, FAINT, 600,
-             anchor="middle", mono=True),
-        text(916, 566, "starts at admission · ends at the signed webhook", 10,
-             BRAND_SOFT, 600, anchor="middle", mono=True),
+        rect(44, 138, 480, 440, fill=OUTSIDE_TINT, stroke=OUTLINE, dash="5 7"),
+        rect(572, 138, 584, 440, fill=BRAND_TINT,
+             stroke=BRAND if beat in (2, 3, 4) else BRAND_DIM, stroke_width=1.5, dash="5 7"),
+        tag(284, 138, "YOURS", OUTLINE, SURFACE),
+        tag(864, 138, "OMASHIKI", BRAND, SURFACE),
     ]
 
-    # --- The job in flight, coloured by its real status ---------------------
-    travel = clamp((t - 1 / BEATS) / (3 / BEATS)) * 3
-    index = min(2, int(travel))
-    pill_x = mix(BOX_CENTERS[index], BOX_CENTERS[index + 1], ease(travel - index))
-    pill_color = AMBER if beat < 2 else (INFO if beat < 4 else BRAND)
-    svg += [
-        line(BOX_CENTERS[0], 172, BOX_CENTERS[-1], 172, LINE, 2, 0.7, "4 8"),
-        line(BOX_CENTERS[0], 172, pill_x, 172, pill_color, 2, 0.85),
-        crossing(GATE, 172, BRAND if beat >= 2 else OUTLINE),
-        tag(pill_x, 172, "PROJ-4821", pill_color),
-    ]
-
-    # --- 01 source systems --------------------------------------------------
-    svg += [rect(60, 200, 228, 228, fill=PANEL, stroke=OUTLINE, opacity=alpha[0])]
-    svg += panel_head(78, 228, "01", "SOURCE SYSTEM", MUTED, alpha[0])
-    for row, (system, change, color) in enumerate(SOURCES):
-        y = 250 + row * 44
-        selected = row == 0
-        row_alpha = alpha[0] * (1.0 if selected else 0.7)
+    # 01 sources: four tracker glyphs, the first one fires
+    for i, (name, color) in enumerate(SOURCE_ICONS):
+        cx, cy = SRC_X + (i % 2) * 90 - 45, 250 + (i // 2) * 96
+        active = i == 0
+        op = a[0] * (1.0 if active else 0.45)
         svg += [
-            rect(78, y, 192, 36, fill=INSET, stroke=color if selected else LINE,
-                 opacity=row_alpha),
-            square(92, y + 18, color, 7,
-                   row_alpha * (pulse if selected and beat == 0 else 1.0)),
-            text(106, y + 15, system, 9.5, color if selected else MUTED, 800,
-                 mono=True, spacing=1.1, opacity=row_alpha),
-            text(106, y + 29, change, 9.5, MUTED, 500, mono=True, opacity=row_alpha),
+            framed(cx, cy, 72, 72, color if active and lit[0] else LINE, op, INSET),
+            icon(name, cx, cy, 34, color if active else FAINT, op, glow=active and beat == 0),
         ]
-    svg.append(text(78, 446, "any system that emits events", 10, FAINT, 600,
-                    mono=True, opacity=alpha[0]))
+    if beat == 0:
+        svg.append(dot(SRC_X - 45 + 30, 250 - 30, AMBER, 5 + 3 * pulse))
+    svg.append(label(SRC_X, 452, "tracker event", MUTED, a[0]))
 
-    # --- 02 your handler ----------------------------------------------------
-    svg += [rect(324, 200, 280, 228, fill=PANEL, stroke=VIOLET if lit[1] else LINE,
-                 opacity=alpha[1])]
-    svg += panel_head(342, 228, "02", "YOUR HANDLER", VIOLET, alpha[1])
-    for row, (indent, content, color, bold) in enumerate(ENVELOPE):
-        reveal = clamp((local - row * 0.06) / 0.12) if beat == 1 else float(lit[1])
-        svg.append(text(342 + indent * 11, 252 + row * 17, content, 10, color,
-                        800 if bold else 600, mono=True, opacity=alpha[1] * reveal))
-    svg.append(text(342, 446, "your code · your bearer token", 10, FAINT, 600,
-                    mono=True, opacity=alpha[1]))
+    # 02 handler
+    svg += [
+        framed(HANDLER_X, ROW_Y, 96, 96, VIOLET if lit[1] else LINE, a[1], INSET),
+        glyph_handler(HANDLER_X, ROW_Y, 30, VIOLET if lit[1] else FAINT, a[1]),
+        label(HANDLER_X, 452, "your handler", MUTED, a[1]),
+    ]
 
-    # --- 03 admission + durable queue --------------------------------------
-    svg += [rect(692, 200, 178, 228, fill=PANEL, stroke=BRAND if lit[2] else BRAND_DIM,
-                 opacity=alpha[2])]
-    svg += panel_head(708, 228, "03", "ADMISSION", BRAND, alpha[2])
-    checks = ["contract valid", "repo + env resolved", "snapshot frozen",
-              "idempotency held"]
-    for row, label in enumerate(checks):
-        reveal = clamp((local - row * 0.1) / 0.14) if beat == 2 else float(lit[2])
+    # 03 house
+    svg += [
+        framed(HOUSE_X, ROW_Y, 150, 150, BRAND if lit[2] else BRAND_DIM, a[2], INSET),
+        glyph_house(HOUSE_X, ROW_Y - 14, 56, BRAND if lit[2] else BRAND_DIM, a[2]),
+        icon("postgresql", HOUSE_X, ROW_Y + 42, 26, INFO if lit[2] else FAINT, a[2]),
+        label(HOUSE_X, 452, "house", BRAND_SOFT, a[2]),
+    ]
+
+    # 04 machines: three, one lights and grows a sandbox
+    for i in range(3):
+        cx, cy = MACHINE_X + (i - 1) * 80, ROW_Y - 40
+        won = i == 1 and lit[3]
+        op = a[3] * (1.0 if won or not lit[3] else 0.5)
         svg += [
-            square(712, 250 + row * 21, BRAND, 6, alpha[2] * reveal),
-            text(726, 254 + row * 21, label, 9.5, INK, 600, mono=True,
-                 opacity=alpha[2] * reveal),
+            framed(cx, cy, 64, 64, INFO if won else LINE, op, INSET),
+            icon("docker", cx, cy, 34, INFO if won else FAINT, op, glow=won and beat == 3),
         ]
-    svg += [
-        rect(708, 340, 146, 74, fill=INSET, stroke=BRAND, opacity=alpha[2]),
-        text(781, 363, "PostgreSQL", 16, INK, 700, anchor="middle", opacity=alpha[2]),
-        text(781, 381, "one durable queue", 9.5, MUTED, 500, anchor="middle",
-             mono=True, opacity=alpha[2]),
-        text(781, 401, "queued · attempt 1", 9.5, INFO, 700, anchor="middle",
-             mono=True, opacity=alpha[2]),
-    ]
-    svg.append(text(708, 446, "caller selects nothing else", 10, FAINT, 600,
-                    mono=True, opacity=alpha[2]))
+    if lit[3]:
+        grow = local if beat == 3 else 1.0
+        svg.append(glyph_box(MACHINE_X, ROW_Y + 48, 30 + 14 * grow, BRAND, a[3]))
+    svg.append(label(MACHINE_X, 452, "machines", BRAND_SOFT, a[3]))
 
-    # --- 04 node claim ------------------------------------------------------
-    svg += [rect(904, 200, 236, 228, fill=PANEL, stroke=BRAND if lit[3] else BRAND_DIM,
-                 opacity=alpha[3])]
-    svg += panel_head(922, 228, "04", "ANY HEALTHY NODE", BRAND, alpha[3])
-    for row, (name, capacity, note, claims) in enumerate(NODES):
-        y = 248 + row * 54
-        won = claims and beat >= 3
+    # flow line and the travelling job
+    svg += [line(SRC_X + 95, ROW_Y, MACHINE_X - 120, ROW_Y, LINE, 2, 0.5, "4 8"),
+            crossing(GATE_X, ROW_Y, BRAND if beat >= 2 else OUTLINE)]
+    if beat == 1:
+        svg += travel(SRC_X + 95, HANDLER_X - 48, ROW_Y, local, VIOLET)
+    elif beat == 2:
+        svg += travel(HANDLER_X + 48, HOUSE_X - 75, ROW_Y, local, BRAND, "POST /jobs")
+    elif beat == 3:
+        svg += travel(HOUSE_X + 75, MACHINE_X - 120, ROW_Y, local, INFO, "offer")
+
+    # 05 result glyphs under the machine, lighting one of three
+    results = [("git", glyph_branch), ("files", glyph_bundle), ("none", glyph_actions)]
+    for i, (name, fn) in enumerate(results):
+        cx = MACHINE_X + (i - 1) * 60
+        chosen = i == 0
+        op = a[4] * (1.0 if chosen or not lit[4] else 0.35)
+        svg += [fn(cx, 520, 26, BRAND if chosen and lit[4] else FAINT, op),
+                label(cx, 548, name, BRAND_SOFT if chosen and lit[4] else FAINT, op, 9)]
+    if lit[4]:
+        amt = local if beat == 4 else 1.0
+        svg += [line(MACHINE_X - 60, 520, HOUSE_X + 40, 520, BRAND, 2.5, 0.9),
+                arrow(HOUSE_X + 40, 520, HOUSE_X + 40, ROW_Y + 80, BRAND, 2.5, 0.9),
+                dot(mix(MACHINE_X - 60, HOUSE_X + 40, amt), 520, BRAND, 6)]
+
+    # 06 webhook back across the line to the ticket
+    if lit[5]:
+        x = mix(HOUSE_X - 75, SRC_X + 45, local if beat == 5 else 1.0)
         svg += [
-            rect(922, y, 200, 46, fill=INSET, stroke=INFO if won else LINE,
-                 opacity=alpha[3]),
-            square(938, y + 16, INFO if won else FAINT, 7,
-                   alpha[3] * (pulse if won else 1.0)),
-            text(952, y + 20, f"omashiki@{name}", 10, INK if won else MUTED, 700,
-                 mono=True, opacity=alpha[3]),
-            text(952, y + 36, note if won else capacity, 9.5,
-                 INFO if won else FAINT, 700 if won else 500, mono=True,
-                 opacity=alpha[3]),
+            line(HOUSE_X - 75, 520, x, 520, BRAND, 2.5, 0.9),
+            crossing(GATE_X, 520, BRAND),
+            dot(x, 520, BRAND, 6),
+            tag(x, 494, "webhook", BRAND, SURFACE, size=10),
         ]
-    svg.append(text(922, 446, "lock + lease + capacity token", 10, FAINT, 600,
-                    mono=True, opacity=alpha[3]))
-
-    # --- Flow between the panels -------------------------------------------
-    svg += [
-        arrow(288, 316, 324, 316, VIOLET if beat >= 1 else LINE, 2,
-              1.0 if beat >= 1 else 0.4),
-        text(306, 304, "event", 9, MUTED if beat >= 1 else FAINT, 700,
-             anchor="middle", mono=True),
-        arrow(604, 316, 692, 316, BRAND if beat >= 2 else LINE, 2.5,
-              1.0 if beat >= 2 else 0.4),
-        text(648, 300, "POST /jobs", 9.5, BRAND if beat >= 2 else FAINT, 800,
-             anchor="middle", mono=True),
-        crossing(648, 316, BRAND if beat >= 2 else OUTLINE),
-        text(648, 340, "ingress", 8.5, FAINT, 700, anchor="middle", mono=True),
-        arrow(870, 316, 904, 316, BRAND if beat >= 3 else LINE, 2,
-              1.0 if beat >= 3 else 0.4),
-        text(887, 304, "claim", 9, MUTED if beat >= 3 else FAINT, 700,
-             anchor="middle", mono=True),
-    ]
-
-    # --- The return leg, crossing the boundary outward ----------------------
-    back = clamp((t - 4 / BEATS) / (2 / BEATS))
-    out_alpha = 1.0 if beat >= 4 else DIM
-    home_alpha = 1.0 if beat >= 5 else DIM
-    svg += [
-        rect(700, 470, 436, 72, fill=PANEL, stroke=BRAND if beat >= 4 else BRAND_DIM,
-             opacity=out_alpha),
-        text(718, 494, "05", 10, BRAND, 800, mono=True, spacing=1.2, opacity=out_alpha),
-        text(740, 494, "TERMINAL EVENT", 10, INK, 800, mono=True, spacing=1.3,
-             opacity=out_alpha),
-        text(718, 514, "job.succeeded · branch feat/proj-4821", 10.5, INK, 700,
-             mono=True, opacity=out_alpha),
-        text(718, 531, "signed HMAC-SHA256 · at-least-once · retried 24h", 9.5,
-             MUTED, 500, mono=True, opacity=out_alpha),
-        rect(60, 470, 400, 72, fill=PANEL, stroke=OUTLINE, opacity=home_alpha),
-        text(78, 494, "06", 10, MUTED, 800, mono=True, spacing=1.2, opacity=home_alpha),
-        text(100, 494, "BACK ON THE TICKET", 10, INK, 800, mono=True, spacing=1.3,
-             opacity=home_alpha),
-        text(78, 514, "comment: feat/proj-4821 ready for review", 10.5, INK, 700,
-             mono=True, opacity=home_alpha),
-        text(78, 531, "PROJ-4821 transitions to In review", 9.5, MUTED, 500,
-             mono=True, opacity=home_alpha),
-        arrow(690, 506, 470, 506, BRAND if beat >= 4 else LINE, 2.5, out_alpha),
-        text(648, 490, "webhook", 9.5, BRAND if beat >= 4 else FAINT, 800,
-             anchor="middle", mono=True),
-        crossing(648, 506, BRAND if beat >= 4 else OUTLINE, out_alpha),
-        text(648, 530, "egress", 8.5, FAINT, 700, anchor="middle", mono=True),
-    ]
-    if beat >= 4:
-        svg.append(tag(mix(672, 488, ease(back)), 506, "job.succeeded", BRAND))
+        if local > 0.9 or beat > 5:
+            svg.append(icon("jira", SRC_X - 45 + 0, 250, 34, AMBER, 1.0, glow=True))
+    else:
+        svg.append(line(HOUSE_X - 75, 520, SRC_X + 45, 520, LINE, 2, 0.35, "4 8"))
 
     svg += narration(beat + 1, BEATS, INTAKE_STEPS[beat])
     svg.append("</svg>")
@@ -429,187 +454,137 @@ def intake_frame(frame: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 2. Governed job lifecycle: what the claiming node actually runs
+# 2. Governed job lifecycle: what one machine does with one offer
 # ---------------------------------------------------------------------------
 
-STAGES = [
-    ("01", "CLAIM", "lease the job"),
-    ("02", "SNAPSHOT", "frozen registry"),
-    ("03", "PREPARE", "clean worktree"),
-    ("04", "EXECUTE", "one harness turn"),
-    ("05", "FINALIZE", "commit + verify"),
-    ("06", "RETURN", "event + outbox"),
-]
-
-SNAPSHOT = [
-    ("ticket", "PROJ-4821", INFO),
-    ("repo", "acme/checkout", INK),
-    ("base", "main @ 9f2c1ab", INK),
-    ("environment", "review-and-fix", INK),
-    ("runtime", "docker.runc.debian", INK),
-    ("plugin", "claude-code", INK),
-    ("image", "omashiki/agent-claude", INK),
-]
-
-CONTAINER_BLOCKS = [
-    (0, "/workspace", "feat/proj-4821 @ 9f2c1ab", INFO),
-    (1, "EGRESS", "declared network policy", VIOLET),
-    (2, "LIMITS", "cpu · memory · timeout", VIOLET),
-    (3, "TOOL PROXY", "declared MCP servers only", VIOLET),
-    (4, "LLM GATEWAY", "short-lived scoped claim", INFO),
-    (5, "HARNESS TURN", "instruction + ticket context", BRAND),
-]
-
-RESULT = [
-    ("branch", "feat/proj-4821", INFO),
-    ("base_sha", "9f2c1ab", INK),
-    ("head_sha", "4d81e07", INK),
-    ("worktree_clean", "true", BRAND),
-    ("event", "job.succeeded", BRAND),
-]
-
 LIFECYCLE_STEPS = [
-    "node-a wins the row lock, takes a fencing lease, and reserves one capacity token.",
-    "The snapshot frozen at admission — not the payload — decides runtime, image, plugin, and mounts.",
-    "A clean worktree is cut from main @ 9f2c1ab onto feat/proj-4821 before anything runs.",
-    "One harness turn runs in the container. Egress, tools, packages, and the gateway are claim-scoped.",
-    "Success demands a clean tree and a real commit: base and head revisions, or the attempt fails.",
-    "The terminal event and its signed outbox row commit together — the only thing that leaves.",
+    "The machine polls the house and accepts into a free slot.",
+    "The snapshot frozen at admission decides everything.",
+    "A workspace is prepared for the sink.",
+    "One agent turn runs. Model, tools and identity go through the house.",
+    "The result is verified: a branch, a bundle, or the actions taken.",
+    "The house records it and signs the webhook.",
 ]
+
+STAGE_X = [150, 330, 510, 690, 870, 1050]
+STAGE_LABEL = ["accept", "snapshot", "workspace", "run", "result", "return"]
+STAGE_Y = 372
 
 
 def lifecycle_frame(frame: int) -> str:
-    t = frame / FRAMES
-    beat = min(BEATS - 1, int(t * BEATS))
-    local = ease((t * BEATS) - beat)
-    pulse = 0.55 + 0.45 * math.sin(t * math.tau * 3) ** 2
-
+    beat, local, pulse, t = beat_of(frame)
     svg = base(
         "Inside the boundary",
-        "The claimed job becomes a governed container run.",
-        "Same job as above, now past admission: everything on this frame is Omashiki's side of the line.",
+        "One offer becomes one governed sandbox run.",
+        "Everything on this frame is Omashiki. Nothing here came from the payload.",
     )
+    lit = [beat >= i for i in range(6)]
+    a = [1.0 if on else DIM for on in lit]
+    STRIP_Y = 156
+    TL_Y = 236
+    Y = 430
 
-    # --- Boundary strip: what enters, what leaves ---------------------------
+    # the house: a strip across the top that every upward link reaches
     svg += [
-        rect(56, 134, 1088, 32, fill=BRAND_TINT, stroke=BRAND_DIM, dash="5 7"),
-        square(74, 150, BRAND, 8),
-        text(88, 154, "INSIDE OMASHIKI", 10.5, BRAND, 800, mono=True, spacing=1.4),
-        text(250, 154, "◀ in · one claimed job from the durable queue", 10, MUTED,
-             600, mono=True),
-        text(1126, 154, "out · committed branch + signed webhook to your receiver ▶",
-             10, BRAND_SOFT, 600, anchor="end", mono=True),
+        rect(56, STRIP_Y - 16, 1088, 32, fill=BRAND_TINT, stroke=BRAND_DIM, dash="5 7"),
+        glyph_house(80, STRIP_Y, 22, BRAND, 1.0),
+        text(100, STRIP_Y + 4, "HOUSE", 10.5, BRAND, 800, mono=True, spacing=1.4),
+        icon("postgresql", 1120, STRIP_Y, 20, INFO, 0.9),
     ]
 
-    # --- Stage rail ---------------------------------------------------------
-    rail_y = 200
-    first_x, last_x = 120, 1080
-    svg.append(line(first_x, rail_y, last_x, rail_y, LINE, 3))
-    marker = first_x + (last_x - first_x) * clamp((beat + local) / (BEATS - 1))
-    svg.append(line(first_x, rail_y, marker, rail_y, BRAND, 3))
-    for index, (number, name, detail) in enumerate(STAGES):
-        x = first_x + (last_x - first_x) * index / (len(STAGES) - 1)
-        done = index < beat
-        active = index == beat
-        color = INFO if active else (BRAND if done else LINE)
-        svg += [
-            square(x, rail_y, color, 15 if active else 10, pulse if active else 1.0),
-            text(x, 176, number, 10, color if (done or active) else FAINT, 800,
-                 anchor="middle", mono=True, spacing=1.1),
-            text(x, 228, name, 11.5, INK if (done or active) else MUTED, 800,
-                 anchor="middle", mono=True, spacing=1.0),
-            text(x, 244, detail, 9.5, MUTED if (done or active) else FAINT, 500,
-                 anchor="middle", mono=True),
-        ]
+    # timeline
+    svg.append(line(STAGE_X[0], TL_Y, STAGE_X[-1], TL_Y, LINE, 2, 0.7))
+    if beat < 5:
+        svg.append(line(STAGE_X[0], TL_Y, mix(STAGE_X[beat], STAGE_X[beat + 1], local), TL_Y, BRAND, 2.5))
+    else:
+        svg.append(line(STAGE_X[0], TL_Y, STAGE_X[-1], TL_Y, BRAND, 2.5))
+    for i, x in enumerate(STAGE_X):
+        svg += [square(x, TL_Y, BRAND if lit[i] else OUTLINE, 10 if beat == i else 8,
+                       1.0 if lit[i] else 0.6),
+                label(x, TL_Y + 28, STAGE_LABEL[i],
+                      BRAND if beat == i else (INK if lit[i] else FAINT), 1.0, 11)]
 
-    snapshot_alpha = 1.0 if beat >= 1 else 0.5
-    container_alpha = 1.0 if beat >= 2 else DIM
-    result_alpha = 1.0 if beat >= 4 else DIM
-
-    # --- Frozen input -------------------------------------------------------
-    svg += [rect(56, 268, 240, 248, fill=PANEL, stroke=BRAND_DIM if beat >= 1 else LINE,
-                 opacity=snapshot_alpha)]
-    svg += panel_head(76, 296, "IN", "FROZEN AT ADMISSION", BRAND_DIM, snapshot_alpha)
-    for row, (key, value, color) in enumerate(SNAPSHOT):
-        reveal = clamp((local - row * 0.08) / 0.12) if beat == 1 else float(beat >= 1)
-        reveal = reveal if beat >= 1 else 0.6
-        svg += kv(76, 324 + row * 22, key, value, snapshot_alpha * reveal, color)
-    svg.append(text(76, 494, "catalog reloads reach new jobs only", 10, BRAND_SOFT,
-                    600, mono=True, opacity=snapshot_alpha))
-
-    # --- The container ------------------------------------------------------
+    # 01 accept: the machine polls the house and takes a slot
+    x = STAGE_X[0]
     svg += [
-        rect(324, 268, 612, 248, fill=PANEL_2, stroke=BRAND if beat >= 2 else LINE,
-             opacity=container_alpha),
-        text(344, 296, "RUN", 11, BRAND, 800, mono=True, spacing=1.2,
-             opacity=container_alpha),
-        text(380, 296, "ONE ATTEMPT, ONE CONTAINER", 11, INK, 800, mono=True,
-             spacing=1.4, opacity=container_alpha),
-        text(916, 296, "docker.runc.debian", 10, MUTED, 600, anchor="end", mono=True,
-             opacity=container_alpha),
+        framed(x, Y, 130, 150, INFO if lit[0] else LINE, a[0], INSET),
+        icon("docker", x, Y - 16, 52, INFO if lit[0] else FAINT, a[0], glow=beat == 0),
+        label(x, Y + 40, "slot 1 / 2", INFO if lit[0] else FAINT, a[0], 10),
     ]
-    for slot, label, detail, color in CONTAINER_BLOCKS:
-        column, row = slot % 3, slot // 3
-        x = 344 + column * 200
-        y = 314 + row * 90
-        if slot == 0:
-            reveal = 0.0 if beat < 2 else (clamp(local / 0.45) if beat == 2 else 1.0)
-        elif beat < 3:
-            reveal = 0.0
-        elif beat == 3:
-            reveal = clamp((local - (slot - 1) * 0.13) / 0.18)
-        else:
-            reveal = 1.0
-        svg += [
-            rect(x, y, 184, 74, fill=INSET, stroke=color if reveal > 0.6 else LINE,
-                 opacity=container_alpha * mix(0.4, 1.0, reveal)),
-            text(x + 16, y + 30, label, 10.5, color, 800, mono=True, spacing=1.0,
-                 opacity=container_alpha * reveal),
-            text(x + 16, y + 49, detail, 9.5, MUTED, 500, mono=True,
-                 opacity=container_alpha * reveal),
-        ]
-    if beat < 2:
-        waiting = [
-            "node-a: row lock → fencing lease → capacity token 1 of 2",
-            "resolving the frozen snapshot — no container started yet",
-        ][beat]
-        svg += [
-            square(630, 372, INFO, 8, pulse),
-            text(630, 404, waiting, 12, MUTED, 600, anchor="middle", mono=True),
-        ]
-    svg.append(text(344, 494,
-                    "nothing here came from the payload — no provider, model, credential, or mount",
-                    10, FAINT, 600, mono=True, opacity=container_alpha))
+    for i in range(2):
+        svg.append(square(x - 10 + i * 20, Y + 56, INFO if (i == 0 and lit[0]) else OUTLINE, 9, a[0]))
+    if beat == 0:
+        y0 = mix(Y - 75, STRIP_Y + 16, local)
+        svg += [line(x, Y - 75, x, STRIP_Y + 16, BRAND_DIM, 1.5, 0.6, "3 6"),
+                dot(x, y0, BRAND, 5), tag(x + 52, STRIP_Y + 38, "poll", BRAND, SURFACE, size=9)]
 
-    # --- Durable result -----------------------------------------------------
-    svg += [rect(964, 268, 180, 248, fill=PANEL, stroke=BRAND if beat >= 4 else LINE,
-                 opacity=result_alpha)]
-    svg += panel_head(982, 296, "OUT", "DURABLE RESULT", BRAND, result_alpha)
-    for row, (key, value, color) in enumerate(RESULT):
-        reveal = clamp((local - row * 0.1) / 0.14) if beat == 4 else float(beat >= 4)
-        svg += [
-            text(982, 326 + row * 32, key, 9.5, MUTED, 600, mono=True,
-                 opacity=result_alpha * reveal),
-            text(982, 342 + row * 32, value, 10.5, color, 700, mono=True,
-                 opacity=result_alpha * reveal),
-        ]
-    svg.append(text(982, 494, "webhook signed", 10, BRAND_SOFT, 700, mono=True,
-                    opacity=result_alpha * (1.0 if beat >= 5 else 0.0)))
+    # 02 snapshot: what was frozen at admission
+    x = STAGE_X[1]
+    svg.append(framed(x, Y, 130, 150, BRAND if lit[1] else LINE, a[1], INSET))
+    rows = [("git", "repo"), ("docker", "runtime"), ("github", "identity"), ("jira", "context")]
+    for r, (ic, lab) in enumerate(rows):
+        cy = Y - 48 + r * 30
+        reveal = clamp((local - r * 0.18) / 0.3) if beat == 1 else float(lit[1])
+        svg += [icon(ic, x - 38, cy, 18, INK if lit[1] else FAINT, a[1] * reveal),
+                text(x - 20, cy + 4, lab, 10, INK if lit[1] else FAINT, 600, mono=True,
+                     opacity=a[1] * reveal)]
+    svg.append(label(x, Y + 62, "frozen", BRAND_SOFT if lit[1] else FAINT, a[1], 9))
 
+    # 03 workspace: a clean tree cut for the sink
+    x = STAGE_X[2]
     svg += [
-        arrow(296, 392, 324, 392, BRAND_DIM if beat >= 1 else LINE, 2,
-              1.0 if beat >= 1 else 0.4),
-        arrow(936, 392, 964, 392, BRAND if beat >= 4 else LINE, 2,
-              1.0 if beat >= 4 else 0.4),
+        framed(x, Y, 130, 150, INFO if lit[2] else LINE, a[2], INSET),
+        glyph_branch(x, Y - 12, 56, INFO if lit[2] else FAINT, a[2]),
+        label(x, Y + 46, "clean tree", INFO if lit[2] else FAINT, a[2], 9),
     ]
 
+    # 04 run: the sandbox, with model · tools · identity going up to the house
+    x = STAGE_X[3]
     svg += [
-        line(56, 542, 1144, 542, LINE, 1, 0.8),
-        text(56, 566, "FAILURE IS ALSO A RESULT", 10, CORAL, 800, mono=True, spacing=1.3),
-        text(258, 566,
-             "durable error record · events retained · retry reopens the same job as attempt 2 · the webhook fires either way",
-             10.5, MUTED, 500, mono=True),
+        framed(x, Y, 150, 150, BRAND if lit[3] else LINE, a[3], INSET),
+        glyph_box(x, Y - 12, 64, BRAND if lit[3] else FAINT, a[3]),
+        label(x, Y + 50, "sandbox", BRAND_SOFT if lit[3] else FAINT, a[3], 9),
     ]
+    for i, (lab, dx) in enumerate([("model", -52), ("tools", 0), ("identity", 52)]):
+        on = lit[3] and (beat > 3 or local > 0.2 + i * 0.25)
+        top = STRIP_Y + 16
+        svg += [line(x + dx, Y - 75, x + dx, top, BRAND if on else LINE, 1.5,
+                     0.8 if on else 0.25, "3 6"),
+                label(x + dx, TL_Y + 46, lab, BRAND_SOFT if on else FAINT, 1.0, 8)]
+        if on and beat == 3:
+            svg.append(dot(x + dx, mix(Y - 75, top, (local * 1.6 + i * 0.33) % 1.0), BRAND, 4))
+
+    # 05 result: one of three, verified
+    x = STAGE_X[4]
+    svg.append(framed(x, Y, 130, 150, BRAND if lit[4] else LINE, a[4], INSET))
+    for i, fn in enumerate([glyph_branch, glyph_bundle, glyph_actions]):
+        chosen = i == 0
+        op = a[4] * (1.0 if chosen or not lit[4] else 0.3)
+        svg.append(fn(x + (i - 1) * 38, Y - 14, 32, BRAND if chosen and lit[4] else FAINT, op))
+    svg.append(label(x, Y + 46, "verified", BRAND_SOFT if lit[4] else FAINT, a[4], 9))
+    if lit[4]:
+        svg.append(square(x + 50, Y - 60, BRAND, 9 * (pulse if beat == 4 else 1.0)))
+
+    # 06 return: the house records it, the webhook leaves
+    x = STAGE_X[5]
+    svg += [
+        framed(x, Y, 130, 150, BRAND if lit[5] else LINE, a[5], INSET),
+        icon("postgresql", x, Y - 14, 48, INFO if lit[5] else FAINT, a[5], glow=beat == 5),
+        label(x, Y + 46, "event + outbox", BRAND_SOFT if lit[5] else FAINT, a[5], 9),
+    ]
+    if beat == 5:
+        out = clamp((local - 0.5) / 0.5)
+        svg += [line(x, Y - 75, x, STRIP_Y + 16, BRAND, 2, 0.9),
+                dot(x, mix(Y - 75, STRIP_Y + 16, min(1.0, local * 2)), BRAND, 5),
+                arrow(x, Y + 75, x, 565, BRAND, 2.5, 0.35 + 0.65 * out),
+                crossing(x, 548, BRAND, 0.4 + 0.6 * out)]
+        if out > 0:
+            svg += [dot(x, mix(Y + 75, 548, out), BRAND, 6),
+                    tag(x - 62, 548, "webhook", BRAND, SURFACE, size=9, opacity=out)]
+
+    svg.append(text(520, 552, "failure is also a result · retry reopens the same job",
+                    9.5, FAINT, 600, anchor="middle", mono=True))
+
     svg += narration(beat + 1, BEATS, LIFECYCLE_STEPS[beat])
     svg.append("</svg>")
     return "".join(svg)
