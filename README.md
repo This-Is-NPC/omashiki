@@ -140,7 +140,7 @@ ports 4013/4014), run `mise run e2e:compose-worker`.
 
 Distributed manager and worker Compose examples live under [`examples/`](examples/README.md); enroll a remote worker with `mise run worker:enroll` after both stacks are up. One worker can be enrolled into many houses; `mise run e2e:two-houses` proves two managers sharing one worker in isolation.
 
-The product, feature by feature — one house per developer, a shared machine fleet, agent identities declared in the house — is walked through in [`docs/walkthrough.md`](docs/walkthrough.md). Technical documentation lives under [`docs/internal/`](docs/internal/README.md).
+The product, feature by feature — one house per developer, a shared machine fleet, agent identities declared in the house — is walked through in [`docs/concepts/`](docs/README.md). Technical documentation lives under [`docs/internal/`](docs/internal/README.md).
 
 Real providers remain explicit opt-ins: use `e2e:overture:runc:opencode`,
 `e2e:overture:runc:claude`, or `e2e:overture:jcode:lmstudio`. To validate Kata,

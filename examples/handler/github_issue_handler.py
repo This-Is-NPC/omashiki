@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A client at the door: GitHub issues become Omashiki jobs, and back.
 
-This is the "client at the door" from docs/walkthrough.md. It is not part of
+This is the "client at the door" from docs/concepts/client-at-the-door.md. It is not part of
 Omashiki. It is what *you* run in front of a house, and it is the whole
 integration surface:
 

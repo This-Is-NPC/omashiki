@@ -2,7 +2,7 @@
 
 Technical documentation: how the system is built, what it guarantees, and
 the design records behind it. The product itself is described in
-[../walkthrough.md](../walkthrough.md).
+[../README.md](../README.md).
 
 ## Reading Order
 
@@ -29,7 +29,7 @@ Grounded in the current code; each carries its own status notes.
   configuration support plus host deployment for per-sandbox kernels.
 - [Generic task processor](generic-task-processor.md): structured non-Git
   results and optional repositories, without weakening the caller boundary.
-- [Plugins and task lifecycle](plugins-e-ciclo-de-vida.md): declarative
+- [Plugins and task lifecycle](plugins-and-task-lifecycle.md): declarative
   plugin manifests, harness cost model, and Wave 2 gate criteria.
 - [Harness next-cost measurement](harness-next-cost.md): post-CliJson
   re-measurement and Wave 2 gate verdict.
@@ -54,7 +54,7 @@ Grounded in the current code; each carries its own status notes.
 
 ## Documentation Ownership
 
-- `docs/walkthrough.md` owns product behaviour as the user meets it.
+- `docs/concepts/` owns product behaviour as the user meets it.
 - `docs/internal/` owns architecture, contracts, security guarantees, and
   cross-component operational concepts.
 - The root [`README.md`](../../README.md) owns project discovery and quick
