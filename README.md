@@ -133,6 +133,16 @@ rewrites the shared ignored `omashiki.e2e.toml`:
 mise run e2e:overture
 ```
 
+For the two-process host manager+worker path (manager on port 4011, worker on
+host Docker), run `mise run e2e:host-worker`.
+
+For the packaged Compose manager+worker path (release images, HTTP enroll,
+ports 4013/4014), run `mise run e2e:compose-worker`.
+
+Distributed manager and worker Compose examples live under [`examples/`](examples/README.md); enroll a remote worker with `mise run worker:enroll` after both stacks are up. One worker can be enrolled into many houses; `mise run e2e:two-houses` proves two managers sharing one worker in isolation.
+
+The intended product shape — one house per developer, a shared machine fleet, agent identities declared in the house — is written up in [`docs/omashiki-to-be.md`](docs/omashiki-to-be.md), with the phased work order and status in [`docs/omashiki-to-be-implementation.md`](docs/omashiki-to-be-implementation.md).
+
 Real providers remain explicit opt-ins: use `e2e:overture:runc:opencode`,
 `e2e:overture:runc:claude`, or `e2e:overture:jcode:lmstudio`. To validate Kata,
 run `mise run kata:install` once and then `mise run kata:smoke`; the smoke uses

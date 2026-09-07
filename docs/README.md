@@ -42,6 +42,13 @@ requires; individual status notes distinguish implemented seams from pending
 deployment. Anything they contradict in the four documents above is
 aspirational, not current.
 
+- [Omashiki to-be](omashiki-to-be.md): product walkthrough of the intended
+  shape — one house (manager) per developer, a shared machine fleet, the job
+  as the only thing a worker authenticates. Its closing checklist records
+  which statements the code already backs.
+- [Omashiki to-be implementation](omashiki-to-be-implementation.md): phased
+  work order from the pre-to-be code to the product (casa track) with per-phase
+  status; ferro phases 2–3 stay in distributed-execution.md.
 - [Manager and worker plan](distributed-execution.md): control plane owns
   PostgreSQL and the product registry; workers pull snapshots and never mount
   the database. Covers 1:N, N:1, and N:M plus `git` / `files` / `none` sinks.
