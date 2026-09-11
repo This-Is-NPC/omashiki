@@ -33,6 +33,10 @@ MANAGER_PORT = 4011
 DB_NAME = "omashiki_host_e2e"
 FAKE_LLM_PORT = 8787
 JOB_TIMEOUT_SEC = 180
+# A worker reports a container change within a second; a census corrects the
+# list every ten seconds. Twenty seconds covers both with margin.
+FLEET_TIMEOUT_SEC = 20
+FLEET_CONTAINER_STATES = {"created", "running", "exited", "removing"}
 
 INSTRUCTIONS = """\
 Create a Python file named hello.py at the repository root. It must print
@@ -365,6 +369,51 @@ def watch_container_creates(
             proc.kill()
 
 
+def fleet_container(fleet: dict, container_id: str) -> tuple[dict, dict] | None:
+    """Find a Docker container in a ``GET /api/v1/fleet`` body.
+
+    The Docker CLI prints short ids and the Engine API full ones, so either may
+    be a prefix of the other.
+    """
+    for node in fleet.get("data", []):
+        for container in node.get("containers", []):
+            reported = container.get("id") or ""
+            if reported and (reported.startswith(container_id) or container_id.startswith(reported)):
+                return node, container
+    return None
+
+
+def fleet_report_problems(node: dict, container: dict, job_id: str, *, machine_id: str) -> list[str]:
+    """What is wrong with the manager's view of the worker running ``job_id``."""
+    problems = []
+    if node.get("kind") != "worker":
+        problems.append(f"node kind is {node.get('kind')!r}, expected 'worker'")
+    if node.get("machine_id") != machine_id:
+        problems.append(f"node is {node.get('machine_id')!r}, expected {machine_id!r}")
+    if node.get("stale") is not False:
+        problems.append("worker is reported stale while it runs a job")
+    if node.get("capacity") != 1:
+        problems.append(f"worker capacity is {node.get('capacity')!r}, expected 1")
+    if container.get("job_id") != job_id:
+        problems.append(f"container job_id is {container.get('job_id')!r}, expected {job_id!r}")
+    if container.get("state") not in FLEET_CONTAINER_STATES:
+        problems.append(f"container state is {container.get('state')!r}")
+    return problems
+
+
+def watch_fleet(stop_event: threading.Event, seen: list[dict], token: str | None) -> None:
+    """Record every fleet snapshot with a container, so a short-lived one is kept."""
+    while not stop_event.is_set():
+        try:
+            status, body = api_request("GET", "/api/v1/fleet", token=token, timeout=5)
+        except OSError:
+            status, body = 0, {}
+        if status == 200 and any(node.get("containers") for node in body.get("data", [])):
+            seen.append(body)
+            del seen[:-500]
+        stop_event.wait(0.1)
+
+
 def wait_http(url: str, *, timeout: float = 90, process: subprocess.Popen | None = None) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -434,6 +483,9 @@ class Harness:
         self.container_watch_stop = threading.Event()
         self.container_watch_seen: list[dict[str, str]] = []
         self.container_watch_thread: threading.Thread | None = None
+        self.fleet_watch_stop = threading.Event()
+        self.fleet_seen: list[dict] = []
+        self.fleet_watch_thread: threading.Thread | None = None
 
     def acquire_lock(self) -> None:
         if os.environ.get("OMASHIKI_E2E_LOCK_HELD") == "1":
@@ -577,6 +629,60 @@ class Harness:
             self.container_watch_thread.join(timeout=2)
             self.container_watch_thread = None
 
+    def start_fleet_watch(self) -> None:
+        self.fleet_watch_stop.clear()
+        self.fleet_seen = []
+        self.fleet_watch_thread = threading.Thread(
+            target=watch_fleet,
+            args=(self.fleet_watch_stop, self.fleet_seen, self.api_token),
+            daemon=True,
+        )
+        self.fleet_watch_thread.start()
+
+    def stop_fleet_watch(self) -> None:
+        self.fleet_watch_stop.set()
+        if self.fleet_watch_thread is not None:
+            self.fleet_watch_thread.join(timeout=6)
+            self.fleet_watch_thread = None
+
+    def assert_fleet_reported(self, job_id: str, container_id: str) -> None:
+        """The manager learned about the worker's real container from its report."""
+        machine_id = worker_env(worker_token=self.worker_token)["OMASHIKI_NODE"]
+        deadline = time.monotonic() + FLEET_TIMEOUT_SEC
+        while time.monotonic() < deadline:
+            for body in list(self.fleet_seen):
+                match = fleet_container(body, container_id)
+                if match is None:
+                    continue
+                node, container = match
+                problems = fleet_report_problems(node, container, job_id, machine_id=machine_id)
+                if problems:
+                    raise E2EError(f"fleet report for {container_id} is wrong: {problems}")
+                print(
+                    f"fleet reported {container['id'][:12]} ({container['state']}) "
+                    f"on {node['machine_id']} for job {job_id}",
+                    flush=True,
+                )
+                return
+            time.sleep(0.1)
+        raise E2EError(
+            f"manager fleet never reported container {container_id} for job {job_id}"
+        )
+
+    def assert_fleet_cleared(self, container_id: str) -> None:
+        """The removed container left the manager's fleet."""
+        deadline = time.monotonic() + FLEET_TIMEOUT_SEC
+        last: dict = {}
+        while time.monotonic() < deadline:
+            status, body = api_request("GET", "/api/v1/fleet", token=self.api_token)
+            if status == 200:
+                last = body
+                if fleet_container(body, container_id) is None:
+                    print(f"fleet no longer lists {container_id[:12]}", flush=True)
+                    return
+            time.sleep(0.25)
+        raise E2EError(f"removed container {container_id} still in the fleet: {last}")
+
     def admit_job(self) -> str:
         self.api_token = ensure_api_token()
         request = {
@@ -710,6 +816,7 @@ class Harness:
             time.sleep(0.3)
             remove_labelled_containers()
             job_id = self.admit_job()
+            self.start_fleet_watch()
             try:
                 containers = self.wait_for_container_proof(job_id)
                 print(
@@ -719,10 +826,13 @@ class Harness:
                 )
             finally:
                 self.stop_container_watch()
+            self.assert_fleet_reported(job_id, containers[0]["id"])
             result = self.wait_for_result(job_id)
             self.assert_hello_on_remote(result)
+            self.assert_fleet_cleared(containers[0]["id"])
             print("host-worker E2E passed", flush=True)
         finally:
+            self.stop_fleet_watch()
             self.cleanup()
 
 

@@ -67,6 +67,46 @@ class HostWorkerHelperTests(unittest.TestCase):
         self.assertEqual(env["OMASHIKI_MAX_CONCURRENT_CONTAINERS"], "1")
         self.assertEqual(env["OMASHIKI_MANAGER_URL"], "http://127.0.0.1:4011")
 
+    def fleet(self, container_id: str = "fc0257f99b3df3c283d7f941ce522a54") -> dict:
+        return {
+            "data": [
+                {
+                    "machine_id": "worker-1",
+                    "kind": "worker",
+                    "stale": False,
+                    "capacity": 1,
+                    "free_slots": 0,
+                    "containers": [
+                        {"id": container_id, "state": "running", "job_id": "job-1"}
+                    ],
+                }
+            ]
+        }
+
+    def test_fleet_container_matches_short_and_full_docker_ids(self) -> None:
+        full = "fc0257f99b3df3c283d7f941ce522a54"
+
+        self.assertIsNotNone(MODULE.fleet_container(self.fleet(full), "fc0257f99b3d"))
+        self.assertIsNotNone(MODULE.fleet_container(self.fleet("fc0257f99b3d"), full))
+        self.assertIsNone(MODULE.fleet_container(self.fleet(full), "aaaaaaaaaaaa"))
+        self.assertIsNone(MODULE.fleet_container({"data": []}, full))
+
+    def test_fleet_report_problems_accepts_the_running_worker(self) -> None:
+        node, container = MODULE.fleet_container(self.fleet(), "fc0257f99b3d")
+
+        self.assertEqual(
+            MODULE.fleet_report_problems(node, container, "job-1", machine_id="worker-1"), []
+        )
+
+    def test_fleet_report_problems_names_each_mismatch(self) -> None:
+        node, container = MODULE.fleet_container(self.fleet(), "fc0257f99b3d")
+        node = {**node, "stale": True, "capacity": 2, "machine_id": "worker-9"}
+        container = {**container, "job_id": None, "state": "exploded"}
+
+        problems = MODULE.fleet_report_problems(node, container, "job-1", machine_id="worker-1")
+
+        self.assertEqual(len(problems), 5)
+
 
 if __name__ == "__main__":
     unittest.main()

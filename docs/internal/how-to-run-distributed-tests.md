@@ -15,9 +15,13 @@ Select the required deployment:
 
 | Command | Deployment and checks |
 | --- | --- |
-| `mise run e2e:host-worker` | Two host processes, host Docker, manager port `4011`. |
+| `mise run e2e:host-worker` | Two host processes, host Docker, manager port `4011`, and fleet reports. |
 | `mise run e2e:compose-worker` | Release images, HTTP enrollment, ports `4013` and `4014`. |
 | `mise run e2e:two-houses` | Managers on `4021` and `4022`, worker enrollment on `4023`. |
+
+The host-worker test reads `GET /api/v1/fleet` while the job runs.
+It checks that the manager lists the real Docker container under the worker, with the job ID.
+After the job, it checks that the removed container leaves the list.
 
 The two-house test runs both houses through one worker.
 It stops and restarts one house while it checks continued operation of the other.
