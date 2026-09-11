@@ -34,6 +34,15 @@ description = "Start db + migrate + assets + images, then run Phoenix (foregroun
 depends     = ["server"]
 run         = "true"
 
+# Split roles: the manager owns the database, queue, and browser; the worker
+# (.mise/tasks/up/worker) owns Docker and runs the jobs. The manager builds no
+# image, so it skips `server`'s dependencies and keeps only its own.
+[tasks."up:manager"]
+description = "Start db + migrate + assets, then run Phoenix as a manager only (no local jobs)"
+depends     = ["migrate", "assets-install"]
+env         = { OMASHIKI_ROLE = "manager" }
+run         = "mise run --skip-deps server"
+
 [tasks."up:fresh"]
 description = "Nuke everything, then start fresh"
 depends     = ["nuke"]

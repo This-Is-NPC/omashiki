@@ -50,6 +50,19 @@ mise run db-up
 mise run migrate
 ```
 
+To run the manager and the worker as separate processes, use two terminals:
+
+```bash
+mise run up:manager
+mise run up:worker
+```
+
+`up:manager` starts Phoenix in the manager role. It does not build agent images or run jobs.
+`up:worker` builds missing images and polls the manager. It does not use the database.
+Both tasks need the same `OMASHIKI_WORKER_TOKEN` value in `.env`.
+The worker uses the Docker bridge gateway as the default manager URL.
+Set `OMASHIKI_MANAGER_URL` to use a manager on a different host.
+
 Use the [test procedure](how-to-run-tests.md) to validate source changes.
 
 ## 4. Install the repository hook

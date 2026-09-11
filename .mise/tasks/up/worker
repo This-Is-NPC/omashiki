@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+#MISE description="Run only a worker in the foreground: poll a manager and run its jobs in Docker"
+#MISE depends=["deps", "images"]
+import os
+import socket
+import subprocess
+import sys
+import pathlib
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3] / ".scripts"))
+from omashiki import config, mix, node_cookie, node_name
+
+# The manager already holds the default node name on this machine; a second
+# BEAM under the same name would refuse to start.
+WORKER_NODE_NAME = "omashiki-worker@127.0.0.1"
+
+
+def already_listening(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.5)
+        return probe.connect_ex((host, port)) == 0
+
+
+def bridge_gateway() -> str | None:
+    """The host address on Docker's default bridge, e.g. 172.17.0.1."""
+    probe = subprocess.run(
+        ["docker", "network", "inspect", "bridge",
+         "--format", "{{(index .IPAM.Config 0).Gateway}}"],
+        capture_output=True, text=True,
+    )
+    gateway = probe.stdout.strip()
+    return gateway if probe.returncode == 0 and gateway else None
+
+
+token = os.environ.get("OMASHIKI_WORKER_TOKEN", "").strip()
+if not token:
+    print(
+        "✖ OMASHIKI_WORKER_TOKEN is not set.\n"
+        "  Put the manager's worker token in .env, for example:\n"
+        "    OMASHIKI_WORKER_TOKEN=$(openssl rand -hex 32)\n"
+        "  The manager and the worker must use the same value.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+enroll_port = int(os.environ.get("OMASHIKI_ENROLL_PORT", "4012"))
+if already_listening("127.0.0.1", enroll_port):
+    print(f"✔ a worker already listens on :{enroll_port} — nothing to do", flush=True)
+    sys.exit(0)
+
+# The job containers receive this URL too, so loopback is the wrong default:
+# inside a container it is the container. The bridge gateway reaches a manager
+# bound to 0.0.0.0 from this process and from bridge containers alike, which is
+# the same shape examples/compose.worker.yml uses with host.docker.internal.
+manager_url = os.environ.get("OMASHIKI_MANAGER_URL", "").strip()
+if not manager_url:
+    port = int(config().get("app", {}).get("port", 4000))
+    gateway = bridge_gateway()
+
+    if gateway is None:
+        print("⚠ Docker bridge not found; job containers cannot reach a loopback manager URL.",
+              flush=True)
+
+    manager_url = f"http://{gateway or '127.0.0.1'}:{port}"
+
+os.environ["OMASHIKI_ROLE"] = "worker"
+os.environ["OMASHIKI_MANAGER_URL"] = manager_url
+os.environ.setdefault("OMASHIKI_AGENT_NETWORK_MODE", "bridge")
+os.environ.setdefault("OMASHIKI_NODE_NAME", WORKER_NODE_NAME)
+# omashiki.toml is the house registry. A worker takes each job's snapshot from
+# the manager and never reads it.
+os.environ.pop("OMASHIKI_CONFIG", None)
+
+print(
+    f"✔ worker polling {manager_url}\n"
+    f"✔ node {node_name()} — attach a remote console with:\n"
+    f"    iex --name console@127.0.0.1 --cookie {node_cookie()} --remsh {node_name()}",
+    flush=True,
+)
+
+mix("run", "--no-halt", distributed=True)

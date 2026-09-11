@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 #MISE description="Run the Phoenix server in the foreground"
 #MISE depends=["migrate", "assets-install", "images"]
+import os
 import socket
 import sys
 import pathlib
@@ -39,6 +40,15 @@ print(
     f"    iex --name console@127.0.0.1 --cookie {node_cookie()} --remsh {node_name()}",
     flush=True,
 )
+
+# A manager runs no job itself. Without the worker token no worker can poll it,
+# and every admitted job would wait in the queue with nothing to say why.
+if os.environ.get("OMASHIKI_ROLE") == "manager":
+    print("✔ manager only — jobs run on workers (mise run up:worker)", flush=True)
+
+    if not os.environ.get("OMASHIKI_WORKER_TOKEN", "").strip():
+        print("⚠ OMASHIKI_WORKER_TOKEN is not set: no worker can poll this manager. "
+              "Put it in .env.", flush=True)
 
 try:
     mix("phx.server", distributed=True)
