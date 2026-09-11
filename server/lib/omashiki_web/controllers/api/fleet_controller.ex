@@ -1,0 +1,48 @@
+defmodule OmashikiWeb.Api.FleetController do
+  use OmashikiWeb, :controller
+
+  alias Omashiki.Fleet
+  alias Omashiki.Jobs.Api
+
+  @doc "Nodes that run this house's jobs and the containers on each. Read-only."
+  def index(conn, _params) do
+    nodes = Fleet.nodes()
+
+    attempt_ids =
+      nodes
+      |> Enum.flat_map(& &1.containers)
+      |> Enum.map(& &1.attempt_id)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    jobs = Api.job_ids_for_attempts(actor(conn), attempt_ids)
+
+    json(conn, %{data: Enum.map(nodes, &node_json(&1, jobs))})
+  end
+
+  defp actor(conn), do: conn.assigns[:current_token] || conn.assigns[:current_user]
+
+  defp node_json(node, jobs) do
+    %{
+      machine_id: node.machine_id,
+      kind: node.kind,
+      stale: node.stale?,
+      last_seen_at: node.last_seen_at,
+      capacity: node.capacity,
+      free_slots: node.free_slots,
+      containers: Enum.map(node.containers, &container_json(&1, jobs))
+    }
+  end
+
+  # A job id is shown only for a job the caller may read. Any other container
+  # stays anonymous, as it does on the fleet graph.
+  defp container_json(container, jobs) do
+    %{
+      id: container.id,
+      state: container.state,
+      created_at: container.created_at,
+      started_at: container.started_at,
+      job_id: Map.get(jobs, container.attempt_id)
+    }
+  end
+end

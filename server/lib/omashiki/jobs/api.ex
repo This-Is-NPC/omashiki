@@ -138,6 +138,25 @@ defmodule Omashiki.Jobs.Api do
   defp attempt_steps(_steps, nil), do: []
   defp attempt_steps(steps, %JobAttempt{id: id}), do: Map.get(steps, id, [])
 
+  @doc "Map attempt ids to job ids, only for jobs `actor` may read."
+  def job_ids_for_attempts(actor, attempt_ids) when is_list(attempt_ids) do
+    ids = for id <- attempt_ids, {:ok, uuid} <- [Ecto.UUID.cast(id)], do: uuid
+
+    if ids == [] do
+      %{}
+    else
+      from(j in Job,
+        join: a in JobAttempt,
+        on: a.job_id == j.id,
+        where: a.id in ^ids,
+        select: {a.id, j.id}
+      )
+      |> apply_actor_scope(actor)
+      |> Repo.all()
+      |> Map.new()
+    end
+  end
+
   @doc "Return all durable observations needed by the operator job detail."
   def detail(job_id, %User{} = user) do
     with {:ok, job} <- get(job_id, user) do

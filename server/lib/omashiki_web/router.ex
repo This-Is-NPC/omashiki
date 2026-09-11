@@ -81,6 +81,9 @@ defmodule OmashikiWeb.Router do
     get "/repositories", DiscoveryController, :repositories
     get "/environments", DiscoveryController, :environments
 
+    # Worker nodes and their containers, as the fleet graph draws them.
+    get "/fleet", FleetController, :index
+
     # Admission and queue lifecycle.
     post "/jobs", JobsController, :create
     post "/jobs/batch", JobsController, :batch

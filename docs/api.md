@@ -53,6 +53,7 @@ Use the submitting token for job inspection and result access.
 | POST | `/sessions/issue_token` | Exchange account credentials for a token. |
 | GET | `/repositories` | List safe repository metadata. |
 | GET | `/environments` | List safe environment metadata. |
+| GET | `/fleet` | Read the nodes that run jobs and their containers. |
 | POST | `/jobs` | Admit one job. |
 | POST | `/jobs/batch` | Admit an atomic batch. |
 | GET | `/jobs` | List accessible jobs. |
@@ -64,6 +65,14 @@ Use the submitting token for job inspection and result access.
 | GET | `/jobs/{id}/events` | Stream events as SSE. |
 | GET | `/jobs/{id}/events/stream` | Compatibility alias for SSE. |
 | GET | `/jobs/{id}/webhook-deliveries` | Read redacted delivery status. |
+
+## Fleet
+
+`GET /fleet` returns one entry for each node that runs jobs for this house.
+Each entry contains `machine_id`, `kind`, `stale`, `last_seen_at`, `capacity`, `free_slots`, and `containers`.
+Each container contains `id`, `state`, `created_at`, `started_at`, and `job_id`.
+`job_id` is `null` when the caller cannot read that job.
+The route is read-only. It does not change a job, a lease, or capacity.
 
 ## Single job envelope
 
