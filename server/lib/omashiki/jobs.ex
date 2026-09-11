@@ -114,7 +114,6 @@ defmodule Omashiki.Jobs do
 
   def claim_next(_, _), do: {:error, :invalid_runner_id}
 
-
   @doc "Refresh a lease using its fencing token."
   def heartbeat(attempt_or_id, lease_token, opts \\ [])
 
@@ -258,6 +257,7 @@ defmodule Omashiki.Jobs do
         end
       end)
       |> normalize_transaction_result()
+      |> notify_job()
     end
   end
 
@@ -1091,7 +1091,6 @@ defmodule Omashiki.Jobs do
     |> Repo.one()
   end
 
-
   defp locked_job(job_id),
     do: from(j in Job, where: j.id == ^job_id, lock: "FOR UPDATE") |> Repo.one()
 
@@ -1125,15 +1124,25 @@ defmodule Omashiki.Jobs do
   defp normalize_transaction_result({:ok, value}), do: {:ok, value}
   defp normalize_transaction_result({:error, reason}), do: {:error, reason}
 
-  defp notify_job({:ok, %{id: job_id}} = result) when is_binary(job_id) do
+  @doc """
+  Tell this node's subscribers that a job's visible state changed. Call it
+  after the change commits, so a subscriber that reads again sees it.
+  """
+  def broadcast_updated(job_id) when is_binary(job_id) do
     Phoenix.PubSub.broadcast(Omashiki.PubSub, "jobs", {:job_updated, job_id})
     Phoenix.PubSub.broadcast(Omashiki.PubSub, "job:#{job_id}", {:job_updated, job_id})
+    :ok
+  end
+
+  # An attempt carries both `id` and `job_id`; its job id has to win, or the
+  # event names the attempt and "job:<id>" subscribers never hear about it.
+  defp notify_job({:ok, %{job_id: job_id}} = result) when is_binary(job_id) do
+    broadcast_updated(job_id)
     result
   end
 
-  defp notify_job({:ok, %{job_id: job_id}} = result) when is_binary(job_id) do
-    Phoenix.PubSub.broadcast(Omashiki.PubSub, "jobs", {:job_updated, job_id})
-    Phoenix.PubSub.broadcast(Omashiki.PubSub, "job:#{job_id}", {:job_updated, job_id})
+  defp notify_job({:ok, %{id: job_id}} = result) when is_binary(job_id) do
+    broadcast_updated(job_id)
     result
   end
 

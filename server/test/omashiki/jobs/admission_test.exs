@@ -147,6 +147,15 @@ defmodule Omashiki.Jobs.AdmissionTest do
     assert job.admitted_repository["task_branch"] == "hello-world"
   end
 
+  # Operator screens learn about new work from this event, not from polling.
+  test "an admitted job is announced to subscribers", %{token: token} do
+    Phoenix.PubSub.subscribe(Omashiki.PubSub, "jobs")
+
+    assert {:ok, job} = Admission.admit(token, single_request())
+    assert_receive {:job_updated, id}
+    assert id == job.id
+  end
+
   test "admits a root job with an immutable redacted snapshot", %{token: token} do
     assert {:ok, job} = Admission.admit(token, single_request())
     assert job.status == "queued"

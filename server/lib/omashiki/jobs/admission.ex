@@ -25,7 +25,7 @@ defmodule Omashiki.Jobs.Admission do
          {:ok, user_id} <- authorize(token),
          nil <- find_existing(user_id, token.id, request["idempotency_key"]),
          {:ok, resolved} <- resolve(request) do
-      insert_single(user_id, token.id, request, resolved)
+      user_id |> insert_single(token.id, request, resolved) |> notify_admitted()
     else
       %Job{} = existing -> {:ok, existing}
       {:error, reason} -> {:error, reason}
@@ -42,11 +42,25 @@ defmodule Omashiki.Jobs.Admission do
          {:ok, user_id} <- authorize(token),
          {:ok, items} <- prepare_batch(user_id, token.id, request),
          result <- insert_batch(user_id, token.id, request["correlation_id"], items) do
-      result
+      notify_admitted(result)
     end
   end
 
   def admit_batch(_, _), do: {:error, :unauthorized}
+
+  # Admission inserts rows directly rather than through `Jobs`, so it announces
+  # new jobs itself, after the transaction commits.
+  defp notify_admitted({:ok, %Job{id: id}} = result) do
+    Omashiki.Jobs.broadcast_updated(id)
+    result
+  end
+
+  defp notify_admitted({:ok, jobs} = result) when is_list(jobs) do
+    Enum.each(jobs, &Omashiki.Jobs.broadcast_updated(&1.id))
+    result
+  end
+
+  defp notify_admitted(result), do: result
 
   # A `drain_all` rollout is waiting for the fleet to empty. Admitting here
   # would keep it from ever emptying, so the door closes at the front rather

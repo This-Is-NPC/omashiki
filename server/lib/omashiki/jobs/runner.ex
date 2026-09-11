@@ -509,7 +509,8 @@ defmodule Omashiki.Jobs.Runner do
   defp persist_plans!(attempt, plans) do
     existing = Repo.all(from(s in JobStep, where: s.attempt_id == ^attempt.id))
 
-    Enum.map(plans, fn plan ->
+    plans
+    |> Enum.map(fn plan ->
       case Enum.find(existing, &(&1.key == plan.key)) do
         %JobStep{} = step ->
           step
@@ -527,6 +528,7 @@ defmodule Omashiki.Jobs.Runner do
           |> Repo.insert!()
       end
     end)
+    |> tap(fn _steps -> Omashiki.Jobs.broadcast_updated(attempt.job_id) end)
   end
 
   defp step_plans(pre_steps, post_steps, timeout_ms) do
@@ -700,7 +702,16 @@ defmodule Omashiki.Jobs.Runner do
   defp replace_step(steps, updated),
     do: Enum.map(steps, &if(&1.id == updated.id, do: updated, else: &1))
 
-  defp update_step!(step, attrs), do: step |> JobStep.changeset(attrs) |> Repo.update!()
+  # Step progress is visible on the operator screens, so each change is
+  # announced like a job transition. Steps are written outside a transaction.
+  defp update_step!(step, attrs) do
+    updated = step |> JobStep.changeset(attrs) |> Repo.update!()
+
+    Repo.one!(from(a in JobAttempt, where: a.id == ^updated.attempt_id, select: a.job_id))
+    |> Omashiki.Jobs.broadcast_updated()
+
+    updated
+  end
 
   defp output_summary(output) when is_map(output), do: deep_stringify(output)
   defp output_summary(output), do: %{"output" => truncate(output)}

@@ -49,6 +49,20 @@ defmodule Omashiki.Jobs.ClaimsTest do
     assert capacity_row().active == 0
   end
 
+  # A worker finishes jobs through `complete`; without this event a finished
+  # job would stay "running" on the operator screens until their next resync.
+  test "completing an attempt is announced to subscribers", %{token: token} do
+    {:ok, job} = Jobs.Admission.admit(token, request("announced"))
+    {:ok, attempt} = Jobs.claim(job, "runner-1")
+    Phoenix.PubSub.subscribe(Omashiki.PubSub, "jobs")
+
+    assert {:ok, _} =
+             Jobs.complete(attempt, attempt.lease_token, :failed, %{error: error("worker_exit")})
+
+    job_id = job.id
+    assert_receive {:job_updated, ^job_id}
+  end
+
   # The production caller is `DispatchWorker`, which passes only a runner id
   # (`"oban:<id>"` — the dispatch job, not the machine). The node has to come
   # from the claim path's own view of this host, or it is never recorded at all.
