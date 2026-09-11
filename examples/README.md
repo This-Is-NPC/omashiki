@@ -10,6 +10,7 @@ Replace example paths, registered names, and secrets with your installation valu
 | [compose.manager.yml](compose.manager.yml) | Manager release with its own database. |
 | [compose.worker.yml](compose.worker.yml) | Worker release with host Docker access. |
 | [worker.toml](worker.toml) | Worker limits and Docker settings. |
+| [ui.toml](ui.toml) | Task views for the browser Home screen. |
 | [handler/github_issue_handler.py](handler/github_issue_handler.py) | Labelled GitHub issue admission and signed terminal callback verification. |
 | [loadtest.omashiki.toml](loadtest.omashiki.toml) | Test registry declarations for the internal load-test procedure. |
 

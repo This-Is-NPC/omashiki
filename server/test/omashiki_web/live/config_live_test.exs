@@ -19,7 +19,7 @@ defmodule OmashikiWeb.ConfigLiveTest do
     refute text =~ "restart to change"
   end
 
-  test "primary nav is only Home and Config", %{conn: conn} do
+  test "primary nav is Home, System, and Config", %{conn: conn} do
     {:ok, _lv, html} = live(conn, ~p"/config")
 
     nav =
@@ -27,7 +27,7 @@ defmodule OmashikiWeb.ConfigLiveTest do
       |> Floki.parse_document!()
       |> Floki.find("nav[aria-label=\"Primary\"]")
 
-    assert Floki.attribute(nav, "a", "href") == ["/", "/config"]
+    assert Floki.attribute(nav, "a", "href") == ["/", "/system", "/config"]
   end
 
   test "cache purge action is available only for configured groups", %{conn: conn} do

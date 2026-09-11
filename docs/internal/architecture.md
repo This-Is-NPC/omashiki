@@ -53,10 +53,12 @@ flowchart LR
 | `Omashiki.Worker.Poller` | Poll enrolled houses and deliver completions. |
 | `Omashiki.Worker.Inbox` | Validate offered work and apply completion results at the house. |
 | `Omashiki.Jobs.Webhooks` | Signed terminal notification delivery. |
+| `OmashikiWeb.TaskViews` | Load display-only task views from `ui.toml`, separately from the registry. |
 | `Omashiki.Runtime.ContainerTracker` | Keep the containers of an executing node from lifecycle events and a census. |
 | `Omashiki.Fleet` | Join worker reports and the local tracker into the nodes of the fleet graph. |
 
-The browser provides Home and configuration views.
+The browser provides the Home task views, the System health view, and the configuration view.
+The views file changes only the Home screen. Admission, dispatch, and workers do not read it.
 Job lifecycle operations remain available through the public API.
 The operator dashboard exposes runtime diagnostics under its access checks.
 

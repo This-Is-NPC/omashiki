@@ -20,6 +20,7 @@ A job with a `files` or `none` sink can operate without a repository.
 | Task | Procedure |
 | --- | --- |
 | Stop work or make another attempt | [Cancel and retry a job](how-to-cancel-and-retry-a-job.md) |
+| Select the tasks and fields on the Home screen | [Customize task views](how-to-customize-task-views.md) |
 | Accept work from GitHub or another tracker | [Connect an issue tracker](how-to-connect-an-issue-tracker.md) |
 | Let an agent act as a GitHub App | [Configure an agent identity](how-to-configure-an-agent-identity.md) |
 | Run jobs on another machine | [Add a worker](how-to-add-a-worker.md) |

@@ -76,9 +76,11 @@ defmodule OmashikiWeb.LiveDashboardTest do
       conn = Plug.Test.init_test_session(conn, %{})
       assert %Accounts.User{} = Accounts.local_owner()
 
-      {:ok, _lv, html} = live(peer(conn, {192, 168, 1, 50}), ~p"/")
+      {:ok, _lv, home} = live(peer(conn, {192, 168, 1, 50}), ~p"/")
+      {:ok, _lv, system} = live(peer(conn, {192, 168, 1, 50}), ~p"/system")
 
-      assert visible_text(html) =~ "Operations overview"
+      assert visible_text(home) =~ "Built-in views"
+      assert visible_text(system) =~ "Operations overview"
     end
   end
 

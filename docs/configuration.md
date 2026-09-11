@@ -129,6 +129,13 @@ Infrastructure changes require a process restart.
 If the timeout expires, the reload is abandoned and admission resumes.
 A configuration reload does not cancel user work.
 
+## Task views file
+
+The browser Home screen reads a separate `ui.toml` file.
+This file is not part of the registry. A registry reload does not read it.
+An incorrect views file does not stop the house or change a job.
+See [customize task views](how-to-customize-task-views.md).
+
 ## Worker settings
 
 The [worker example](../examples/worker.toml) contains only `[limits]` and `[docker]`.

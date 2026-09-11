@@ -20,8 +20,8 @@ defmodule OmashikiWeb.OverviewLive do
 
     {:ok,
      socket
-     |> assign(:page_title, "Omashiki · Home")
-     |> assign(:active_tab, :home)
+     |> assign(:page_title, "Omashiki · System")
+     |> assign(:active_tab, :system)
      |> assign_snapshot()}
   end
 

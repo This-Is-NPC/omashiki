@@ -13,6 +13,8 @@ defmodule Omashiki.Jobs.Api do
   @terminal_statuses ~w(succeeded failed cancelled)
   @default_limit 50
   @max_limit 100
+  @view_max_limit 500
+  @view_sorts [:inserted_at, :started_at, :finished_at, :priority]
 
   def statuses, do: @statuses
   def default_limit, do: @default_limit
@@ -73,6 +75,68 @@ defmodule Omashiki.Jobs.Api do
     )
     |> Repo.all()
   end
+
+  @doc """
+  Return the operator's jobs for a display-only task view. Each row carries the
+  job, its current attempt, and that attempt's steps. Reads only.
+
+  `:filter` accepts `:status`, `:environment`, `:repository`, `:priority`, and
+  `:worker` value lists, and `:since`, a `DateTime` compared with submission.
+  `:sort` is `{field, :asc | :desc}` over submission, start, finish, or priority.
+  """
+  def list_for_view(%User{} = user, opts \\ []) do
+    limit = opts |> Keyword.get(:limit, @default_limit) |> max(1) |> min(@view_max_limit)
+    {sort_field, direction} = Keyword.get(opts, :sort, {:inserted_at, :desc})
+
+    rows =
+      from(j in Job,
+        as: :job,
+        left_join: a in JobAttempt,
+        as: :attempt,
+        on: a.job_id == j.id and a.number == j.current_attempt,
+        where: j.user_id == ^user.id,
+        limit: ^limit,
+        select: {j, a}
+      )
+      |> filter_view(Keyword.get(opts, :filter, %{}))
+      |> order_view(sort_field, direction)
+      |> Repo.all()
+
+    attempt_ids = for {_job, %JobAttempt{id: id}} <- rows, do: id
+
+    steps =
+      from(s in JobStep,
+        where: s.attempt_id in ^attempt_ids,
+        order_by: [asc: s.attempt_id, asc: s.sequence]
+      )
+      |> Repo.all()
+      |> Enum.group_by(& &1.attempt_id)
+
+    Enum.map(rows, fn {job, attempt} ->
+      %{job: job, attempt: attempt, steps: attempt_steps(steps, attempt)}
+    end)
+  end
+
+  defp filter_view(query, filter) do
+    Enum.reduce(filter, query, fn
+      {:status, values}, query -> where(query, [job: j], j.status in ^values)
+      {:environment, values}, query -> where(query, [job: j], j.environment in ^values)
+      {:repository, values}, query -> where(query, [job: j], j.repository in ^values)
+      {:priority, values}, query -> where(query, [job: j], j.priority in ^values)
+      {:worker, values}, query -> where(query, [attempt: a], a.machine_id in ^values)
+      {:since, %DateTime{} = since}, query -> where(query, [job: j], j.inserted_at >= ^since)
+      {:attempt_ids, ids}, query -> where(query, [attempt: a], a.id in ^ids)
+    end)
+  end
+
+  defp order_view(query, field, :asc) when field in @view_sorts,
+    do: order_by(query, [job: j], asc_nulls_last: field(j, ^field), asc: j.id)
+
+  defp order_view(query, field, :desc) when field in @view_sorts,
+    do: order_by(query, [job: j], desc_nulls_last: field(j, ^field), desc: j.id)
+
+  defp attempt_steps(_steps, nil), do: []
+  defp attempt_steps(steps, %JobAttempt{id: id}), do: Map.get(steps, id, [])
 
   @doc "Return all durable observations needed by the operator job detail."
   def detail(job_id, %User{} = user) do

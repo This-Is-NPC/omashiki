@@ -7,6 +7,10 @@ config :argon2_elixir, t_cost: 1, m_cost: 8
 # Keep tests independent of the developer's omashiki.toml.
 config :omashiki, :skip_toml_config, true
 
+# Keep tests independent of the developer's ui.toml. Tests that need a views
+# file point this at their own temporary path.
+config :omashiki, :ui_config_path, "/nonexistent/omashiki-test/ui.toml"
+
 # Configure your database
 #
 # The MIX_TEST_PARTITION environment variable can be used

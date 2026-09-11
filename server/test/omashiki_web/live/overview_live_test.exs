@@ -16,7 +16,7 @@ defmodule OmashikiWeb.OverviewLiveTest do
     insert_node!("node-a", 10)
     insert_node!("node-b", 6)
 
-    {:ok, _lv, html} = live(conn, ~p"/")
+    {:ok, _lv, html} = live(conn, ~p"/system")
     text = visible_text(html)
 
     assert text =~ "0 / 16"
@@ -26,7 +26,7 @@ defmodule OmashikiWeb.OverviewLiveTest do
   test "runtime capacity is zero when no node has booted", %{conn: conn} do
     Repo.delete_all(ExecutionCapacity)
 
-    {:ok, _lv, html} = live(conn, ~p"/")
+    {:ok, _lv, html} = live(conn, ~p"/system")
     assert visible_text(html) =~ "0 / 0"
   end
 
@@ -43,7 +43,7 @@ defmodule OmashikiWeb.OverviewLiveTest do
       last_poll_at: DateTime.add(DateTime.utc_now(), -120, :second)
     })
 
-    {:ok, _lv, html} = live(conn, ~p"/")
+    {:ok, _lv, html} = live(conn, ~p"/system")
     text = visible_text(html)
 
     assert text =~ "vps-1"
@@ -53,25 +53,26 @@ defmodule OmashikiWeb.OverviewLiveTest do
     assert text =~ "live"
   end
 
-  test "primary nav is only Home and Config", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, ~p"/")
+  test "primary nav is Home, System, and Config", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, ~p"/system")
 
     nav =
       html
       |> Floki.parse_document!()
       |> Floki.find("nav[aria-label=\"Primary\"]")
 
-    assert Floki.attribute(nav, "a", "href") == ["/", "/config"]
+    assert Floki.attribute(nav, "a", "href") == ["/", "/system", "/config"]
 
     text = Floki.text(nav, sep: " ")
     assert text =~ "Home"
+    assert text =~ "System"
     assert text =~ "Config"
     refute text =~ "Queue"
     refute text =~ "Runtime"
   end
 
-  test "home does not link into a job page", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, ~p"/")
+  test "system does not link into a job page", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, ~p"/system")
     refute html =~ ~s(href="/jobs/)
   end
 

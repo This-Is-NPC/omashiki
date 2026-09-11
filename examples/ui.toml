@@ -1,0 +1,45 @@
+# Task views for the Omashiki Home screen.
+#
+# Copy this file to ~/.config/omashiki/ui.toml, or set OMASHIKI_UI_CONFIG.
+# The file changes only what the screen shows. It cannot change a job.
+# See docs/how-to-customize-task-views.md for each key and field.
+
+default_view = "board"
+
+[[views]]
+name = "board"
+title = "Board"
+layout = "board"
+group_by = "status"
+filter = { since = "24h" }
+fields = ["title", "environment", "worker", "step", "duration"]
+
+[[views]]
+name = "active"
+title = "In progress"
+filter = { status = ["blocked", "queued", "provisioning", "running"] }
+sort = "-submitted"
+fields = ["status", "title", "environment", "plugin", "worker", "step", "wait", "duration"]
+blocks = ["status_counts", "slots", "workers"]
+
+[[views]]
+name = "failures"
+title = "Failures today"
+filter = { status = ["failed"], since = "24h" }
+sort = "-finished"
+fields = ["title", "repository", "environment", "error", "finished", "context.issue_url"]
+
+[[views]]
+name = "by-worker"
+title = "By worker"
+group_by = "worker"
+filter = { status = ["provisioning", "running"] }
+fields = ["title", "environment", "step", "duration"]
+
+[[views]]
+name = "fleet"
+title = "Fleet"
+layout = "graph"
+show_stale_workers = true
+show_idle_workers = true
+fields = ["title", "environment", "step", "duration"]

@@ -3,9 +3,12 @@ defmodule OmashikiWeb.ScreenSkeletonTest do
 
   import Phoenix.LiveViewTest
 
-  test "operator routes expose only Home and Config", %{conn: conn} do
-    {:ok, _lv, overview} = live(conn, ~p"/")
+  test "operator routes expose Home, System, and Config", %{conn: conn} do
+    {:ok, _lv, views} = live(conn, ~p"/")
+    {:ok, _lv, overview} = live(conn, ~p"/system")
     {:ok, _lv, config} = live(conn, ~p"/config")
+
+    assert views =~ "Built-in views"
 
     assert overview =~ "Operations overview"
     assert overview =~ "Cache health"
@@ -29,10 +32,11 @@ defmodule OmashikiWeb.ScreenSkeletonTest do
   test "browser routes require an authenticated operator", %{} do
     conn = build_conn() |> Plug.Test.init_test_session(%{})
     assert {:error, {:redirect, %{to: "/login"}}} = live(conn, ~p"/")
+    assert {:error, {:redirect, %{to: "/login"}}} = live(conn, ~p"/system")
     assert {:error, {:redirect, %{to: "/login"}}} = live(conn, ~p"/config")
   end
 
-  test "primary navigation contains only Home and Config", %{conn: conn} do
+  test "primary navigation contains Home, System, and Config", %{conn: conn} do
     {:ok, _lv, html} = live(conn, ~p"/")
 
     nav =
@@ -40,7 +44,7 @@ defmodule OmashikiWeb.ScreenSkeletonTest do
       |> Floki.parse_document!()
       |> Floki.find("nav[aria-label=\"Primary\"]")
 
-    assert Floki.attribute(nav, "a", "href") == ["/", "/config"]
+    assert Floki.attribute(nav, "a", "href") == ["/", "/system", "/config"]
     refute html =~ ~s(href="/queue")
     refute html =~ ~s(href="/runtime")
     refute html =~ ~s(href="/tasks")

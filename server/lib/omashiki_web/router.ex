@@ -41,7 +41,8 @@ defmodule OmashikiWeb.Router do
     pipe_through :browser
 
     live_session :authenticated, on_mount: {OmashikiWeb.AuthHooks, :require_user} do
-      live "/", OverviewLive, :index
+      live "/", TaskViewsLive, :index
+      live "/system", OverviewLive, :index
       live "/config", ConfigLive, :index
     end
   end
