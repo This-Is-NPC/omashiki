@@ -75,6 +75,60 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
     end
   end
 
+  describe "report" do
+    setup do
+      Omashiki.Worker.Presence.reset()
+      on_exit(fn -> Omashiki.Worker.Presence.reset() end)
+    end
+
+    @tag :unauthenticated
+    test "records slots, capacity, and containers with the worker presence",
+         %{conn: conn, worker_token: token} do
+      container = %{id: "a1b2c3d4e5f60718", state: "running", attempt_id: nil}
+
+      conn =
+        conn
+        |> worker_conn(token)
+        |> post("/internal/work/report", %{
+          machine_id: "box-r",
+          free_slots: 1,
+          capacity: 3,
+          containers: [container]
+        })
+
+      assert response(conn, 204)
+
+      assert %{
+               capacity: 3,
+               free_slots: 1,
+               containers: [%{id: "a1b2c3d4e5f60718", state: "running"}]
+             } =
+               Enum.find(Omashiki.Fleet.nodes(), &(&1.machine_id == "box-r"))
+    end
+
+    @tag :unauthenticated
+    test "rejects a container list that is not a valid report",
+         %{conn: conn, worker_token: token} do
+      conn =
+        conn
+        |> worker_conn(token)
+        |> post("/internal/work/report", %{
+          machine_id: "box-r",
+          free_slots: 1,
+          containers: [%{id: "; rm -rf /", state: "running"}]
+        })
+
+      assert %{"error" => %{"code" => "invalid_containers"}} = json_response(conn, 422)
+      refute Enum.any?(Omashiki.Fleet.nodes(), &(&1.machine_id == "box-r"))
+    end
+
+    @tag :unauthenticated
+    test "requires the worker token", %{conn: conn} do
+      conn = post(conn, "/internal/work/report", %{machine_id: "box-r", free_slots: 1})
+      assert %{"error" => %{"code" => "missing_token"}} = json_response(conn, 401)
+    end
+  end
+
   describe "authentication" do
     @tag :unauthenticated
     test "returns 401 without a worker token", %{conn: conn} do
@@ -231,6 +285,7 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
 
       conn = put_req_header(build_conn(), "authorization", "Bearer #{api_plaintext}")
       conn = get(conn, ~p"/api/v1/jobs/#{job.id}/result")
+
       assert %{"data" => %{"status" => "succeeded", "result" => %{"sink" => "files"}}} =
                json_response(conn, 200)
     end
@@ -252,6 +307,7 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
 
       reloaded = Repo.get!(Job, job.id)
       assert reloaded.status == "succeeded"
+
       assert reloaded.terminal_result == %{
                "sink" => "none",
                "changed_bytes" => 0,
@@ -334,7 +390,6 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
         |> post(@worker_poll, %{machine_id: "box-a", free_slots: 1})
 
       assert %{"offer" => %{"attempt_id" => attempt_id, "lease_token" => lease_token}} =
-
                json_response(conn, 200)
 
       conn =

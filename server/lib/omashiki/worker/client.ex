@@ -51,6 +51,23 @@ defmodule Omashiki.Worker.Client do
     end
   end
 
+  def report(%__MODULE__{} = client, machine_id, free_slots, capacity, containers)
+      when is_binary(machine_id) and is_integer(free_slots) and free_slots >= 0 and
+             is_list(containers) do
+    body =
+      Jason.encode!(%{
+        "machine_id" => machine_id,
+        "free_slots" => free_slots,
+        "capacity" => capacity,
+        "containers" => Enum.map(containers, &Omashiki.Fleet.encode_container/1)
+      })
+
+    with {:ok, %{status: status}} when status in 200..299 <-
+           request(client, "POST", "/internal/work/report", json_headers(client), body) do
+      :ok
+    end
+  end
+
   def heartbeat(%__MODULE__{} = client, %Execution{} = execution) do
     body =
       Jason.encode!(%{

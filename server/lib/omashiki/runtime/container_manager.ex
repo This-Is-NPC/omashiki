@@ -489,7 +489,16 @@ defmodule Omashiki.Runtime.ContainerManager do
        ) do
     runtime_job = Keyword.get(opts, :job)
     host_base_url = Keyword.get(opts, :host_base_url)
-    supply = supply_chain_delivery(group.id, runtime_job, cache_groups, host_uid, host_gid, host_base_url)
+
+    supply =
+      supply_chain_delivery(
+        group.id,
+        runtime_job,
+        cache_groups,
+        host_uid,
+        host_gid,
+        host_base_url
+      )
 
     context = %Omashiki.Harness.Context{
       job: runtime_job,
@@ -545,6 +554,8 @@ defmodule Omashiki.Runtime.ContainerManager do
 
         case docker_post("/containers/create", container_config) do
           {:ok, %{"Id" => container_id}} ->
+            Omashiki.Runtime.ContainerEvents.publish(:created, container_id, group.id)
+
             provision_result =
               if cancelled_scope?(group.id) do
                 do_destroy(container_id, %{
@@ -600,7 +611,7 @@ defmodule Omashiki.Runtime.ContainerManager do
     do: harness_egress_delivery(:engine, supply_env, runtime_job, nil)
 
   def harness_egress_delivery(:engine, supply_env, runtime_job, host_base_url)
-       when is_list(supply_env) do
+      when is_list(supply_env) do
     socket_isolated? =
       Enum.any?(supply_env, &String.starts_with?(&1, "OMASHIKI_HOST_SOCKET="))
 
@@ -707,6 +718,7 @@ defmodule Omashiki.Runtime.ContainerManager do
           else
             []
           end
+
         npm = Proxy.url(group.name, "npm", token, proxy_opts)
         cargo = Proxy.url(group.name, "cargo", token, proxy_opts)
         go = Proxy.url(group.name, "go", token, proxy_opts)
@@ -949,6 +961,8 @@ defmodule Omashiki.Runtime.ContainerManager do
     {result, bootstrap_duration_ms} =
       case docker_post_no_body("/containers/#{container_id}/start") do
         :ok ->
+          Omashiki.Runtime.ContainerEvents.publish(:started, container_id)
+
           with :ok <- verify_supply_chain_proxy(container_id, cache_groups),
                :ok <- run_supply_chain_preflight(worktree_path, cache_groups, task_id) do
             bootstrap_started_at = System.monotonic_time(:millisecond)
@@ -1448,6 +1462,7 @@ defmodule Omashiki.Runtime.ContainerManager do
   end
 
   defp port_environment(_, _), do: []
+
   defp isolated_host_base_url(env, host_base_url) do
     case host_base_url || DataPlane.base_url() do
       base when is_binary(base) ->
@@ -1634,9 +1649,15 @@ defmodule Omashiki.Runtime.ContainerManager do
       end
 
       case docker_delete("/containers/#{container_id}") do
-        :ok -> Logger.info("[ContainerManager] Container #{container_id} removed")
-        {:error, :not_found} -> :ok
-        {:error, reason} -> Logger.warning("[ContainerManager] Remove failed: #{inspect(reason)}")
+        :ok ->
+          Logger.info("[ContainerManager] Container #{container_id} removed")
+          Omashiki.Runtime.ContainerEvents.publish(:removed, container_id, job_scope_id)
+
+        {:error, :not_found} ->
+          Omashiki.Runtime.ContainerEvents.publish(:removed, container_id, job_scope_id)
+
+        {:error, reason} ->
+          Logger.warning("[ContainerManager] Remove failed: #{inspect(reason)}")
       end
     after
       if is_binary(job_scope_id) do
@@ -1750,6 +1771,7 @@ defmodule Omashiki.Runtime.ContainerManager do
   rescue
     ArgumentError -> :ok
   end
+
   @doc false
   def active_job_scope_ids do
     if Omashiki.Application.boot_role() == :worker or is_nil(Process.whereis(Omashiki.Repo)) do
@@ -1766,7 +1788,6 @@ defmodule Omashiki.Runtime.ContainerManager do
       |> Enum.map(&"job-#{&1}")
     end
   end
-
 
   # --- Compose helpers ---
 

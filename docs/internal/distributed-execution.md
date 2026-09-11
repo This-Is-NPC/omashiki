@@ -43,6 +43,7 @@ The worker resolves permitted host credential origins on its own machine.
 | --- | --- |
 | `POST /internal/work/register` | Register worker presence with a manager. |
 | `POST /internal/work/poll` | Request available work. |
+| `POST /internal/work/report` | Send free slots, capacity, and this house's containers. |
 | `POST /internal/work/accept` | Accept an offer under worker capacity. |
 | `POST /internal/work/reject` | Refuse an unusable offer. |
 | `POST /internal/work/heartbeat` | Renew active execution information. |
@@ -61,6 +62,16 @@ The limit applies across all enrolled houses.
 The poller visits enrolled houses in round-robin order.
 Presence is per house and includes available capacity.
 The documented stale threshold is thirty seconds without a poll.
+
+## Fleet reports
+
+`Omashiki.Runtime.ContainerTracker` keeps the containers of each executing node.
+`ContainerManager` publishes created, started, and removed events after each Docker call.
+A census every ten seconds corrects the list.
+The worker sends a report after each container change and every five seconds.
+A report to a house contains only containers of that house's in-flight attempts.
+The manager validates the report and records it with the worker presence.
+The report does not change a job, a lease, or capacity.
 
 Manager leases and worker slot ownership prevent duplicate acceptance and completion.
 A stale completion cannot replace the result of a later attempt.

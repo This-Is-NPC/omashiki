@@ -112,6 +112,7 @@ defmodule OmashikiWeb.Router do
 
     post "/register", WorkController, :register
     post "/poll", WorkController, :poll
+    post "/report", WorkController, :report
     post "/heartbeat", WorkController, :heartbeat
     post "/accept", WorkController, :accept
     post "/reject", WorkController, :reject

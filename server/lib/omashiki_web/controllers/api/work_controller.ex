@@ -1,6 +1,7 @@
 defmodule OmashikiWeb.Api.WorkController do
   use OmashikiWeb, :controller
 
+  alias Omashiki.Fleet
   alias Omashiki.Worker.{Inbox, Presence}
 
   def register(conn, params) do
@@ -24,6 +25,26 @@ defmodule OmashikiWeb.Api.WorkController do
          {:ok, free_slots} <- parse_free_slots(params["free_slots"]),
          {:ok, payload} <- Inbox.poll(machine_id, free_slots) do
       json(conn, payload)
+    else
+      {:error, reason} -> error(conn, reason)
+    end
+  end
+
+  # Slots, capacity, and the containers the worker runs for this house. It is
+  # what the fleet view draws; it grants nothing and changes no job.
+  def report(conn, params) do
+    with {:ok, machine_id} <- required_string(params, "machine_id"),
+         {:ok, free_slots} <- parse_free_slots(params["free_slots"]),
+         {:ok, capacity} <- parse_capacity(params["capacity"]),
+         {:ok, containers} <- Fleet.parse_containers(params["containers"]) do
+      :ok =
+        Presence.report(machine_id, %{
+          free_slots: free_slots,
+          capacity: capacity,
+          containers: containers
+        })
+
+      send_resp(conn, :no_content, "")
     else
       {:error, reason} -> error(conn, reason)
     end
@@ -120,6 +141,16 @@ defmodule OmashikiWeb.Api.WorkController do
 
   defp parse_free_slots(_), do: {:error, :invalid_free_slots}
 
+  defp parse_capacity(nil), do: {:ok, nil}
+  defp parse_capacity(value) when is_integer(value) and value >= 0, do: {:ok, value}
+  defp parse_capacity(_), do: {:error, :invalid_capacity}
+
+  defp error(conn, :invalid_capacity),
+    do: error_response(conn, 422, "invalid_capacity", "capacity must be a non-negative integer")
+
+  defp error(conn, :invalid_containers),
+    do: error_response(conn, 422, "invalid_containers", "containers must be a valid report list")
+
   defp error(conn, :missing_digest),
     do: error_response(conn, 400, "missing_digest", "x-omashiki-digest header is required")
 
@@ -130,7 +161,8 @@ defmodule OmashikiWeb.Api.WorkController do
     do: error_response(conn, 422, "invalid_complete", "Complete payload is required")
 
   defp error(conn, :invalid_free_slots),
-    do: error_response(conn, 422, "invalid_free_slots", "free_slots must be a non-negative integer")
+    do:
+      error_response(conn, 422, "invalid_free_slots", "free_slots must be a non-negative integer")
 
   defp error(conn, {:validation, field}),
     do:

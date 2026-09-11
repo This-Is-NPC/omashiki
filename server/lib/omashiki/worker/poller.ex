@@ -5,7 +5,13 @@ defmodule Omashiki.Worker.Poller do
 
   require Logger
 
+  alias Omashiki.Runtime.ContainerTracker
   alias Omashiki.Worker.{Client, Complete, Execution, Managers, Offer, Slots}
+
+  # A container change is reported to the managers almost at once; the
+  # keepalive report keeps slots current while the worker is too busy to poll.
+  @report_debounce_ms 150
+  @report_ms 5_000
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -20,6 +26,7 @@ defmodule Omashiki.Worker.Poller do
 
   @impl true
   def init(opts) do
+    Phoenix.PubSub.subscribe(Omashiki.PubSub, ContainerTracker.topic())
     {:ok, build_state(opts)}
   end
 
@@ -43,9 +50,17 @@ defmodule Omashiki.Worker.Poller do
         poll_next_manager(state, free)
       end
 
+    state = maybe_report(state)
     schedule_tick(state)
     {:noreply, state}
   end
+
+  def handle_info(:containers_changed, %{mode: :active, report_pending: false} = state) do
+    Process.send_after(self(), :report, @report_debounce_ms)
+    {:noreply, %{state | report_pending: true}}
+  end
+
+  def handle_info(:report, %{mode: :active} = state), do: {:noreply, report_all(state)}
 
   def handle_info({:job_finished, _execution, offer, result}, state) do
     attempt_id = offer.attempt_id
@@ -201,6 +216,45 @@ defmodule Omashiki.Worker.Poller do
     }
   end
 
+  defp maybe_report(%{mode: :active} = state) do
+    if System.monotonic_time(:millisecond) - state.last_report_at >= state.report_ms,
+      do: report_all(state),
+      else: state
+  end
+
+  defp report_all(state) do
+    containers = ContainerTracker.list()
+    %{max: capacity, free: free} = Slots.snapshot(state.slots)
+
+    for manager <- state.managers do
+      mine = containers_for_manager(containers, state.in_flight, manager.id)
+
+      case Client.report(manager.client, state.machine_id, free, capacity, mine) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          Logger.debug("Worker.Poller report to #{manager.id}: #{inspect(reason)}")
+      end
+    end
+
+    %{state | last_report_at: System.monotonic_time(:millisecond), report_pending: false}
+  end
+
+  @doc """
+  The containers a manager may see: only those running its own in-flight
+  attempts. A worker shared by several houses never shows one house another's
+  containers, and a container no attempt owns is reported to nobody.
+  """
+  def containers_for_manager(containers, in_flight, manager_id) do
+    attempts =
+      for {attempt_id, %{offer: %{manager_id: ^manager_id}}} <- in_flight,
+          into: MapSet.new(),
+          do: attempt_id
+
+    Enum.filter(containers, &MapSet.member?(attempts, &1.attempt_id))
+  end
+
   defp free_slots(slots), do: Slots.available(slots)
 
   defp schedule_tick(%{mode: :idle}), do: :ok
@@ -246,7 +300,10 @@ defmodule Omashiki.Worker.Poller do
         executor: executor,
         machine_id: machine_id,
         interval_ms: interval_ms,
-        slots: slots
+        slots: slots,
+        report_ms: Application.get_env(:omashiki, :worker_fleet_report_ms, @report_ms),
+        last_report_at: System.monotonic_time(:millisecond),
+        report_pending: false
       }
 
       send(self(), :tick)

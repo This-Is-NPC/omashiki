@@ -63,6 +63,11 @@ config :omashiki, :runtime_census, {Omashiki.Runtime.Inspector, :empty_census, [
 # would queue behind — and ahead of — the queries a timing-sensitive test is
 # making. Tests call `Inspector.refresh/0` when they want a census.
 config :omashiki, :runtime_inspector_interval_ms, :timer.hours(1)
+
+# The container tracker and the worker's fleet keepalive follow the same rule:
+# tests trigger them explicitly instead of on a background timer.
+config :omashiki, :container_tracker_reconcile_ms, :timer.hours(1)
+config :omashiki, :worker_fleet_report_ms, :timer.hours(1)
 config :omashiki, :enable_job_recovery, false
 
 # `Config.Rollout` polls for the fleet to empty during a drain. One second is

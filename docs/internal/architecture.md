@@ -53,6 +53,8 @@ flowchart LR
 | `Omashiki.Worker.Poller` | Poll enrolled houses and deliver completions. |
 | `Omashiki.Worker.Inbox` | Validate offered work and apply completion results at the house. |
 | `Omashiki.Jobs.Webhooks` | Signed terminal notification delivery. |
+| `Omashiki.Runtime.ContainerTracker` | Keep the containers of an executing node from lifecycle events and a census. |
+| `Omashiki.Fleet` | Join worker reports and the local tracker into the nodes of the fleet graph. |
 
 The browser provides Home and configuration views.
 Job lifecycle operations remain available through the public API.

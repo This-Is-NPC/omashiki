@@ -28,6 +28,7 @@ defmodule Omashiki.Application do
     OmashikiWeb.RateLimiter.ensure_table()
     Omashiki.Runtime.ContainerManager.ensure_cancellation_table()
     Omashiki.Identities.GithubApp.ensure_table()
+    Omashiki.Worker.Presence.ensure_table()
 
     unless role == :worker do
       OmashikiWeb.AuthMode.assert_boot_safe!()
@@ -63,6 +64,7 @@ defmodule Omashiki.Application do
       Omashiki.Runtime.PortAllocator,
       Omashiki.Runtime.LeaseRenewer,
       Omashiki.Runtime.ContainerManager,
+      Omashiki.Runtime.ContainerTracker,
       Omashiki.Runtime.Inspector,
       Omashiki.Config.Rollout,
       Omashiki.Runtimes.CacheMaintenance,
@@ -100,6 +102,7 @@ defmodule Omashiki.Application do
       Omashiki.Runtime.PortAllocator,
       Omashiki.Runtimes.CacheMaintenance,
       Omashiki.Runtime.ContainerManager,
+      Omashiki.Runtime.ContainerTracker,
       Omashiki.Runtime.Inspector,
       Omashiki.LlmEgress.Proxy,
       Omashiki.Worker.Enroll.Listener,
