@@ -21,31 +21,7 @@ defmodule Omashiki.Accounts do
   signups cannot both succeed.
   """
   def register_user(attrs) do
-    Repo.transaction(
-      fn ->
-        case Repo.aggregate(User, :count, :id) do
-          0 ->
-            %User{}
-            |> User.registration_changeset(attrs)
-            |> Repo.insert()
-            |> case do
-              {:ok, user} -> user
-              {:error, changeset} -> Repo.rollback(changeset)
-            end
-
-          _ ->
-            Repo.rollback(:registration_closed)
-        end
-      end,
-      isolation: :serializable
-    )
-  rescue
-    # Postgres aborts one of two concurrent serializable transactions with
-    # SQLSTATE 40001. Surface that as :registration_closed so the caller
-    # sees the same outcome whether they lost the race to count == 0 or to
-    # the unique index.
-    Postgrex.Error -> {:error, :registration_closed}
-    DBConnection.ConnectionError -> {:error, :registration_closed}
+    serializable(fn -> insert_first_user!(attrs) end)
   end
 
   @doc """
@@ -55,32 +31,40 @@ defmodule Omashiki.Accounts do
   """
   def register_with_token(user_attrs, token_attrs) when is_map(token_attrs) do
     with {:ok, _} <- ApiTokens.validate_create_attrs(token_attrs) do
-      Repo.transaction(
-        fn ->
-          case Repo.aggregate(User, :count, :id) do
-            0 ->
-              user =
-                %User{}
-                |> User.registration_changeset(user_attrs)
-                |> Repo.insert()
-                |> case do
-                  {:ok, user} -> user
-                  {:error, changeset} -> Repo.rollback(changeset)
-                end
+      serializable(fn ->
+        user = insert_first_user!(user_attrs)
 
-              case ApiTokens.create_for_user(user, token_attrs) do
-                {:ok, token, plaintext} -> {user, token, plaintext}
-                {:error, reason} -> Repo.rollback(reason)
-              end
-
-            _ ->
-              Repo.rollback(:registration_closed)
-          end
-        end,
-        isolation: :serializable
-      )
+        case ApiTokens.create_for_user(user, token_attrs) do
+          {:ok, token, plaintext} -> {user, token, plaintext}
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
     end
+  end
+
+  defp insert_first_user!(attrs) do
+    case Repo.aggregate(User, :count, :id) do
+      0 ->
+        %User{}
+        |> User.registration_changeset(attrs)
+        |> Repo.insert()
+        |> case do
+          {:ok, user} -> user
+          {:error, changeset} -> Repo.rollback(changeset)
+        end
+
+      _ ->
+        Repo.rollback(:registration_closed)
+    end
+  end
+
+  defp serializable(fun) do
+    Repo.transaction(fun, isolation: :serializable)
   rescue
+    # Postgres aborts one of two concurrent serializable transactions with
+    # SQLSTATE 40001. Surface that as :registration_closed so the caller
+    # sees the same outcome whether they lost the race to count == 0 or to
+    # the unique index.
     Postgrex.Error -> {:error, :registration_closed}
     DBConnection.ConnectionError -> {:error, :registration_closed}
   end
