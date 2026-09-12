@@ -28,7 +28,7 @@ defmodule OmashikiWeb.Api.JobsController do
     ],
     responses: %{
       200 => {"Job list", "application/json", Schemas.JobListResponse},
-      400 => {"Bad request", "application/problem+json", Schemas.Problem}
+      422 => {"Invalid", "application/problem+json", Schemas.Problem}
     }
   )
 
@@ -48,7 +48,8 @@ defmodule OmashikiWeb.Api.JobsController do
     request_body: {"Job", "application/json", Schemas.JobAdmissionRequest},
     responses: %{
       202 => {"Admitted", "application/json", Schemas.JobResponse},
-      422 => {"Invalid", "application/problem+json", Schemas.Problem}
+      422 => {"Invalid", "application/problem+json", Schemas.Problem},
+      503 => {"Busy", "application/problem+json", Schemas.Problem}
     }
   )
 
@@ -71,7 +72,9 @@ defmodule OmashikiWeb.Api.JobsController do
     request_body: {"Batch", "application/json", Schemas.JobBatchRequest},
     responses: %{
       202 => {"Admitted", "application/json", Schemas.JobListResponse},
-      413 => {"Too large", "application/problem+json", Schemas.Problem}
+      413 => {"Too large", "application/problem+json", Schemas.Problem},
+      422 => {"Invalid", "application/problem+json", Schemas.Problem},
+      503 => {"Busy", "application/problem+json", Schemas.Problem}
     }
   )
 
@@ -147,7 +150,8 @@ defmodule OmashikiWeb.Api.JobsController do
       id: [in: :path, type: :string, required: true]
     ],
     responses: %{
-      200 => {"Cancelled", "application/json", Schemas.JobResponse}
+      200 => {"Cancelled", "application/json", Schemas.JobResponse},
+      503 => {"Busy", "application/problem+json", Schemas.Problem}
     }
   )
 
@@ -166,7 +170,8 @@ defmodule OmashikiWeb.Api.JobsController do
       id: [in: :path, type: :string, required: true]
     ],
     responses: %{
-      202 => {"Retried", "application/json", Schemas.JobResponse}
+      202 => {"Retried", "application/json", Schemas.JobResponse},
+      503 => {"Busy", "application/problem+json", Schemas.Problem}
     }
   )
 

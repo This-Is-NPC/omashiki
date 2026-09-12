@@ -223,10 +223,12 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     assert json_response(retried, 429)["code"] == "max_active_jobs"
   end
 
-  test "invalid since is 400", %{conn: conn} do
+  test "invalid since is 422", %{conn: conn} do
     response = get(conn, "/api/v1/jobs?since=not-a-date")
     assert response.status == 422
-    assert json_response(response, 422)["code"] == "invalid_request"
+    body = json_response(response, 422)
+    assert body["code"] == "invalid_request"
+    assert_schema(body, "Problem", @api_spec)
   end
 
   test "authenticated responses advertise token expiry", %{conn: conn} do

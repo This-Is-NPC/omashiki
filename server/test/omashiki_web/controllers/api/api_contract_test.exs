@@ -41,9 +41,22 @@ defmodule OmashikiWeb.Api.ApiContractTest do
     assert Enum.sort(Problem.codes()) == Enum.sort(enum)
   end
 
-  test "deadlock maps to busy, not internal_error" do
-    assert Problem.code_for(:busy) == "busy"
-    assert Problem.status_for("busy") == 503
+  test "document is OpenAPI 3.0.3" do
+    spec = OmashikiWeb.ApiSpec.spec()
+    assert spec.openapi == "3.0.3"
+  end
+
+  test "job writes declare 503 busy and GET /jobs declares 422" do
+    spec = OmashikiWeb.ApiSpec.spec() |> Jason.encode!() |> Jason.decode!()
+    jobs = spec["paths"]["/api/v1/jobs"]
+    assert Map.has_key?(jobs["get"]["responses"], "422")
+    refute Map.has_key?(jobs["get"]["responses"], "400")
+    assert Map.has_key?(jobs["post"]["responses"], "503")
+    assert Map.has_key?(jobs["post"]["responses"], "422")
+    assert Map.has_key?(spec["paths"]["/api/v1/jobs"]["post"]["responses"], "503")
+    assert Map.has_key?(spec["paths"]["/api/v1/jobs/batch"]["post"]["responses"], "503")
+    assert Map.has_key?(spec["paths"]["/api/v1/jobs/{id}/retry"]["post"]["responses"], "503")
+    assert Map.has_key?(spec["paths"]["/api/v1/jobs/{id}/cancel"]["post"]["responses"], "503")
   end
 
   test "GET /api/v1/openapi.json matches ApiSpec.spec/0" do

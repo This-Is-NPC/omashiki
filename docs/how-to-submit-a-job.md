@@ -81,6 +81,7 @@ Keep the job ID to [follow execution and retrieve the result](how-to-follow-and-
 | `422` | Read the field error. Check registered names and request values. |
 | `429 capacity_exhausted` | Wait before another submission. The request was not admitted. |
 | `503 admission_paused` | Wait for the configuration reload to finish. |
+| `503 busy` | Retry the same request. A lock conflict left the job unchanged. |
 
 An admitted job can wait in the queue without an admission error.
 See [the API reference](api.md) for batches and dependencies.

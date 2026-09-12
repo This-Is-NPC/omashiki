@@ -1,5 +1,10 @@
 defmodule OmashikiWeb.ApiSpec do
-  @moduledoc "Generated OpenAPI 3.0 document for `/api/v1`."
+  @moduledoc """
+  Generated OpenAPI 3.0 document for `/api/v1`.
+
+  `open_api_spex ~> 3.21` emits OpenAPI 3.0. Keep `openapi: "3.0.3"` so the
+  served document and the library dialect stay the same; do not bump to 3.1.
+  """
 
   alias OpenApiSpex.{Components, Info, OpenApi, Paths, SecurityScheme}
 
