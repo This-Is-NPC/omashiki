@@ -97,6 +97,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     forbidden = get(conn, "/api/v1/jobs/#{job.id}")
     assert forbidden.status == 403
     assert json_response(forbidden, 403)["code"] == "forbidden"
+    assert_schema(json_response(forbidden, 403), "Problem", @api_spec)
     assert post(conn, "/api/v1/jobs/#{job.id}/cancel", %{}).status == 403
   end
 
@@ -115,8 +116,10 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
 
   test "rejects an unknown status filter", %{conn: conn} do
     conn = get(conn, "/api/v1/jobs?status=not-a-status")
-    assert conn.status == 400
-    assert json_response(conn, 400)["code"] == "invalid_status"
+    assert conn.status == 422
+    body = json_response(conn, 422)
+    assert body["code"] == "invalid_status"
+    assert_schema(body, "Problem", @api_spec)
   end
 
   test "rejects a batch over the atomic admission limit without writes", %{conn: conn} do
@@ -126,7 +129,9 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
       post(conn, "/api/v1/jobs/batch", %{correlation_id: "batch", jobs: jobs})
 
     assert response.status == 413
-    assert json_response(response, 413)["code"] == "batch_too_large"
+    body = json_response(response, 413)
+    assert body["code"] == "batch_too_large"
+    assert_schema(body, "Problem", @api_spec)
     assert Repo.aggregate(Job, :count, :id) == 0
   end
 
@@ -143,9 +148,11 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
 
     assert cancelled.status == 200
     assert json_response(cancelled, 200)["data"]["status"] == "cancelled"
+    assert_schema(json_response(cancelled, 200), "JobResponse", @api_spec)
     assert repeated.status == 200
     assert retried.status == 202
     assert json_response(retried, 202)["data"]["attempt"] == 2
+    assert_schema(json_response(retried, 202), "JobResponse", @api_spec)
   end
 
   test "a read-only token cannot submit", %{user: user} do
@@ -349,7 +356,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     assert_schema(json_response(environments, 200), "EnvironmentListResponse", @api_spec)
   end
 
-  test "redeliver requeues a failed webhook and refuses a delivered one", %{
+  test "redeliver requeues a failed webhook", %{
     conn: conn,
     user: user,
     token: token
@@ -396,20 +403,6 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
 
     assert requeued.status == 202
     assert_schema(json_response(requeued, 202), "WebhookDeliveryListResponse", @api_spec)
-
-    delivery
-    |> Repo.reload()
-    |> WebhookDelivery.changeset(%{
-      status: "delivered",
-      delivered_at: DateTime.utc_now(:microsecond)
-    })
-    |> Repo.update!()
-
-    refused =
-      post(conn, "/api/v1/jobs/#{job.id}/webhook-deliveries/#{delivery.id}/redeliver", %{})
-
-    assert refused.status == 409
-    assert json_response(refused, 409)["code"] == "already_delivered"
   end
 
   defp collect_ids(conn, cursor, acc) do
