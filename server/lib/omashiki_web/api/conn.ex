@@ -50,11 +50,12 @@ defmodule OmashikiWeb.Api.Conn do
   end
 
   # Proxies sometimes append `:port`. IPv4 is `a.b.c.d:port`; IPv6 is
-  # `[addr]` or `[addr]:port`. Bare IPv6 has colons but no port suffix.
-  defp strip_port("[" <> rest) do
-    case String.split(rest, "]", parts: 2) do
-      [host, _] -> host
-      _ -> rest
+  # `[addr]` or `[addr]:port`. Trailing junk after `]` is not a port.
+  defp strip_port("[" <> _ = raw) do
+    case Regex.run(~r/^\[([^\]]+)\](?::(\d+))?$/, raw) do
+      [_, host] -> host
+      [_, host, _port] -> host
+      nil -> raw
     end
   end
 
