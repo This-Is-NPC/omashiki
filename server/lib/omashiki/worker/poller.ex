@@ -13,6 +13,8 @@ defmodule Omashiki.Worker.Poller do
   @report_debounce_ms 150
   @report_ms 5_000
   @complete_attempts 8
+  @complete_retry_base_ms 100
+  @complete_retry_cap_ms 5_000
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -33,7 +35,12 @@ defmodule Omashiki.Worker.Poller do
 
   @impl true
   def handle_call({:configure, opts}, _from, state) do
-    new_state = build_state(Keyword.merge(default_opts(state), opts))
+    new_state =
+      opts
+      |> then(&Keyword.merge(default_opts(state), &1))
+      |> build_state()
+      |> adopt_in_flight(state)
+
     {:reply, :ok, new_state}
   end
 
@@ -66,7 +73,7 @@ defmodule Omashiki.Worker.Poller do
   def handle_info({:job_finished, _execution, offer, result}, state) do
     attempt_id = offer.attempt_id
 
-    case Map.fetch(state.in_flight, attempt_id) do
+    case Map.fetch(in_flight(state), attempt_id) do
       {:ok, job} ->
         complete = complete_from_result(job.client, offer, result)
         complete_or_schedule(state, attempt_id, complete, @complete_attempts)
@@ -189,33 +196,42 @@ defmodule Omashiki.Worker.Poller do
   end
 
   defp complete_or_schedule(state, attempt_id, complete, left) do
-    case Map.fetch(state.in_flight, attempt_id) do
+    case Map.fetch(in_flight(state), attempt_id) do
       {:ok, %{client: client, execution: execution}} ->
         case Client.complete(client, execution, complete) do
           :ok ->
             finish_in_flight(state, attempt_id)
 
-          {:error, :busy} when left > 1 ->
-            Process.send_after(
-              self(),
-              {:complete_retry, attempt_id, complete, left - 1},
-              complete_retry_ms()
-            )
+          result ->
+            if left > 1 and retryable_complete?(result) do
+              Process.send_after(
+                self(),
+                {:complete_retry, attempt_id, complete, left - 1},
+                complete_retry_delay(left - 1)
+              )
 
-            {:noreply, state}
+              {:noreply, state}
+            else
+              Logger.warning(
+                "Worker.Poller dropping complete for #{attempt_id}: #{inspect(result)}"
+              )
 
-          reason ->
-            Logger.warning(
-              "Worker.Poller dropping complete for #{attempt_id}: #{inspect(reason)}"
-            )
-
-            finish_in_flight(state, attempt_id)
+              finish_in_flight(state, attempt_id)
+            end
         end
 
       :error ->
         {:noreply, state}
     end
   end
+
+  defp retryable_complete?(:ok), do: false
+  defp retryable_complete?({:error, :unauthorized}), do: false
+  defp retryable_complete?({:error, {:http, status, _}}) when status in 400..499, do: false
+  defp retryable_complete?({:error, :busy}), do: true
+  defp retryable_complete?({:error, {:http, 503, _}}), do: true
+  defp retryable_complete?({:error, _reason}), do: true
+  defp retryable_complete?(_), do: false
 
   defp finish_in_flight(state, attempt_id) do
     Slots.release(state.slots)
@@ -224,9 +240,32 @@ defmodule Omashiki.Worker.Poller do
     {:noreply, state}
   end
 
-  defp complete_retry_ms do
-    Application.get_env(:omashiki, :worker_complete_retry_ms, 25)
+  defp complete_retry_delay(left) do
+    used = max(@complete_attempts - left - 1, 0)
+    base = Application.get_env(:omashiki, :worker_complete_retry_ms, @complete_retry_base_ms)
+    cap = Application.get_env(:omashiki, :worker_complete_retry_cap_ms, @complete_retry_cap_ms)
+    min(cap, base * trunc(:math.pow(2, used)))
   end
+
+  defp in_flight(%{in_flight: in_flight}) when is_map(in_flight), do: in_flight
+  defp in_flight(_state), do: %{}
+
+  defp adopt_in_flight(%{mode: :active} = next, %{in_flight: previous})
+       when map_size(previous) > 0 do
+    %{next | in_flight: Map.merge(previous, next.in_flight)}
+  end
+
+  defp adopt_in_flight(%{mode: :idle} = next, %{in_flight: previous})
+       when map_size(previous) > 0 do
+    Enum.each(previous, fn {attempt_id, _} ->
+      Logger.warning("Worker.Poller dropping in-flight #{attempt_id} on idle configure")
+      Slots.release(next.slots)
+    end)
+
+    %{next | in_flight: %{}}
+  end
+
+  defp adopt_in_flight(next, _previous), do: next
 
   defp maybe_upload_blob(%Complete{kind: :files} = complete, client, %Offer{job_id: job_id}) do
     with path when is_binary(path) <- complete.blob_path,
@@ -309,7 +348,7 @@ defmodule Omashiki.Worker.Poller do
         "Worker.Poller idle: at least one manager and worker_executor must be configured"
       )
 
-      %{mode: :idle, slots: slots}
+      %{mode: :idle, slots: slots, in_flight: %{}}
     else
       managers =
         Enum.map(managers, fn m ->

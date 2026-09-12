@@ -44,6 +44,10 @@ defmodule Omashiki.Worker.PollerTest do
       assert {:ok, pid} = start_supervised({Poller, name: unique_poller_name()})
       assert Process.alive?(pid)
 
+      send(pid, {:complete_retry, "missing-attempt", %Complete{kind: :none}, 3})
+      _ = :sys.get_state(pid)
+      assert Process.alive?(pid)
+
       Process.sleep(50)
       refute_receive {:http_hit, _}, 50
     end
@@ -82,16 +86,7 @@ defmodule Omashiki.Worker.PollerTest do
         assert body["complete"]["head_sha"] == "def"
       end)
 
-      put_env(:fake_executor_result, {
-        :ok,
-        %Complete{
-          kind: :git,
-          remote: "https://example.com/repo.git",
-          branch: "main",
-          base_sha: "abc",
-          head_sha: "def"
-        }
-      })
+      put_env(:fake_executor_result, git_complete())
 
       assert {:ok, _pid} = start_poller(slots)
       assert_receive {:accept, _}, 2_000
@@ -122,16 +117,7 @@ defmodule Omashiki.Worker.PollerTest do
         end
       end)
 
-      put_env(:fake_executor_result, {
-        :ok,
-        %Complete{
-          kind: :git,
-          remote: "https://example.com/repo.git",
-          branch: "main",
-          base_sha: "abc",
-          head_sha: "def"
-        }
-      })
+      put_env(:fake_executor_result, git_complete())
 
       assert {:ok, _pid} = start_poller(slots)
       assert_receive {:accept, _}, 2_000
@@ -155,35 +141,26 @@ defmodule Omashiki.Worker.PollerTest do
         Plug.Conn.resp(conn, 503, ~s({"code":"busy"}))
       end)
 
-      put_env(:fake_executor_result, {
-        :ok,
-        %Complete{
-          kind: :git,
-          remote: "https://example.com/repo.git",
-          branch: "main",
-          base_sha: "abc",
-          head_sha: "def"
-        }
-      })
+      put_env(:fake_executor_result, git_complete())
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:ok, _pid} = start_poller(slots)
           assert_receive {:accept, _}, 2_000
           wait_until(fn -> Agent.get(hits, & &1) >= 8 end)
-          Process.sleep(20)
         end)
 
       assert Agent.get(hits, & &1) == 8
       assert log =~ "dropping complete"
     end
 
-    test "does not treat a proxy 503 as manager busy", %{
+    test "retries a proxy 503 complete", %{
       bypass: bypass,
       parent: parent,
       slots: slots
     } do
       offer = sample_offer("git")
+      put_env(:worker_complete_retry_ms, 1)
 
       expect_register(bypass)
       expect_accept(bypass, parent)
@@ -197,23 +174,42 @@ defmodule Omashiki.Worker.PollerTest do
         Plug.Conn.resp(conn, 503, "no healthy upstream")
       end)
 
-      put_env(:fake_executor_result, {
-        :ok,
-        %Complete{
-          kind: :git,
-          remote: "https://example.com/repo.git",
-          branch: "main",
-          base_sha: "abc",
-          head_sha: "def"
-        }
-      })
+      put_env(:fake_executor_result, git_complete())
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, _pid} = start_poller(slots)
+          assert_receive {:accept, _}, 2_000
+          wait_until(fn -> Agent.get(hits, & &1) >= 8 end)
+        end)
+
+      assert Agent.get(hits, & &1) == 8
+      assert log =~ "dropping complete"
+    end
+
+    test "does not retry a 4xx complete", %{bypass: bypass, parent: parent, slots: slots} do
+      offer = sample_offer("git")
+      put_env(:worker_complete_retry_ms, 1)
+
+      expect_register(bypass)
+      expect_accept(bypass, parent)
+      expect_poll_sequence(bypass, [offer], parent)
+
+      {:ok, hits} = Agent.start_link(fn -> 0 end)
+
+      Bypass.expect(bypass, "POST", "/internal/work/complete", fn conn ->
+        {:ok, _body, conn} = Plug.Conn.read_body(conn)
+        Agent.update(hits, &(&1 + 1))
+        Plug.Conn.resp(conn, 422, ~s({"code":"invalid_complete"}))
+      end)
+
+      put_env(:fake_executor_result, git_complete())
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
           assert {:ok, _pid} = start_poller(slots)
           assert_receive {:accept, _}, 2_000
           wait_until(fn -> Agent.get(hits, & &1) >= 1 end)
-          Process.sleep(30)
         end)
 
       assert Agent.get(hits, & &1) == 1
@@ -692,6 +688,17 @@ defmodule Omashiki.Worker.PollerTest do
 
   defp unique_poller_name do
     :"Omashiki.Worker.Poller.Test.#{System.unique_integer([:positive])}"
+  end
+
+  defp git_complete do
+    {:ok,
+     %Complete{
+       kind: :git,
+       remote: "https://example.com/repo.git",
+       branch: "main",
+       base_sha: "abc",
+       head_sha: "def"
+     }}
   end
 
   defp wait_until(fun, remaining \\ 2_000) do
