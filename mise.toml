@@ -91,7 +91,7 @@ MIX_ENV=test mix test
 """
 
 [tasks."ci:api:contract"]
-description = "OpenAPI route coverage, security scheme, and document equality"
+description = "OpenAPI route coverage, document lint ($ref, operationId, path params), and security scheme"
 run         = """
 mise run db-up
 cd server

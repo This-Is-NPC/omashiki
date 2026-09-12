@@ -32,6 +32,7 @@ defmodule OmashikiWeb.Api.FleetControllerTest do
       })
 
     body = conn |> get(~p"/api/v1/fleet") |> json_response(200)
+    assert_schema(body, "FleetResponse", OmashikiWeb.ApiSpec.spec())
     node = Enum.find(body["data"], &(&1["machine_id"] == "worker-1"))
 
     assert %{"kind" => "worker", "stale" => false, "capacity" => 2, "free_slots" => 0} = node
@@ -43,7 +44,9 @@ defmodule OmashikiWeb.Api.FleetControllerTest do
 
   @tag :unauthenticated
   test "requires an operator token", %{conn: conn} do
-    assert conn |> get(~p"/api/v1/fleet") |> json_response(401)
+    conn = get(conn, ~p"/api/v1/fleet")
+    assert conn.status == 401
+    assert_schema(json_response(conn, 401), "Problem", OmashikiWeb.ApiSpec.spec())
   end
 
   defp container(id, attempt_id) do

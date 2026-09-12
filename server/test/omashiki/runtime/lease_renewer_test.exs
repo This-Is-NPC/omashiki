@@ -59,15 +59,13 @@ defmodule Omashiki.Runtime.LeaseRenewerTest do
     renewer = start_renewer!()
     Enum.each(attempts, &LeaseRenewer.register(renewer, &1.id, &1.lease_token))
     send(renewer, :renew)
+    _ = :sys.get_state(renewer)
 
     for attempt <- attempts do
-      assert eventually(fn ->
-               reloaded = Repo.get!(JobAttempt, attempt.id)
+      reloaded = Repo.get!(JobAttempt, attempt.id)
 
-               DateTime.compare(reloaded.lease_expires_at, before[attempt.id]) == :gt and
-                 not is_nil(reloaded.heartbeat_at)
-             end),
-             "lease for #{attempt.id} was not renewed"
+      assert DateTime.compare(reloaded.lease_expires_at, before[attempt.id]) == :gt
+      assert reloaded.heartbeat_at
     end
   end
 
@@ -77,6 +75,7 @@ defmodule Omashiki.Runtime.LeaseRenewerTest do
     renewer = start_renewer!()
     LeaseRenewer.register(renewer, attempt.id, "not-the-lease-token")
     send(renewer, :renew)
+    _ = :sys.get_state(renewer)
 
     assert_receive {:lease_lost, id}, 2_000
     assert id == attempt.id
@@ -94,6 +93,7 @@ defmodule Omashiki.Runtime.LeaseRenewerTest do
     LeaseRenewer.register(renewer, attempt.id, attempt.lease_token)
     LeaseRenewer.unregister(renewer, attempt.id)
     send(renewer, :renew)
+    _ = :sys.get_state(renewer)
 
     refute_receive {:lease_lost, _}, 300
     assert Repo.get!(JobAttempt, attempt.id).lease_expires_at == expires_at
@@ -119,14 +119,6 @@ defmodule Omashiki.Runtime.LeaseRenewerTest do
     {:ok, job} = Jobs.Admission.admit(token, request(key))
     {:ok, attempt} = Jobs.claim(job, "lease-runner-#{key}")
     attempt
-  end
-
-  defp eventually(fun, attempts \\ 40) do
-    cond do
-      fun.() -> true
-      attempts <= 1 -> false
-      true -> Process.sleep(25) && eventually(fun, attempts - 1)
-    end
   end
 
   defp request(key) do
