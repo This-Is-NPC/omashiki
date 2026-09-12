@@ -306,7 +306,9 @@ defmodule Omashiki.Jobs.ClaimsTest do
   test "cancellation is idempotent in blocked queued provisioning and running states", %{
     token: token
   } do
-    {:ok, [{_, parent}, {_, blocked}]} = Omashiki.Jobs.Admission.admit_batch_once(token, batch_request())
+    {:ok, [{_, parent}, {_, blocked}]} =
+      Omashiki.Jobs.Admission.admit_batch_once(token, batch_request())
+
     assert {:ok, _} = Jobs.cancel(blocked)
     assert {:ok, same_blocked} = Jobs.cancel(blocked)
     assert same_blocked.status == "cancelled"
@@ -315,7 +317,9 @@ defmodule Omashiki.Jobs.ClaimsTest do
     assert {:ok, _} = Jobs.cancel(queued)
     assert {:ok, _} = Jobs.cancel(queued)
 
-    {:ok, _, provisioning} = Omashiki.Jobs.Admission.admit_once(token, request("provisioning-cancel"))
+    {:ok, _, provisioning} =
+      Omashiki.Jobs.Admission.admit_once(token, request("provisioning-cancel"))
+
     {:ok, provisioning_attempt} = Jobs.claim(provisioning, "provisioning-runner")
     assert {:ok, _} = Jobs.cancel(provisioning)
     assert {:ok, _} = Jobs.cancel(provisioning)
@@ -583,7 +587,9 @@ defmodule Omashiki.Jobs.ClaimsTest do
 
     for state <- ~w(available scheduled retryable executing) do
       test "a dispatch still #{state} is left alone", %{token: token} do
-        {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("orphan-live-#{unquote(state)}"))
+        {:ok, _, job} =
+          Omashiki.Jobs.Admission.admit_once(token, request("orphan-live-#{unquote(state)}"))
+
         set_dispatch_state!(job.id, unquote(state))
 
         assert {:ok, 0} = Jobs.recover_orphaned_dispatches(past_grace())
