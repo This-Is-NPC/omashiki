@@ -36,7 +36,7 @@ curl --fail-with-body -sS "$OMASHIKI_URL/api/v1/agent-skill" \
 ```
 
 The served skill is [`server/priv/agent_skill/SKILL.md`](../server/priv/agent_skill/SKILL.md).
-A checkout copy lives at [`.agents/skills/omashiki/SKILL.md`](../.agents/skills/omashiki/SKILL.md) so a local agent loads the same text. That path is a Git symbolic link to the priv file. Windows clones need `git config core.symlinks true` before checkout; otherwise Git writes a plain text file that contains only the target path. `GET /api/v1/agent-skill` always serves the priv file.
+A checkout copy lives at [`.agents/skills/omashiki/SKILL.md`](../.agents/skills/omashiki/SKILL.md) so a local agent loads the same text. That path is a Git symbolic link to the priv file. On Windows, enable Developer Mode (or run as Administrator) and clone with `git clone -c core.symlinks=true <url>`. Setting `core.symlinks` after clone does not convert an existing checkout; Git then writes a plain text file that contains only the target path. `GET /api/v1/agent-skill` always serves the priv file.
 
 ## References
 
