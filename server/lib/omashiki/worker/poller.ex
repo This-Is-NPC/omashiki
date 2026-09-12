@@ -200,7 +200,7 @@ defmodule Omashiki.Worker.Poller do
         %Complete{
           kind: :error,
           code: "executor_failed",
-          message: format_complete_error(:error, reason)
+          message: AttemptResult.truncate_summary(Exception.format(:error, reason, []))
         }
     end
   end
@@ -223,8 +223,7 @@ defmodule Omashiki.Worker.Poller do
     end
   end
 
-  @doc false
-  def run_complete(client, execution, payload) do
+  defp run_complete(client, execution, payload) do
     try do
       complete = materialize_complete(client, payload)
       {complete, Client.complete(client, execution, complete)}
@@ -250,17 +249,8 @@ defmodule Omashiki.Worker.Poller do
     %Complete{
       kind: :error,
       code: "complete_failed",
-      message: format_complete_error(kind, reason)
+      message: AttemptResult.truncate_summary(Exception.format(kind, reason, []))
     }
-  end
-
-  defp format_complete_error(kind, reason) do
-    formatted = Exception.format(kind, reason, [])
-
-    case AttemptResult.truncate_summary(formatted) do
-      nil -> "complete failed"
-      message -> message
-    end
   end
 
   defp handle_complete_result(state, attempt_id, complete, left, result) do
