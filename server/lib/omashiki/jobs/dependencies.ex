@@ -6,7 +6,7 @@ defmodule Omashiki.Jobs.Dependencies do
   alias Omashiki.Jobs.{DispatchWorker, Job, JobAttempt, JobDependency, JobEvent, Statuses}
   alias Omashiki.Repo
 
-  import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_retry_allowed: 1]
+  import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_unsuccessful: 1]
 
   def notify_dependents!(%Job{} = dependency, unlock_event_id) do
     dependents =
@@ -73,7 +73,7 @@ defmodule Omashiki.Jobs.Dependencies do
     Enum.all?(edges, fn {dep_id, on_failure} ->
       case Map.fetch!(dep_jobs, dep_id).status do
         "succeeded" -> true
-        status when is_retry_allowed(status) -> on_failure == "proceed"
+        status when is_unsuccessful(status) -> on_failure == "proceed"
         _ -> false
       end
     end)

@@ -2,7 +2,7 @@ defmodule Omashiki.Jobs do
   @moduledoc "DB-authoritative claims, leases, retries, cancellation, and recovery."
 
   import Ecto.Query
-  import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_retry_allowed: 1]
+  import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_unsuccessful: 1]
 
   require Logger
 
@@ -551,7 +551,7 @@ defmodule Omashiki.Jobs do
     end
   end
 
-  defp complete_locked(job, attempt, status, attrs, now) when is_retry_allowed(status) do
+  defp complete_locked(job, attempt, status, attrs, now) when is_unsuccessful(status) do
     error = get_attr(attrs, :error) || default_error(status)
 
     updated =
@@ -708,7 +708,7 @@ defmodule Omashiki.Jobs do
     end
   end
 
-  defp apply_transition(%Job{} = job, status, attrs) when is_retry_allowed(status) do
+  defp apply_transition(%Job{} = job, status, attrs) when is_unsuccessful(status) do
     attempt = current_attempt!(job)
     complete_locked(job, attempt, status, attrs, now())
   end

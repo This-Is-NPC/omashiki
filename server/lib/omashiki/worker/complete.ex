@@ -10,7 +10,7 @@ defmodule Omashiki.Worker.Complete do
   alias Omashiki.Jobs.{Job, JobAttempt}
   alias Omashiki.Repo
 
-  import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_retry_allowed: 1]
+  import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_unsuccessful: 1]
 
   @type kind :: :git | :files | :none | :error
 
@@ -50,7 +50,7 @@ defmodule Omashiki.Worker.Complete do
   def from_job(%Job{status: "succeeded"} = job), do: from_succeeded_job(job)
 
   def from_job(%Job{status: status, terminal_error: error})
-      when is_retry_allowed(status) and is_map(error) do
+      when is_unsuccessful(status) and is_map(error) do
     %__MODULE__{
       kind: :error,
       code: error_code(error),
