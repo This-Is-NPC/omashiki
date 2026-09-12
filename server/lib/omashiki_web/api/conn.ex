@@ -43,9 +43,25 @@ defmodule OmashikiWeb.Api.Conn do
   defp parse_ip(""), do: nil
 
   defp parse_ip(raw) do
-    case :inet.parse_strict_address(String.to_charlist(raw)) do
+    case raw |> strip_port() |> String.to_charlist() |> :inet.parse_strict_address() do
       {:ok, tuple} -> tuple |> :inet.ntoa() |> to_string()
       _ -> nil
+    end
+  end
+
+  # Proxies sometimes append `:port`. IPv4 is `a.b.c.d:port`; IPv6 is
+  # `[addr]` or `[addr]:port`. Bare IPv6 has colons but no port suffix.
+  defp strip_port("[" <> rest) do
+    case String.split(rest, "]", parts: 2) do
+      [host, _] -> host
+      _ -> rest
+    end
+  end
+
+  defp strip_port(raw) do
+    case Regex.run(~r/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/, raw) do
+      [_, host] -> host
+      nil -> raw
     end
   end
 

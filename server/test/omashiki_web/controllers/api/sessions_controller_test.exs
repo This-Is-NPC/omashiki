@@ -224,6 +224,17 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
       assert forwarded.status == 401
       assert Jason.decode!(forwarded.resp_body)["code"] == "invalid_credentials"
 
+      with_port =
+        conn
+        |> Plug.Conn.put_req_header("x-forwarded-for", "8.8.8.8:1234")
+        |> post(
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+
+      assert with_port.status == 401
+      assert Jason.decode!(with_port.resp_body)["code"] == "invalid_credentials"
+
       spoofed =
         conn
         |> Plug.Conn.put_req_header("x-forwarded-for", "not-an-ip")
