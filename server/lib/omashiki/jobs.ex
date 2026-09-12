@@ -2,12 +2,13 @@ defmodule Omashiki.Jobs do
   @moduledoc "DB-authoritative claims, leases, retries, cancellation, and recovery."
 
   import Ecto.Query
-  import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_unsuccessful: 1]
+  import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_unsuccessful: 1, is_active: 1]
 
   require Logger
 
   alias Omashiki.Config
   alias Omashiki.HostSettings
+  alias Omashiki.ApiTokens.Token
 
   alias Omashiki.Jobs.{
     Admission,
@@ -672,11 +673,6 @@ defmodule Omashiki.Jobs do
         lock_token_before_job!(job_id)
       end
 
-    attrs =
-      if match?(%Omashiki.ApiTokens.Token{}, locked_token),
-        do: Map.put(attrs, :locked_token, locked_token),
-        else: attrs
-
     case locked_job(job_id) do
       nil ->
         Repo.rollback(:not_found)
@@ -687,12 +683,12 @@ defmodule Omashiki.Jobs do
       %Job{} = job ->
         retry? = get_attr(attrs, :retry) == true
 
-        if status in ~w(succeeded failed) and Statuses.active?(job.status) do
+        if is_terminal(status) and status != "cancelled" and is_active(job.status) do
           Repo.rollback(:lease_required)
         else
           if status in Map.get(@transitions, job.status, []) or
                (status == "queued" and is_unsuccessful(job.status) and retry?) do
-            apply_transition(job, status, attrs)
+            apply_transition(job, status, attrs, locked_token)
           else
             Repo.rollback({:invalid_transition, job.status, status})
           end
@@ -700,7 +696,7 @@ defmodule Omashiki.Jobs do
     end
   end
 
-  defp apply_transition(%Job{} = job, "running", _attrs) do
+  defp apply_transition(%Job{} = job, "running", _attrs, _locked_token) do
     attempt = current_attempt!(job)
     now = now()
 
@@ -714,19 +710,20 @@ defmodule Omashiki.Jobs do
     end
   end
 
-  defp apply_transition(%Job{} = job, status, attrs) when is_unsuccessful(status) do
+  defp apply_transition(%Job{} = job, status, attrs, _locked_token)
+       when is_unsuccessful(status) do
     attempt = current_attempt!(job)
     complete_locked(job, attempt, status, attrs, now())
   end
 
-  defp apply_transition(%Job{} = job, "succeeded", attrs) do
+  defp apply_transition(%Job{} = job, "succeeded", attrs, _locked_token) do
     attempt = current_attempt!(job)
     complete_locked(job, attempt, "succeeded", attrs, now())
   end
 
-  defp apply_transition(%Job{} = job, "queued", %{retry: true} = attrs) do
-    case Map.get(attrs, :locked_token) do
-      %Omashiki.ApiTokens.Token{} = token ->
+  defp apply_transition(%Job{} = job, "queued", %{retry: true}, locked_token) do
+    case locked_token do
+      %Token{} = token ->
         Admission.reject_over_capacity!(token, 1)
 
       _ ->
