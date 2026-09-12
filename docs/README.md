@@ -35,7 +35,8 @@ curl --fail-with-body -sS "$OMASHIKI_URL/api/v1/agent-skill" \
   > "${HOME:?}/.agents/skills/omashiki/SKILL.md"
 ```
 
-The [skill file](../.agents/skills/omashiki/SKILL.md) is the source the house serves.
+The served skill is [`server/priv/agent_skill/SKILL.md`](../server/priv/agent_skill/SKILL.md).
+[`.agents/skills/omashiki/SKILL.md`](../.agents/skills/omashiki/SKILL.md) is a symlink of that file so a local agent loads the same text.
 
 ## References
 
