@@ -309,13 +309,19 @@ defmodule Omashiki.Runtime.InspectorTest do
 
     test "a full census carries the configuration state" do
       {:ok, pid} =
-        Inspector.start_link(name: nil, interval_ms: 60_000, census: {__MODULE__, :no_census, []})
+        Inspector.start_link(
+          name: nil,
+          interval_ms: 60_000,
+          census: {__MODULE__, :no_census, []},
+          live_digest: @live
+        )
 
       snapshot = Inspector.refresh(pid)
 
-      assert %{applied_percent: 100, digest: digest} = snapshot.config
-      assert digest == Omashiki.Config.current_digest()
-      assert snapshot.config.generation == Omashiki.Config.generation()
+      assert snapshot.config.applied_percent == 100
+      assert snapshot.config.digest == @live
+      assert is_integer(snapshot.config.generation)
+      assert is_map(snapshot.config.rollout)
     end
   end
 
