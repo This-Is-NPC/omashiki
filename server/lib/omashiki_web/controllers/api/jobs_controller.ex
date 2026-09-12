@@ -47,6 +47,8 @@ defmodule OmashikiWeb.Api.JobsController do
     request_body: {"Job", "application/json", Schemas.JobAdmissionRequest},
     responses: %{
       202 => {"Admitted", "application/json", Schemas.JobResponse},
+      409 => {"Conflict", "application/problem+json", Schemas.Problem},
+      413 => {"Too large", "application/problem+json", Schemas.Problem},
       422 => {"Invalid", "application/problem+json", Schemas.Problem},
       503 => {"Busy", "application/problem+json", Schemas.Problem}
     }
@@ -125,6 +127,7 @@ defmodule OmashikiWeb.Api.JobsController do
     responses: %{
       200 => {"Result", "application/json", Schemas.JobResultResponse},
       202 => {"Not ready", "application/problem+json", Schemas.Problem},
+      404 => {"Missing", "application/problem+json", Schemas.Problem},
       409 => {"Not ready", "application/problem+json", Schemas.Problem}
     }
   )
@@ -150,6 +153,8 @@ defmodule OmashikiWeb.Api.JobsController do
     ],
     responses: %{
       200 => {"Cancelled", "application/json", Schemas.JobResponse},
+      404 => {"Missing", "application/problem+json", Schemas.Problem},
+      409 => {"Conflict", "application/problem+json", Schemas.Problem},
       503 => {"Busy", "application/problem+json", Schemas.Problem}
     }
   )
@@ -170,6 +175,8 @@ defmodule OmashikiWeb.Api.JobsController do
     ],
     responses: %{
       202 => {"Retried", "application/json", Schemas.JobResponse},
+      404 => {"Missing", "application/problem+json", Schemas.Problem},
+      409 => {"Conflict", "application/problem+json", Schemas.Problem},
       503 => {"Busy", "application/problem+json", Schemas.Problem}
     }
   )
@@ -193,6 +200,8 @@ defmodule OmashikiWeb.Api.JobsController do
     ],
     responses: %{
       200 => {"Events", "application/json", Schemas.JobEventListResponse},
+      404 => {"Missing", "application/problem+json", Schemas.Problem},
+      409 => {"Gap", "application/problem+json", Schemas.Problem},
       422 => {"Invalid cursor", "application/problem+json", Schemas.Problem}
     }
   )

@@ -193,6 +193,7 @@ defmodule OmashikiWeb.Api.Problem do
     payload = body(conn, code, opts)
     status = payload.status
     request_id = payload.request_id
+    assert_declared_status!(conn, status)
 
     Logger.info("api_error code=#{code} status=#{status} request_id=#{request_id}")
 
@@ -459,4 +460,51 @@ defmodule OmashikiWeb.Api.Problem do
       %{field: to_string(field), code: "invalid", detail: List.first(messages)}
     end)
   end
+
+  # 500 is the unexpected path and is never declared per operation.
+  defp assert_declared_status!(_conn, 500), do: :ok
+
+  defp assert_declared_status!(conn, status) do
+    if Application.get_env(:omashiki, :strict_api_contract, false) do
+      case spec_operation(conn) do
+        nil ->
+          :ok
+
+        operation ->
+          unless declared_status?(operation, status) do
+            raise ArgumentError,
+                  "undeclared problem status #{status} for #{operation.operationId || "operation"}"
+          end
+      end
+    end
+  end
+
+  defp spec_operation(conn) do
+    case conn.private[:open_api_spex] do
+      %{spec_module: _} ->
+        {_spec, lookup} = OpenApiSpex.Plug.PutApiSpec.get_spec_and_operation_lookup(conn)
+
+        cond do
+          is_binary(conn.private.open_api_spex[:operation_id]) ->
+            lookup[conn.private.open_api_spex.operation_id]
+
+          controller = conn.private[:phoenix_controller] ->
+            action = conn.private[:phoenix_action]
+            declared = controller.open_api_operation(action)
+            declared && lookup[declared.operationId]
+
+          true ->
+            nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp declared_status?(%{responses: responses}, status) when is_map(responses) do
+    Map.has_key?(responses, status) or Map.has_key?(responses, Integer.to_string(status))
+  end
+
+  defp declared_status?(_, _), do: false
 end

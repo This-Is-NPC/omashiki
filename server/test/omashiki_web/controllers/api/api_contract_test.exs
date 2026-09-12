@@ -4,7 +4,6 @@ defmodule OmashikiWeb.Api.ApiContractTest do
   @moduletag :api
 
   alias OmashikiWeb.Api.Problem
-  alias OmashikiWeb.Api.ErrorSurface
   alias OmashikiWeb.ApiSpec.Schemas
   alias OmashikiWeb.Router
 
@@ -47,28 +46,29 @@ defmodule OmashikiWeb.Api.ApiContractTest do
     assert spec.openapi == "3.0.3"
   end
 
-  test "operations declare statuses for Problem codes they can return" do
+  test "served spec includes pipeline statuses and operation-declared errors" do
     spec = OmashikiWeb.ApiSpec.spec() |> Jason.encode!() |> Jason.decode!()
     jobs = spec["paths"]["/api/v1/jobs"]
     refute Map.has_key?(jobs["get"]["responses"], "400")
 
-    missing =
-      for {path, item} <- spec["paths"],
-          {method, operation} <- item,
-          method in ~w(get post put patch delete),
-          is_map(operation),
-          status <- ErrorSurface.required_statuses(path, method, bearer_operation?(operation)),
-          status = Integer.to_string(status),
-          not Map.has_key?(operation["responses"] || %{}, status) do
-        "#{method} #{path} #{status}"
-      end
-
-    assert missing == [], "undeclared error statuses: #{inspect(missing)}"
-
-    assert "429" in Map.keys(spec["paths"]["/api/v1/jobs"]["post"]["responses"])
+    assert "401" in Map.keys(jobs["post"]["responses"])
+    assert "429" in Map.keys(jobs["post"]["responses"])
     assert "429" in Map.keys(spec["paths"]["/api/v1/jobs/{id}/retry"]["post"]["responses"])
     assert "429" in Map.keys(spec["paths"]["/api/v1/jobs/{id}/result"]["get"]["responses"])
-    assert "503" in Map.keys(spec["paths"]["/api/v1/jobs"]["post"]["responses"])
+    assert "503" in Map.keys(jobs["post"]["responses"])
+    assert "404" in Map.keys(spec["paths"]["/api/v1/jobs/{id}/webhook-deliveries"]["get"]["responses"])
+  end
+
+  test "undeclared problem status raises against the served operation" do
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> Plug.Conn.put_private(:phoenix_controller, OmashikiWeb.Api.HealthController)
+      |> Plug.Conn.put_private(:phoenix_action, :show)
+      |> OpenApiSpex.Plug.PutApiSpec.call(OmashikiWeb.ApiSpec)
+
+    assert_raise ArgumentError, ~r/undeclared problem status 404/, fn ->
+      Problem.send(conn, "not_found")
+    end
   end
 
   test "HTTP read timeout is an integer and does not replace the test bind" do
@@ -250,13 +250,4 @@ defmodule OmashikiWeb.Api.ApiContractTest do
   end
 
   defp resolve_node(node, _spec), do: node
-
-  defp bearer_operation?(%{"security" => security}) when is_list(security) do
-    Enum.any?(security, fn
-      %{"bearer" => _} -> true
-      _ -> false
-    end)
-  end
-
-  defp bearer_operation?(_), do: false
 end

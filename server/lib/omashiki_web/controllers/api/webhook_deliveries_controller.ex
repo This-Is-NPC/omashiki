@@ -13,7 +13,8 @@ defmodule OmashikiWeb.Api.WebhookDeliveriesController do
       id: [in: :path, type: :string, required: true]
     ],
     responses: %{
-      200 => {"Deliveries", "application/json", Schemas.WebhookDeliveryListResponse}
+      200 => {"Deliveries", "application/json", Schemas.WebhookDeliveryListResponse},
+      404 => {"Missing", "application/problem+json", Schemas.Problem}
     }
   )
 
@@ -35,6 +36,7 @@ defmodule OmashikiWeb.Api.WebhookDeliveriesController do
     ],
     responses: %{
       202 => {"Requeued", "application/json", Schemas.WebhookDeliveryListResponse},
+      404 => {"Missing", "application/problem+json", Schemas.Problem},
       409 => {"Refused", "application/problem+json", Schemas.Problem},
       503 => {"Busy", "application/problem+json", Schemas.Problem}
     }

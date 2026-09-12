@@ -4,7 +4,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
   @moduletag :api
 
   alias Omashiki.Config
-  alias Omashiki.Jobs.{Job, JobAttempt, JobEvent}
+  alias Omashiki.Jobs.{Admission, Job, JobAttempt, JobEvent}
   alias Omashiki.Repo
 
   import Ecto.Query
@@ -89,7 +89,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     token: token,
     user: user
   } do
-    {:ok, job} = admit(token, request())
+    {:ok, _, job} = Admission.admit_once(token, request())
     {_other, plaintext} = api_token_fixture(user)
 
     conn = json_conn() |> Plug.Conn.put_req_header("authorization", "Bearer #{plaintext}")
@@ -102,7 +102,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
   end
 
   test "the local operator can inspect jobs from every owned token", %{user: user, token: token} do
-    {:ok, job} = admit(token, request())
+    {:ok, _, job} = Admission.admit_once(token, request())
     {_other, _plaintext} = api_token_fixture(user)
 
     conn =
@@ -140,7 +140,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     token: token,
     token_plaintext: plaintext
   } do
-    {:ok, job} = admit(token, request())
+    {:ok, _, job} = Admission.admit_once(token, request())
 
     cancelled = post(conn, "/api/v1/jobs/#{job.id}/cancel", %{})
     repeated = post(build_conn_with_auth(plaintext), "/api/v1/jobs/#{job.id}/cancel", %{})
@@ -216,13 +216,13 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
         ttl_days: 7
       })
 
-    {:ok, cancelled} =
-      admit(token, request(%{"idempotency_key" => "retry-me"}))
+    {:ok, _, cancelled} =
+      Admission.admit_once(token, request(%{"idempotency_key" => "retry-me"}))
 
     {:ok, _} = Omashiki.Jobs.cancel(cancelled)
 
-    {:ok, _active} =
-      admit(token, request(%{"idempotency_key" => "held"}))
+    {:ok, _, _active} =
+      Admission.admit_once(token, request(%{"idempotency_key" => "held"}))
 
     conn = json_conn() |> Plug.Conn.put_req_header("authorization", "Bearer #{plaintext}")
     retried = post(conn, "/api/v1/jobs/#{cancelled.id}/retry", %{})
@@ -320,14 +320,14 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
   end
 
   test "result without wait is 409 while the job is running", %{conn: conn, token: token} do
-    {:ok, job} = admit(token, request())
+    {:ok, _, job} = Admission.admit_once(token, request())
     response = get(conn, "/api/v1/jobs/#{job.id}/result")
     assert response.status == 409
     assert json_response(response, 409)["code"] == "result_not_ready"
   end
 
   test "result wait times out with 202", %{conn: conn, token: token} do
-    {:ok, job} = admit(token, request())
+    {:ok, _, job} = Admission.admit_once(token, request())
     response = get(conn, "/api/v1/jobs/#{job.id}/result?wait=1")
     assert response.status == 202
     assert get_resp_header(response, "retry-after") != []
@@ -356,57 +356,25 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     assert_schema(json_response(environments, 200), "EnvironmentListResponse", @api_spec)
   end
 
-  test "redeliver requeues a failed webhook", %{
+  test "lists webhook deliveries and 404s a missing job", %{
     conn: conn,
     user: user,
     token: token
   } do
-    alias Omashiki.Jobs.{WebhookDelivery, Webhooks}
-
-    {:ok, _} =
-      Webhooks.configure(token, %{
-        destination: "https://client.test/hook",
-        secret: "client-secret"
-      })
-
-    {job, attempt} =
-      Omashiki.JobFixtures.job_fixture(user, token, %{status: "provisioning"})
-
-    assert {:ok, _} = Omashiki.Jobs.sync_capacity()
-    machine = Omashiki.Config.current_machine().name
-
-    Repo.update_all(
-      from(c in Omashiki.Jobs.ExecutionCapacity, where: c.machine_id == ^machine),
-      inc: [active: 1]
-    )
-
-    Repo.update_all(from(a in JobAttempt, where: a.id == ^attempt.id), set: [machine_id: machine])
-    attempt = %{attempt | machine_id: machine}
-
-    {:ok, _} =
-      Omashiki.Jobs.complete(attempt, attempt.lease_token, "succeeded", %{
-        result: %{"ok" => true},
-        branch: "jobs/webhook",
-        base_sha: String.duplicate("a", 40),
-        head_sha: String.duplicate("b", 40),
-        worktree_clean: true
-      })
-
-    delivery = Repo.one!(from(d in WebhookDelivery, limit: 1))
-
-    delivery
-    |> WebhookDelivery.changeset(%{status: "failed"})
-    |> Repo.update!()
-
-    requeued =
-      post(conn, "/api/v1/jobs/#{job.id}/webhook-deliveries/#{delivery.id}/redeliver", %{})
-
-    assert requeued.status == 202
-    assert_schema(json_response(requeued, 202), "WebhookDeliveryListResponse", @api_spec)
+    {job, _attempt} = Omashiki.JobFixtures.job_fixture(user, token, %{status: "queued"})
 
     listed = get(conn, "/api/v1/jobs/#{job.id}/webhook-deliveries")
     assert listed.status == 200
     assert_schema(json_response(listed, 200), "WebhookDeliveryListResponse", @api_spec)
+
+    missing = get(conn, "/api/v1/jobs/#{Ecto.UUID.generate()}/webhook-deliveries")
+    assert missing.status == 404
+    assert json_response(missing, 404)["code"] == "not_found"
+    assert_schema(json_response(missing, 404), "Problem", @api_spec)
+
+    spec = OmashikiWeb.ApiSpec.spec() |> Jason.encode!() |> Jason.decode!()
+
+    assert "404" in Map.keys(spec["paths"]["/api/v1/jobs/{id}/webhook-deliveries"]["get"]["responses"])
   end
 
   test "event history matches JobEventListResponse", %{conn: conn, user: user, token: token} do

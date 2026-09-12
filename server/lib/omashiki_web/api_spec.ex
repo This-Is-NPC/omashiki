@@ -4,6 +4,11 @@ defmodule OmashikiWeb.ApiSpec do
 
   `open_api_spex ~> 3.21` emits OpenAPI 3.0. Keep `openapi: "3.0.3"` so the
   served document and the library dialect stay the same; do not bump to 3.1.
+
+  Action-specific error statuses are declared on each `operation()`. This
+  module only adds statuses that every matching pipeline can produce: bearer
+  plugs (401/403/429) and OpenApiSpex cast failures (422) when the operation
+  has a body or parameters.
   """
 
   alias OpenApiSpex.{
@@ -17,10 +22,12 @@ defmodule OmashikiWeb.ApiSpec do
     SecurityScheme
   }
 
-  alias OmashikiWeb.Api.ErrorSurface
   alias OmashikiWeb.ApiSpec.Schemas
 
   @behaviour OpenApi
+
+  @pipeline_problem_statuses [401, 403, 429]
+  @cast_problem_status 422
 
   @impl OpenApi
   def spec do
@@ -43,19 +50,19 @@ defmodule OmashikiWeb.ApiSpec do
         }
       }
     }
-    |> put_error_responses()
+    |> put_pipeline_responses()
     |> OpenApiSpex.resolve_schema_modules()
   end
 
-  defp put_error_responses(%OpenApi{paths: paths} = spec) do
-    %{spec | paths: Map.new(paths, fn {path, item} -> {path, merge_path_item(path, item)} end)}
+  defp put_pipeline_responses(%OpenApi{paths: paths} = spec) do
+    %{spec | paths: Map.new(paths, fn {path, item} -> {path, merge_path_item(item)} end)}
   end
 
-  defp merge_path_item(path, item) do
+  defp merge_path_item(item) do
     Enum.reduce([:get, :post, :put, :patch, :delete], item, fn method, acc ->
       case Map.get(acc, method) do
         %Operation{} = operation ->
-          Map.put(acc, method, put_operation_errors(path, method, operation))
+          Map.put(acc, method, put_pipeline_errors(operation))
 
         _ ->
           acc
@@ -63,10 +70,22 @@ defmodule OmashikiWeb.ApiSpec do
     end)
   end
 
-  defp put_operation_errors(path, method, %Operation{} = operation) do
-    statuses = ErrorSurface.required_statuses(path, Atom.to_string(method), bearer?(operation))
+  defp put_pipeline_errors(%Operation{} = operation) do
+    statuses =
+      []
+      |> maybe_put_statuses(bearer?(operation), @pipeline_problem_statuses)
+      |> maybe_put_statuses(castable?(operation), [@cast_problem_status])
+      |> Enum.uniq()
+
     responses = Enum.reduce(statuses, operation.responses || %{}, &put_problem_response/2)
     %{operation | responses: responses}
+  end
+
+  defp maybe_put_statuses(statuses, true, extra), do: extra ++ statuses
+  defp maybe_put_statuses(statuses, false, _extra), do: statuses
+
+  defp castable?(%Operation{requestBody: body, parameters: params}) do
+    not is_nil(body) or params not in [nil, []]
   end
 
   defp put_problem_response(status, responses) do

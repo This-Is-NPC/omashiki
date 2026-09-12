@@ -76,6 +76,7 @@ config :omashiki, :runtime_inspector_interval_ms, :timer.hours(1)
 config :omashiki, :container_tracker_reconcile_ms, :timer.hours(1)
 config :omashiki, :worker_fleet_report_ms, :timer.hours(1)
 config :omashiki, :enable_job_recovery, false
+config :omashiki, :strict_api_contract, true
 
 # `Config.Rollout` polls for the fleet to empty during a drain. One second is
 # right for a production drain measured in minutes and is pure dead time here.
