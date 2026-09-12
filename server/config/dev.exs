@@ -32,7 +32,9 @@ config :omashiki, OmashikiWeb.Endpoint,
   http: [
     ip: {127, 0, 0, 1},
     port: String.to_integer(System.get_env("PORT") || "4000"),
-    thousand_island_options: [read_timeout: 90_000]
+    thousand_island_options: [
+      read_timeout: Application.get_env(:omashiki, :http_idle_timeout_ms)
+    ]
   ],
   check_origin: false,
   code_reloader: true,
