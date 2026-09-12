@@ -200,5 +200,35 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
 
       assert spoofed.status == 429
     end
+
+    @tag :unauthenticated
+    test "uses the last X-Forwarded-For header line as the trusted hop", %{conn: conn} do
+      previous = Application.get_env(:omashiki, :http_forwarded)
+      Application.put_env(:omashiki, :http_forwarded, true)
+      on_exit(fn -> Application.put_env(:omashiki, :http_forwarded, previous) end)
+
+      _ = user_fixture(%{username: "bob", password: "right-password-1"})
+
+      for _ <- 1..10 do
+        conn
+        |> Plug.Conn.put_req_header("x-forwarded-for", "8.8.8.8, 9.9.9.9")
+        |> post(
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+      end
+
+      spoofed_first_line =
+        conn
+        |> Map.update!(:req_headers, fn headers ->
+          headers ++ [{"x-forwarded-for", "1.2.3.4"}, {"x-forwarded-for", "9.9.9.9"}]
+        end)
+        |> post(
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+
+      assert spoofed_first_line.status == 429
+    end
   end
 end

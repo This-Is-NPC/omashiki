@@ -25,22 +25,19 @@ defmodule OmashikiWeb.Api.Conn do
     _ -> nil
   end
 
-  # The rightmost hop is what the trusted proxy appended. The leftmost value is
-  # client-controlled and must not key rate limits or audit rows.
+  # Every header line is a hop list. The rightmost hop of the last line is what
+  # the trusted proxy appended. Earlier lines and hops are client-controlled.
   defp forwarded_client_ip(conn) do
-    case Plug.Conn.get_req_header(conn, "x-forwarded-for") do
-      [value | _] ->
-        value
-        |> String.split(",")
-        |> List.last()
-        |> String.trim()
-        |> parse_ip()
-
-      _ ->
-        nil
-    end
+    conn
+    |> Plug.Conn.get_req_header("x-forwarded-for")
+    |> Enum.flat_map(&String.split(&1, ","))
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> List.last()
+    |> parse_ip()
   end
 
+  defp parse_ip(nil), do: nil
   defp parse_ip(""), do: nil
 
   defp parse_ip(raw) do
