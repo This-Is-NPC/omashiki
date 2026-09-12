@@ -73,6 +73,7 @@ defmodule OmashikiWeb.Api.JobsController do
     request_body: {"Batch", "application/json", Schemas.JobBatchRequest},
     responses: %{
       202 => {"Admitted", "application/json", Schemas.JobListResponse},
+      409 => {"Conflict", "application/problem+json", Schemas.Problem},
       413 => {"Too large", "application/problem+json", Schemas.Problem},
       422 => {"Invalid", "application/problem+json", Schemas.Problem},
       503 => {"Busy", "application/problem+json", Schemas.Problem}

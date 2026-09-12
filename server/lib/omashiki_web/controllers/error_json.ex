@@ -7,7 +7,7 @@ defmodule OmashikiWeb.ErrorJSON do
 
   alias OmashikiWeb.Api.Problem
 
-  def render("404.json", assigns), do: Problem.body(assigns[:conn], "not_found")
+  def render("404.json", assigns), do: problem(assigns, "not_found")
 
   def render(template, assigns) do
     status =
@@ -15,13 +15,20 @@ defmodule OmashikiWeb.ErrorJSON do
       |> String.replace_suffix(".json", "")
       |> String.to_integer()
 
-    Problem.body(assigns[:conn], "internal_error",
+    problem(assigns, "internal_error",
       status: status,
       title: Phoenix.Controller.status_message_from_template(template),
       detail: Phoenix.Controller.status_message_from_template(template)
     )
   rescue
     _ ->
-      Problem.body(assigns[:conn], "internal_error")
+      problem(assigns, "internal_error")
+  end
+
+  defp problem(assigns, code, opts \\ []) do
+    conn = assigns[:conn]
+    payload = Problem.body(conn, code, opts)
+    Problem.assert_declared!(conn, payload.status)
+    payload
   end
 end

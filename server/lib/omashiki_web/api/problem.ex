@@ -193,7 +193,7 @@ defmodule OmashikiWeb.Api.Problem do
     payload = body(conn, code, opts)
     status = payload.status
     request_id = payload.request_id
-    assert_declared_status!(conn, status)
+    assert_declared!(conn, status)
 
     Logger.info("api_error code=#{code} status=#{status} request_id=#{request_id}")
 
@@ -218,6 +218,25 @@ defmodule OmashikiWeb.Api.Problem do
   end
 
   def from_reason(conn, reason), do: send(conn, code_for(reason), opts_for(reason))
+
+  # 500 is the unexpected path and is never declared per operation.
+  def assert_declared!(_conn, 500), do: :ok
+  def assert_declared!(nil, _status), do: :ok
+
+  def assert_declared!(conn, status) do
+    if Application.get_env(:omashiki, :strict_api_contract, false) do
+      case spec_operation(conn) do
+        nil ->
+          :ok
+
+        operation ->
+          unless declared_status?(operation, status) do
+            raise ArgumentError,
+                  "undeclared problem status #{status} for #{operation.operationId || "operation"}"
+          end
+      end
+    end
+  end
 
   def code_for(reason) do
     case reason do
@@ -461,24 +480,6 @@ defmodule OmashikiWeb.Api.Problem do
     end)
   end
 
-  # 500 is the unexpected path and is never declared per operation.
-  defp assert_declared_status!(_conn, 500), do: :ok
-
-  defp assert_declared_status!(conn, status) do
-    if Application.get_env(:omashiki, :strict_api_contract, false) do
-      case spec_operation(conn) do
-        nil ->
-          :ok
-
-        operation ->
-          unless declared_status?(operation, status) do
-            raise ArgumentError,
-                  "undeclared problem status #{status} for #{operation.operationId || "operation"}"
-          end
-      end
-    end
-  end
-
   defp spec_operation(conn) do
     case conn.private[:open_api_spex] do
       %{spec_module: _} ->
@@ -494,8 +495,35 @@ defmodule OmashikiWeb.Api.Problem do
             declared && lookup[declared.operationId]
 
           true ->
-            nil
+            lookup_from_router(conn, lookup)
         end
+
+      _ ->
+        nil
+    end
+  end
+
+  # Pipeline plugs halt before the controller sets phoenix_controller /
+  # operation_id. Re-read the matched route so BearerAuth and ApiRateLimit
+  # still check against the served operation.
+  defp lookup_from_router(conn, lookup) do
+    with router when not is_nil(router) <- conn.private[:phoenix_router],
+         {controller, action} <- matched_controller(router, conn),
+         true <- function_exported?(controller, :open_api_operation, 1),
+         %{operationId: id} when is_binary(id) <- controller.open_api_operation(action) do
+      lookup[id]
+    else
+      _ -> nil
+    end
+  end
+
+  defp matched_controller(router, conn) do
+    path = Enum.map(conn.path_info, &URI.decode/1)
+    host = conn.host || "www.example.com"
+
+    case router.__match_route__(conn.method, path, host) do
+      {_metadata, _prepare, _pipeline, {plug, opts}} when is_atom(plug) and is_atom(opts) ->
+        {plug, opts}
 
       _ ->
         nil

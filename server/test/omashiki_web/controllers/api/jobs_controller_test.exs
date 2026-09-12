@@ -4,7 +4,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
   @moduletag :api
 
   alias Omashiki.Config
-  alias Omashiki.Jobs.{Admission, Job, JobAttempt, JobEvent}
+  alias Omashiki.Jobs.{Admission, Job, JobAttempt, JobEvent, WebhookDelivery, Webhooks}
   alias Omashiki.Repo
 
   import Ecto.Query
@@ -133,6 +133,27 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     assert body["code"] == "batch_too_large"
     assert_schema(body, "Problem", @api_spec)
     assert Repo.aggregate(Job, :count, :id) == 0
+  end
+
+  test "batch returns 409 when an idempotency key belongs to another token", %{
+    user: user,
+    token: token
+  } do
+    key = "batch-conflict-#{System.unique_integer([:positive])}"
+    {:ok, _, _} = Admission.admit_once(token, request(%{"idempotency_key" => key}))
+    {_other, plaintext} = api_token_fixture(user)
+    conn = json_conn() |> Plug.Conn.put_req_header("authorization", "Bearer #{plaintext}")
+
+    response =
+      post(conn, "/api/v1/jobs/batch", %{
+        correlation_id: "batch-conflict",
+        jobs: [batch_job("root") |> Map.put("idempotency_key", key)]
+      })
+
+    assert response.status == 409
+    body = json_response(response, 409)
+    assert body["code"] == "idempotency_conflict"
+    assert_schema(body, "Problem", @api_spec)
   end
 
   test "cancellation is idempotent and retry returns 202", %{
@@ -371,10 +392,40 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     assert missing.status == 404
     assert json_response(missing, 404)["code"] == "not_found"
     assert_schema(json_response(missing, 404), "Problem", @api_spec)
+  end
 
-    spec = OmashikiWeb.ApiSpec.spec() |> Jason.encode!() |> Jason.decode!()
+  test "redelivers a failed webhook delivery", %{conn: conn, token: token} do
+    assert {:ok, _} =
+             Webhooks.configure(token, %{
+               destination: "https://client.test/hook",
+               secret: "client-secret"
+             })
 
-    assert "404" in Map.keys(spec["paths"]["/api/v1/jobs/{id}/webhook-deliveries"]["get"]["responses"])
+    {:ok, _, job} = Admission.admit_once(token, request())
+    {:ok, attempt} = Omashiki.Jobs.claim(job, "api-redeliver")
+
+    assert {:ok, _} =
+             Omashiki.Jobs.complete(attempt, attempt.lease_token, "succeeded", %{
+               result: %{"ok" => true},
+               branch: "jobs/webhook",
+               base_sha: String.duplicate("a", 40),
+               head_sha: String.duplicate("b", 40),
+               worktree_clean: true
+             })
+
+    delivery =
+      Repo.one!(from(d in WebhookDelivery, order_by: [desc: d.inserted_at], limit: 1))
+
+    delivery
+    |> WebhookDelivery.changeset(%{status: "failed"})
+    |> Repo.update!()
+
+    response =
+      post(conn, "/api/v1/jobs/#{job.id}/webhook-deliveries/#{delivery.id}/redeliver", %{})
+
+    assert response.status == 202
+    assert json_response(response, 202)["data"] |> List.first() |> Map.get("status") == "pending"
+    assert_schema(json_response(response, 202), "WebhookDeliveryListResponse", @api_spec)
   end
 
   test "event history matches JobEventListResponse", %{conn: conn, user: user, token: token} do

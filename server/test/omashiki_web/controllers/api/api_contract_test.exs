@@ -56,7 +56,45 @@ defmodule OmashikiWeb.Api.ApiContractTest do
     assert "429" in Map.keys(spec["paths"]["/api/v1/jobs/{id}/retry"]["post"]["responses"])
     assert "429" in Map.keys(spec["paths"]["/api/v1/jobs/{id}/result"]["get"]["responses"])
     assert "503" in Map.keys(jobs["post"]["responses"])
-    assert "404" in Map.keys(spec["paths"]["/api/v1/jobs/{id}/webhook-deliveries"]["get"]["responses"])
+    assert "409" in Map.keys(spec["paths"]["/api/v1/jobs/batch"]["post"]["responses"])
+
+    assert "404" in Map.keys(
+             spec["paths"]["/api/v1/jobs/{id}/webhook-deliveries"]["get"]["responses"]
+           )
+  end
+
+  test "pipeline plugs check the matched operation before the controller runs" do
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> Map.put(:method, "GET")
+      |> Map.put(:path_info, ["api", "v1", "jobs"])
+      |> Plug.Conn.put_private(:phoenix_router, OmashikiWeb.Router)
+      |> OpenApiSpex.Plug.PutApiSpec.call(OmashikiWeb.ApiSpec)
+
+    refute conn.private[:phoenix_controller]
+
+    assert_raise ArgumentError, ~r/undeclared problem status 404/, fn ->
+      Problem.send(conn, "not_found")
+    end
+  end
+
+  test "pipeline 401 and unmatched API 404 are Problem documents" do
+    spec = OmashikiWeb.ApiSpec.spec()
+
+    missing = Phoenix.ConnTest.build_conn() |> get("/api/v1/jobs")
+    assert missing.status == 401
+    assert json_response(missing, 401)["code"] == "missing_token"
+    assert_schema(json_response(missing, 401), "Problem", spec)
+
+    unknown =
+      Phoenix.ConnTest.build_conn()
+      |> Plug.Conn.put_req_header("accept", "application/json")
+      |> get("/api/v1/this-route-does-not-exist")
+
+    assert unknown.status == 404
+    body = json_response(unknown, 404)
+    assert body["code"] == "not_found"
+    assert_schema(body, "Problem", spec)
   end
 
   test "undeclared problem status raises against the served operation" do
