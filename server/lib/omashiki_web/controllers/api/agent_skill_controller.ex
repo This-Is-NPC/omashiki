@@ -1,13 +1,11 @@
 defmodule OmashikiWeb.Api.AgentSkillController do
   use OmashikiWeb.Api.Controller
 
-  @skill_path Path.expand("../../../../../.agents/skills/omashiki/SKILL.md", __DIR__)
-  @external_resource @skill_path
-  @skill File.read!(@skill_path)
+  @skill_path "priv/agent_skill/SKILL.md"
 
-  tags ["meta"]
+  tags(["meta"])
 
-  operation :show,
+  operation(:show,
     summary: "Agent skill document",
     security: [],
     responses: %{
@@ -15,14 +13,20 @@ defmodule OmashikiWeb.Api.AgentSkillController do
         {"Skill", "text/markdown",
          %OpenApiSpex.Schema{type: :string, description: "SKILL.md contents"}}
     }
+  )
 
   def show(conn, _params) do
     base = base_url(conn)
-    body = String.replace(@skill, "{{OMASHIKI_URL}}", base)
+    body = String.replace(skill_document(), "{{OMASHIKI_URL}}", base)
 
     conn
     |> put_resp_content_type("text/markdown")
     |> send_resp(200, body)
+  end
+
+  defp skill_document do
+    Application.app_dir(:omashiki, @skill_path)
+    |> File.read!()
   end
 
   defp base_url(conn) do
