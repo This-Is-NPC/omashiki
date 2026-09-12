@@ -5,6 +5,7 @@ defmodule Omashiki.Worker.Poller do
 
   require Logger
 
+  alias Omashiki.Jobs.AttemptResult
   alias Omashiki.Runtime.ContainerTracker
   alias Omashiki.Worker.{Client, Complete, Execution, Managers, Offer, Slots}
 
@@ -199,7 +200,7 @@ defmodule Omashiki.Worker.Poller do
         %Complete{
           kind: :error,
           code: "executor_failed",
-          message: Exception.format(:error, reason, [])
+          message: format_complete_error(:error, reason)
         }
     end
   end
@@ -222,7 +223,8 @@ defmodule Omashiki.Worker.Poller do
     end
   end
 
-  defp run_complete(client, execution, payload) do
+  @doc false
+  def run_complete(client, execution, payload) do
     try do
       complete = materialize_complete(client, payload)
       {complete, Client.complete(client, execution, complete)}
@@ -248,8 +250,17 @@ defmodule Omashiki.Worker.Poller do
     %Complete{
       kind: :error,
       code: "complete_failed",
-      message: Exception.format(kind, reason, [])
+      message: format_complete_error(kind, reason)
     }
+  end
+
+  defp format_complete_error(kind, reason) do
+    formatted = Exception.format(kind, reason, [])
+
+    case AttemptResult.truncate_summary(formatted) do
+      nil -> "complete failed"
+      message -> message
+    end
   end
 
   defp handle_complete_result(state, attempt_id, complete, left, result) do
