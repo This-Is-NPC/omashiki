@@ -6,7 +6,7 @@ defmodule Omashiki.Jobs.OrderingTest do
 
   alias Omashiki.Config
   alias Omashiki.Jobs
-  alias Omashiki.Jobs.{Job, JobAttempt, JobEvent}
+  alias Omashiki.Jobs.{Admission, Job, JobAttempt, JobEvent}
   alias Omashiki.Repo
 
   setup do
@@ -207,7 +207,7 @@ defmodule Omashiki.Jobs.OrderingTest do
   end
 
   test "dispatch intent survives an Oban process restart", %{token: token} do
-    assert {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, single_request())
+    assert {:ok, _, job} = Admission.admit_once(token, single_request())
     dispatch = Repo.one!(from(j in Oban.Job, where: j.worker == "Omashiki.Jobs.DispatchWorker"))
 
     assert :ok = Supervisor.terminate_child(Omashiki.Supervisor, Oban)

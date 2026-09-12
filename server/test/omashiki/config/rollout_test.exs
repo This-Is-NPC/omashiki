@@ -86,7 +86,7 @@ defmodule Omashiki.Config.RolloutTest do
       assert Config.generation() == generation
 
       set_counter(counter, 0)
-      assert eventually(fn -> Rollout.admission_open?(rollout) end)
+      Omashiki.Await.until(fn -> Rollout.admission_open?(rollout) end)
 
       assert Config.generation() == generation + 1
       assert {:ok, resolved} = Config.resolve_job("app", "opencode")
@@ -105,7 +105,7 @@ defmodule Omashiki.Config.RolloutTest do
       write(ctx, model: "new-model", reload: ~s(mode = "drain_all"\ndrain_timeout_ms = 30\n))
 
       assert {:ok, :draining} = Rollout.reload(rollout)
-      assert eventually(fn -> Rollout.admission_open?(rollout) end)
+      Omashiki.Await.until(fn -> Rollout.admission_open?(rollout) end)
 
       assert Config.generation() == generation
       assert {:ok, resolved} = Config.resolve_job("app", "opencode")
@@ -154,17 +154,6 @@ defmodule Omashiki.Config.RolloutTest do
   defp counter_fun(agent), do: fn -> Agent.get(agent, & &1) end
 
   defp set_counter(agent, value), do: Agent.update(agent, fn _ -> value end)
-
-  defp eventually(fun, attempts \\ 200) do
-    Enum.reduce_while(1..attempts, false, fn _i, _acc ->
-      if fun.() do
-        {:halt, true}
-      else
-        Process.sleep(10)
-        {:cont, false}
-      end
-    end)
-  end
 
   defp write(ctx, opts) do
     model = Keyword.fetch!(opts, :model)

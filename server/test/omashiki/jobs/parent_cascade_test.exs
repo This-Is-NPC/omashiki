@@ -3,7 +3,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
 
   alias Omashiki.Config
   alias Omashiki.Jobs
-  alias Omashiki.Jobs.{Job, JobAttempt}
+  alias Omashiki.Jobs.{Admission, Job, JobAttempt}
   alias Omashiki.Repo
 
   setup do
@@ -62,7 +62,9 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
       ]
     }
 
-    assert {:error, {:validation, errors}} = Omashiki.Jobs.Admission.admit_batch_once(token, batch)
+    assert {:error, {:validation, errors}} =
+             Omashiki.Jobs.Admission.admit_batch_once(token, batch)
+
     assert Enum.any?(errors, &(&1.field == "jobs.depends_on" and &1.code == "cycle"))
   end
 
@@ -144,7 +146,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
     parent_sha = commit_file!(repo_path, "parent.txt", "parent\n")
 
     assert {:ok, _, parent} =
-             Omashiki.Jobs.Admission.admit_once(
+             Admission.admit_once(
                token,
                single_job("parent-root", %{"branch" => "feat-parent"})
              )
@@ -152,7 +154,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
     succeed_job!(parent, head_sha: parent_sha)
 
     assert {:ok, _, child} =
-             Omashiki.Jobs.Admission.admit_once(
+             Admission.admit_once(
                token,
                single_job("child-root", %{"branch" => "feat-child"}, [
                  %{"id" => parent.id}
@@ -177,7 +179,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
     parent_sha = commit_file!(repo_path, "parent-default.txt", "parent\n")
 
     assert {:ok, _, parent} =
-             Omashiki.Jobs.Admission.admit_once(
+             Admission.admit_once(
                token,
                single_job("parent-default", %{"branch" => "feat-parent-default"})
              )
@@ -185,7 +187,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
     succeed_job!(parent, head_sha: parent_sha)
 
     assert {:ok, _, child} =
-             Omashiki.Jobs.Admission.admit_once(
+             Admission.admit_once(
                token,
                single_job("child-default", %{"branch" => "feat-child-default"}, [
                  %{"id" => parent.id}

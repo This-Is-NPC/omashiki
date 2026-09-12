@@ -140,7 +140,7 @@ defmodule Omashiki.Runtimes.CacheGcTest do
     assert {:ok, _lease} = CacheMaintenance.acquire([group], owner_pid, server)
     assert CacheMaintenance.active?("global", server)
     Process.exit(owner_pid, :kill)
-    eventually(fn -> not CacheMaintenance.active?("global", server) end)
+    Omashiki.Await.until(fn -> not CacheMaintenance.active?("global", server) end, 200)
   end
 
   test "classifies empty groups as cold and populated groups as warm", ctx do
@@ -165,18 +165,6 @@ defmodule Omashiki.Runtimes.CacheGcTest do
 
   defp group(host, attrs \\ []) do
     struct!(%CacheGroup{name: "global", host: host}, attrs)
-  end
-
-  defp eventually(fun, attempts \\ 20)
-  defp eventually(fun, 0), do: assert(fun.())
-
-  defp eventually(fun, attempts) do
-    if fun.() do
-      :ok
-    else
-      Process.sleep(10)
-      eventually(fun, attempts - 1)
-    end
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)

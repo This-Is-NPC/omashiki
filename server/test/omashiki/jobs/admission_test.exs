@@ -231,7 +231,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
     assert Repo.aggregate(Job, :count, :id) == 0
 
     set_fleet(0)
-    assert eventually(fn -> Rollout.admission_open?() end)
+    Omashiki.Await.until(fn -> Rollout.admission_open?() end)
     assert {:ok, _, %Job{}} = Admission.admit_once(token, single_request())
   end
 
@@ -277,17 +277,6 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
   defp set_fleet(n), do: :persistent_term.put({__MODULE__, :fleet}, n)
 
-  defp eventually(fun, attempts \\ 200) do
-    Enum.reduce_while(1..attempts, false, fn _i, _acc ->
-      if fun.() do
-        {:halt, true}
-      else
-        Process.sleep(10)
-        {:cont, false}
-      end
-    end)
-  end
-
   test "rejects oversized submissions without writes", %{token: token} do
     assert {:error, :unknown_repository} =
              Admission.admit_once(token, Map.put(single_request(), "repo", "missing"))
@@ -332,7 +321,10 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
   test "accepts exactly 1 MiB of encoded payload and rejects the next byte", %{token: token} do
     exact = %{"instruction" => String.duplicate("x", 128), "branch" => "feat-exact"}
-    assert {:ok, _, job} = Admission.admit_once(token, Map.put(single_request(), "payload", exact))
+
+    assert {:ok, _, job} =
+             Admission.admit_once(token, Map.put(single_request(), "payload", exact))
+
     assert job.payload == exact
 
     oversized = %{
