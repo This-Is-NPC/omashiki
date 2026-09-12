@@ -26,8 +26,8 @@ For installation operation, use the [public documentation](../README.md).
 - [Job lifecycle](job-lifecycle.md): admission, dependencies, attempts, results, and recovery.
 - [Distributed execution](distributed-execution.md): worker protocol, leases, slots, and result delivery.
 - [Kata runtime](runtime-kata.md): installation implementation and compatibility checks.
-- [Design decisions](design-decisions.md): accepted choices and deferred proposals.
-- [Validation results](validation-results.md): dated measurements and evidence limits.
+- [Design decisions](design-decisions.md): accepted choices and deferred work.
+- [Validation results](validation-results.md): verification paths and evidence limits.
 
 ## Documentation ownership
 

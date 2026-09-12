@@ -65,7 +65,8 @@ Then inspect the result before you permit write operations.
 
 The house keeps the App key and installation token.
 The worker receives the identity name and public IDs.
-If the identity declaration changes to a different App, the broker refuses the old job's request.
+The broker authorizes the admitted identity snapshot.
+It refuses a request that does not match that snapshot.
 
 The repository tests use a simulated GitHub service.
 They do not prove that your real App permissions are correct.

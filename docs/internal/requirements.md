@@ -1,7 +1,7 @@
 # Requirements
 
 These requirements describe the implemented product boundary.
-Known evidence gaps are listed in [validation results](validation-results.md) and [user limitations](../what-does-not-work.md).
+Current evidence limits are listed in [validation results](validation-results.md) and [user limitations](../what-does-not-work.md).
 
 ## Product scope
 

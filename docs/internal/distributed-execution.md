@@ -104,5 +104,3 @@ A loopback manager URL is unsuitable for remote or separate-container access.
 `e2e:two-houses` checks shared slots, separate results, and independent manager recovery.
 VM tests check the distributed runtime in disposable machines.
 See [the distributed test procedure](how-to-run-distributed-tests.md).
-
-The six-phase fleet implementation record is consolidated in [design decisions](design-decisions.md).

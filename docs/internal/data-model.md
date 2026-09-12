@@ -44,7 +44,6 @@ A non-Git job can have a null repository and repository snapshot.
 The environment and plugin snapshots remain required.
 Credential API keys and private identity keys do not belong in admitted snapshots.
 
-The current model uses `job_dependencies`, not `parent_job_id`.
 Each edge stores `job_id`, `depends_on_job_id`, `user_id`, and `on_failure`.
 The database checks ownership, uniqueness, and self-reference constraints.
 Admission also checks the dependency graph.
@@ -87,11 +86,9 @@ Delivery states are `pending`, `delivering`, `delivered`, `failed`, and `dead`.
 The usage ledger's stable request ID prevents duplicate accounting.
 A null token count means unknown. It is different from zero.
 
-## Migration history
+## Schema source
 
-The initial schema does not represent the complete current model.
-Later migrations add per-machine capacity, admitted plugin snapshots, non-Git results, and dependency edges.
-The [migration directory](../../server/priv/repo/migrations) is the complete schema history.
+The [migration directory](../../server/priv/repo/migrations) defines the schema.
 
 Source schemas: [job](../../server/lib/omashiki/jobs/job.ex),
 [dependency](../../server/lib/omashiki/jobs/job_dependency.ex),

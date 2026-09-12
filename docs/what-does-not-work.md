@@ -17,4 +17,4 @@ It does not describe proposed features as available behavior.
 | OAuth refresh does not update the original host credential file. | Renew authentication on the execution machine when the source expires. |
 | The browser exposes Home and configuration, without dedicated job pages. | Use the public API for job details, cancellation, retry, and events. |
 
-The [internal validation record](internal/validation-results.md) separates historical measurements from current checks.
+See [validation results](internal/validation-results.md) for current evidence limits.

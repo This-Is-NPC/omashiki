@@ -48,4 +48,4 @@ A checkout copy lives at [`.agents/skills/omashiki/SKILL.md`](../.agents/skills/
 
 ## Development
 
-The [internal documentation](internal/README.md) contains development setup, tests, architecture, requirements, and implementation records.
+The [internal documentation](internal/README.md) contains development setup, tests, architecture, requirements, and implementation references.

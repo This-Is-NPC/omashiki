@@ -74,10 +74,7 @@ Record admitted jobs, terminal jobs, failures, latency, and peak concurrency sep
 A queue that reaches terminal state does not prove that every job succeeded.
 Database pool exhaustion and Docker startup pressure can fail attempts during a burst.
 Do not use a sampled active count as a physical capacity guarantee.
-
-The historical 400-job run ended with 20 successes and 380 failures.
-It demonstrated terminal-state recovery after a crash, not a 400-job success rate.
-See [validation results](validation-results.md) for its exact conditions.
+See [validation results](validation-results.md) for current evidence limits.
 
 Stop the stub and test server after the run.
 Retain the report if it will support a performance claim.

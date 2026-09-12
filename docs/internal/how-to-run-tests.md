@@ -85,4 +85,4 @@ python .scripts/overture_e2e.py validate claude
 
 Use [distributed tests](how-to-run-distributed-tests.md) for manager and worker changes.
 Use [load tests](how-to-run-load-tests.md) for capacity and durability measurements.
-Record new results with their source revision in [validation results](validation-results.md).
+Record the date, source revision, command, and result with each measurement.

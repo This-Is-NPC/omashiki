@@ -54,12 +54,14 @@ Describe the expected result and relevant failure action.
 
 Check vocabulary and meaning as well as sentence length.
 A word-count check alone does not establish STE conformity.
-Preserve diagrams, examples, and technical evidence during language edits.
+Preserve diagrams and examples during language edits.
+Describe the current product.
+Do not mention removed features, names, or contracts.
 
 ## Documentation review
 
 Check each local link after a file move.
 Check command names against `mise.toml` and `.mise/tasks`.
 Check API examples against the executable request contract.
-Keep historical measurements with their dates and source revisions.
-Do not describe an old test result as a new validation run.
+Record a measurement with its date and source revision.
+Do not present a past measurement as current product behavior.

@@ -1,8 +1,7 @@
 # Design decisions
 
-This page consolidates the previous product, plugin, task-processor, and fleet design records.
-Current behavior is described separately from deferred proposals.
-Historical source text remains in Git history.
+This page records accepted choices and deferred work.
+Use [architecture](architecture.md) for current component behavior.
 
 ## One admission boundary
 
@@ -33,26 +32,16 @@ They do not evaluate shell expressions.
 Output decoding remains explicit because tool formats differ.
 The `requires.binaries` check compares plugin needs with image and package contents.
 
-The earlier `CliJson` extraction reduced duplicated CLI mechanics.
-The historical cost measurement did not justify a manifest change by itself.
-The later declarative implementation also addressed admitted definitions and configuration validation.
-See [validation results](validation-results.md#harness-cost-record) for the measured counts.
-
 ## Explicit result sinks
 
 **Accepted.** `git`, `files`, and `none` select different preparation and publication paths.
 They share admission, attempt execution, events, cleanup, and terminal-state rules.
 Output validation remains a core responsibility.
-
-The earlier generic-task proposal used `result = "data"` and a workspace JSON result file.
-Those proposed names are not the current contract.
-The current non-Git paths use the `files` and `none` sinks.
-An arbitrary environment-specific JSON result schema is not a documented supported interface.
+An environment-specific JSON result schema is not a supported interface.
 
 ## Dependency graph
 
 **Accepted.** Jobs use directed dependency edges with explicit failure policy.
-The previous single `parent_job_id` model was removed by migration.
 Admission validates the graph before execution.
 This avoids a cycle that would otherwise remain blocked indefinitely.
 Dependency output can supply downstream workspace input and Git base selection.
@@ -64,28 +53,23 @@ The worker owns local slots and the Docker boundary.
 Workers receive offers over HTTP and return results to the offering house.
 One worker can enroll into several houses.
 The local slot limit applies to all those houses together.
-
-This replaces the requirement that every execution process share the house database.
-The embedded shared-database deployment remains an available deployment option.
+A worker does not connect to the house database.
+The embedded shared-database deployment remains an available option.
 The [distributed protocol](distributed-execution.md) is the implementation reference.
 
-## Fleet implementation record
+## Fleet and configuration
 
-The original six-phase house and fleet record reported completion on 2026-09-06.
-Its implemented outcomes are:
+**Accepted.** These configuration and fleet rules apply together.
 
-| Phase | Outcome |
+| Area | Rule |
 | --- | --- |
-| 1 | Root-only includes with confined paths, duplicate-name rejection, and stable combined digests. |
-| 2 | Worker-side `~/` expansion for host credential origins. |
-| 3 | House-declared GitHub App identities attached to presets. |
-| 4 | House-side identity broker with temporary job authorization. |
-| 5 | Reference handler for labelled GitHub issues and terminal notifications. |
-| 6 | Several houses sharing workers with separated mirrors, state, and results. |
-
-Fleet slot ownership and multi-manager isolation were dependencies of the final phase.
-The record retained two important gaps: simulated GitHub evidence and OpenCode-only identity configuration.
-These gaps remain visible in [user limitations](../what-does-not-work.md).
+| Registry includes | Root-only includes, confined paths, duplicate-name rejection, and a stable combined digest. |
+| Host credentials | The worker expands `~/` against its process home. |
+| Identities | House-declared GitHub App identities attach to presets. |
+| Identity broker | The house authorizes temporary job requests. |
+| Reference handler | It admits labelled GitHub issues and verifies terminal notifications. |
+| Shared workers | Several houses share workers. Mirrors, state, and results stay separated. |
+| Slots | One local slot limit applies across enrolled houses. |
 
 ## Credential ownership
 

@@ -239,7 +239,7 @@ Read [security and limits](docs/security-and-limits.md) and [known limitations](
 
 ## Development
 
-[The internal documentation](docs/internal/README.md) contains development setup, tests, architecture, requirements, and implementation records.
+[The internal documentation](docs/internal/README.md) contains development setup, tests, architecture, requirements, and implementation references.
 Start with [contributing](docs/internal/contributing.md).
 
 ## License
