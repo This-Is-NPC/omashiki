@@ -29,7 +29,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
 
   test "A and B must both succeed before C queues (A then B)", %{token: token} do
     assert {:ok, [{_, a}, {_, b}, {_, c}]} =
-             Omashiki.Jobs.Admission.admit_batch_once(token, diamond_batch())
+             Admission.admit_batch_once(token, diamond_batch())
 
     assert a.status == "queued"
     assert b.status == "queued"
@@ -44,7 +44,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
 
   test "A and B must both succeed before C queues (B then A)", %{token: token} do
     assert {:ok, [{_, a}, {_, b}, {_, c}]} =
-             Omashiki.Jobs.Admission.admit_batch_once(token, diamond_batch())
+             Admission.admit_batch_once(token, diamond_batch())
 
     succeed_job!(b)
     assert Repo.get!(Job, c.id).status == "blocked"
@@ -63,14 +63,14 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
     }
 
     assert {:error, {:validation, errors}} =
-             Omashiki.Jobs.Admission.admit_batch_once(token, batch)
+             Admission.admit_batch_once(token, batch)
 
     assert Enum.any?(errors, &(&1.field == "jobs.depends_on" and &1.code == "cycle"))
   end
 
   test "failed dependency with block edge keeps child blocked", %{token: token} do
     assert {:ok, [{_, a}, {_, c}]} =
-             Omashiki.Jobs.Admission.admit_batch_once(
+             Admission.admit_batch_once(
                token,
                %{
                  "correlation_id" => "block-edge",
@@ -88,7 +88,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
 
   test "failed dependency with cancel edge cancels child", %{token: token} do
     assert {:ok, [{_, a}, {_, c}]} =
-             Omashiki.Jobs.Admission.admit_batch_once(
+             Admission.admit_batch_once(
                token,
                %{
                  "correlation_id" => "cancel-edge",
@@ -109,7 +109,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
 
   test "failed dependency with proceed edge unblocks when remaining deps succeed", %{token: token} do
     assert {:ok, [{_, a}, {_, b}, {_, c}]} =
-             Omashiki.Jobs.Admission.admit_batch_once(
+             Admission.admit_batch_once(
                token,
                %{
                  "correlation_id" => "proceed-edge",
@@ -218,7 +218,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
     sha_b = commit_file!(repo_path, "b-default.txt", "b\n")
 
     assert {:ok, [{_, a}, {_, b}, {_, c}]} =
-             Omashiki.Jobs.Admission.admit_batch_once(
+             Admission.admit_batch_once(
                token,
                %{
                  "correlation_id" => "default-base-proceed",
@@ -250,7 +250,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
 
   test "a cancelled parent cascade-cancels blocked children with cancel edge", %{token: token} do
     assert {:ok, [{_, parent}, {_, child}]} =
-             Omashiki.Jobs.Admission.admit_batch_once(
+             Admission.admit_batch_once(
                token,
                %{
                  "correlation_id" => "parent-cancel",

@@ -111,16 +111,10 @@ defmodule Omashiki.ApiTokensTest do
   end
 
   defp drain_use_writes do
-    Enum.reduce_while(1..500, :timeout, fn _, _ ->
-      case Task.Supervisor.children(Omashiki.ApiTokens.TaskSupervisor) do
-        [] -> {:halt, :ok}
-        _ -> {:cont, Process.sleep(10)}
-      end
-    end)
-    |> case do
-      :ok -> :ok
-      :timeout -> flunk("last_used_at writes did not drain")
-    end
+    Omashiki.Await.until(
+      fn -> Task.Supervisor.children(Omashiki.ApiTokens.TaskSupervisor) == [] end,
+      5_000
+    )
   end
 
   defp token_attrs(extra \\ %{}) do

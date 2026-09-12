@@ -56,7 +56,7 @@ defmodule Omashiki.Jobs.OrderingTest do
 
   test "success queues direct children once in priority/FIFO order", %{token: token} do
     assert {:ok, [{_, root}, {_, first}, {_, second}, {_, third}]} =
-             Omashiki.Jobs.Admission.admit_batch_once(
+             Admission.admit_batch_once(
                token,
                batch_request([
                  {"root", [], 0},
@@ -116,7 +116,7 @@ defmodule Omashiki.Jobs.OrderingTest do
 
   test "failure and cancellation cascade-cancel blocked descendants", %{token: token} do
     assert {:ok, [{_, root}, {_, child}]} =
-             Omashiki.Jobs.Admission.admit_batch_once(
+             Admission.admit_batch_once(
                token,
                batch_request([{"root", [], 0}, {"child", [%{"ref" => "root"}], 0}])
              )
@@ -134,7 +134,7 @@ defmodule Omashiki.Jobs.OrderingTest do
     assert Repo.aggregate(Oban.Job, :count, :id) == 1
 
     assert {:ok, [{_, failed_root}, {_, failed_child}]} =
-             Omashiki.Jobs.Admission.admit_batch_once(
+             Admission.admit_batch_once(
                token,
                batch_request([
                  {"failed-root", [], 0},
@@ -155,7 +155,7 @@ defmodule Omashiki.Jobs.OrderingTest do
 
   test "retry success does not re-queue cascade-cancelled children", %{token: token} do
     assert {:ok, [{_, root}, {_, child}]} =
-             Omashiki.Jobs.Admission.admit_batch_once(
+             Admission.admit_batch_once(
                token,
                batch_request([{"root", [], 0}, {"child", [%{"ref" => "root"}], 0}])
              )
@@ -181,7 +181,7 @@ defmodule Omashiki.Jobs.OrderingTest do
 
   test "concurrent parent success has one unlock and one child dispatch", %{token: token} do
     assert {:ok, [{_, root}, {_, child}]} =
-             Omashiki.Jobs.Admission.admit_batch_once(
+             Admission.admit_batch_once(
                token,
                batch_request([{"root", [], 0}, {"child", [%{"ref" => "root"}], 0}])
              )
