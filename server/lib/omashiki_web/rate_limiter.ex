@@ -2,8 +2,14 @@ defmodule OmashikiWeb.RateLimiter do
   @moduledoc """
   Tiny ETS-based fixed-window rate limiter. Used by
   `Api.SessionsController.issue_token/2` to make brute-forcing the
-  credential exchange expensive. Only failed exchanges count, so a
-  successful login behind NAT is not locked out by a neighbour's budget.
+  credential exchange expensive.
+
+  Reservations are taken atomically before password hashing, so a
+  burst of connections cannot exceed `max`. A successful exchange
+  refunds its reservation and does not consume the window. Failures
+  keep the count. Once the budget is spent, further attempts — including
+  a correct password — are refused without hashing. Callers that share
+  an IP therefore share the budget.
 
   Not a replacement for Hammer in production deploys that need
   cluster-wide coordination — this is intentionally local + dependency-free.
@@ -14,6 +20,8 @@ defmodule OmashikiWeb.RateLimiter do
 
       RateLimiter.hit("issue_token", remote_ip, max: 10, per_ms: 60_000)
       # => {:ok, count} | {:error, :rate_limited}
+
+      RateLimiter.refund("issue_token", remote_ip, per_ms: 60_000)
   """
 
   @table __MODULE__
@@ -48,9 +56,33 @@ defmodule OmashikiWeb.RateLimiter do
     maybe_gc(scope, window)
 
     if n > max do
+      :ets.update_counter(@table, key, {2, -1})
       {:error, :rate_limited}
     else
       {:ok, n}
+    end
+  end
+
+  @doc """
+  Give back a reservation taken by `hit/3` in the same window.
+
+  Used when the work that reserved a slot succeeded and must not consume
+  the failure budget. Missing or rolled-over windows are a no-op.
+  """
+  def refund(scope, identifier, opts) when is_binary(scope) do
+    ensure_table()
+
+    per_ms = Keyword.fetch!(opts, :per_ms)
+    now = System.system_time(:millisecond)
+    window = div(now, per_ms)
+    key = {scope, identifier, window}
+
+    try do
+      n = :ets.update_counter(@table, key, {2, -1, 0, 0})
+      if n == 0, do: :ets.select_delete(@table, [{{key, 0}, [], [true]}])
+      :ok
+    rescue
+      ArgumentError -> :ok
     end
   end
 

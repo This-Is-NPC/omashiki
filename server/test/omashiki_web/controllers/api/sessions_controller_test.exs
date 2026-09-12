@@ -153,6 +153,27 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
     end
 
     @tag :unauthenticated
+    test "a parallel burst cannot exceed the failure budget", _ctx do
+      _ = user_fixture(%{username: "bob", password: "right-password-1"})
+      grants = token_grants(%{"username" => "bob", "password" => "wrong"})
+
+      results =
+        1..30
+        |> Task.async_stream(
+          fn _ ->
+            json_conn() |> post(~p"/api/v1/sessions/issue_token", grants)
+          end,
+          max_concurrency: 30,
+          timeout: 30_000
+        )
+        |> Enum.map(fn {:ok, response} -> response.status end)
+
+      assert Enum.count(results, &(&1 == 401)) == 10
+      assert Enum.count(results, &(&1 == 429)) == 20
+      assert Enum.all?(results, &(&1 in [401, 429]))
+    end
+
+    @tag :unauthenticated
     test "issue_token budget is per address, not typed identifier", %{conn: conn} do
       _ = user_fixture(%{username: "bob", password: "right-password-1"})
       _ = user_fixture(%{username: "ann", password: "right-password-2"})
@@ -234,6 +255,27 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
 
       assert with_port.status == 401
       assert Jason.decode!(with_port.resp_body)["code"] == "invalid_credentials"
+
+      ipv6_with_port =
+        conn
+        |> Plug.Conn.put_req_header("x-forwarded-for", "[::1]:5678")
+        |> post(
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+
+      assert ipv6_with_port.status == 401
+      assert Jason.decode!(ipv6_with_port.resp_body)["code"] == "invalid_credentials"
+
+      ipv6_junk =
+        conn
+        |> Plug.Conn.put_req_header("x-forwarded-for", "[::1]lixo")
+        |> post(
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+
+      assert ipv6_junk.status == 429
 
       spoofed =
         conn

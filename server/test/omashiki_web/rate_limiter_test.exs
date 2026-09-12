@@ -85,6 +85,18 @@ defmodule OmashikiWeb.RateLimiterTest do
     assert Enum.count(results, &match?({:error, :rate_limited}, &1)) == 30
   end
 
+  test "refund restores a reservation in the same window" do
+    opts = [max: 1, per_ms: 60_000]
+    assert {:ok, 1} = RateLimiter.hit("scope", "x", opts)
+    assert {:error, :rate_limited} = RateLimiter.hit("scope", "x", opts)
+    assert :ok = RateLimiter.refund("scope", "x", opts)
+    assert {:ok, 1} = RateLimiter.hit("scope", "x", opts)
+  end
+
+  test "refund is a no-op when the window has no bucket" do
+    assert :ok = RateLimiter.refund("scope", "missing", per_ms: 60_000)
+  end
+
   test "checkin removes a zeroed counter" do
     assert {:ok, 1} = RateLimiter.checkout("conc", "id", 2)
     RateLimiter.checkin("conc", "id")
