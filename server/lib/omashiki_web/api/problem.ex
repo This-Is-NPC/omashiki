@@ -418,6 +418,8 @@ defmodule OmashikiWeb.Api.Problem do
     end
   end
 
+  def request_id(nil), do: Logger.metadata()[:request_id]
+
   def request_id(conn) do
     conn
     |> get_resp_header("x-request-id")

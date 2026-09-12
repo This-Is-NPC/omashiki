@@ -158,14 +158,6 @@ defmodule Omashiki.ApiTokens do
 
   def find_presented_by_plaintext(_), do: {:error, :invalid_token}
 
-  @doc false
-  def find_active_by_plaintext(plaintext) do
-    case find_presented_by_plaintext(plaintext) do
-      {:ok, token} -> {:ok, token}
-      {:error, _} -> :error
-    end
-  end
-
   # Coarse on purpose. Every authenticated request used to issue an
   # unconditional UPDATE on this one row, so N concurrent requests carrying the
   # same token serialized on its row lock — each holding a pool connection while

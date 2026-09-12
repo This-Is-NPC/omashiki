@@ -201,7 +201,8 @@ defmodule OmashikiWeb.Api.JobsController do
     id = param(params, :id)
     actor = ApiConn.actor(conn)
 
-    with {:ok, %{after_sequence: after_sequence}} <- EventStream.prepare(id, actor, cursor(conn)),
+    with {:ok, %{after_sequence: after_sequence}} <-
+           EventStream.prepare(id, actor, ApiConn.last_event_id(conn)),
          {:ok, events} <-
            EventStream.fetch_events(id, after_sequence, page_size: event_limit(conn)) do
       json(conn, %{data: Enum.map(events, &EventStream.to_map/1)})
@@ -327,8 +328,6 @@ defmodule OmashikiWeb.Api.JobsController do
         100
     end
   end
-
-  defp cursor(conn), do: ApiConn.last_event_id(conn)
 
   defp job_json(%Job{} = job) do
     %{

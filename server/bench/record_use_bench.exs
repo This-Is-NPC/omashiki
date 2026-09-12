@@ -176,7 +176,7 @@ run_arm = fn arm ->
             # counted, not raised: under saturation, dropped requests ARE the
             # phenomenon under study.
             try do
-              ApiTokens.find_active_by_plaintext(plaintext)
+              ApiTokens.find_presented_by_plaintext(plaintext)
             rescue
               _ -> :counters.add(counter, 3, 1)
             catch

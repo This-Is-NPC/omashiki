@@ -389,7 +389,6 @@ defmodule Omashiki.Jobs.GitArtifact do
          head_sha: head_sha,
          worktree_clean: true,
          changes: changes,
-         compare_url: web_compare_url(remote, artifact.base_sha, head_sha),
          result: %{
            "job_id" => to_string(job.id),
            "remote" => remote,

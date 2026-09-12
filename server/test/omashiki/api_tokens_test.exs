@@ -10,7 +10,7 @@ defmodule Omashiki.ApiTokensTest do
     assert token.user_id == user.id
     assert token.token_hash == Hash.hmac(plaintext)
     refute Map.has_key?(Map.from_struct(token), :plaintext)
-    assert {:ok, found} = ApiTokens.find_active_by_plaintext(plaintext)
+    assert {:ok, found} = ApiTokens.find_presented_by_plaintext(plaintext)
     assert found.id == token.id
   end
 
@@ -52,7 +52,7 @@ defmodule Omashiki.ApiTokensTest do
 
     assert {:error, :not_found} = ApiTokens.revoke(other, token.id)
     assert {:ok, _} = ApiTokens.revoke(owner, token.id)
-    assert :error = ApiTokens.find_active_by_plaintext(plaintext)
+    assert {:error, :invalid_token} = ApiTokens.find_presented_by_plaintext(plaintext)
   end
 
   describe "record_use/1" do
