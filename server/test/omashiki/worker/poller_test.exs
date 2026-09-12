@@ -1,7 +1,8 @@
 defmodule Omashiki.Worker.PollerTest do
   use ExUnit.Case, async: false
 
-  alias Omashiki.Worker.{Complete, Offer, Poller, Slots}
+  alias Omashiki.Jobs.AttemptResult
+  alias Omashiki.Worker.{Client, Complete, Execution, Offer, Poller, Slots}
 
   import Omashiki.Await, only: [until: 1]
 
@@ -49,9 +50,68 @@ defmodule Omashiki.Worker.PollerTest do
       send(pid, {:complete_retry, "missing-attempt", %Complete{kind: :none}, 3})
       _ = :sys.get_state(pid)
       assert Process.alive?(pid)
+      refute_receive {:http_hit, _}
+    end
+  end
 
-      Process.sleep(50)
-      refute_receive {:http_hit, _}, 50
+  describe "run_complete/3" do
+    defmodule RaisingMint do
+      def connect(_scheme, _host, _port, _opts), do: raise("mint down")
+    end
+
+    defmodule AcceptMint do
+      def connect(_scheme, _host, _port, _opts), do: {:ok, :conn}
+
+      def request(conn, _method, _path, _headers, _body), do: {:ok, conn, :ref}
+
+      def recv(_conn, 0, _timeout),
+        do: {:ok, :conn, [{:status, :ref, 204}, {:headers, :ref, []}, {:done, :ref}]}
+
+      def close(_conn), do: :ok
+    end
+
+    test "a nested complete crash still returns complete_failed" do
+      client = Client.new("http://127.0.0.1:1", "token", mint_mod: RaisingMint)
+
+      execution = %Execution{
+        job_id: "job",
+        attempt_id: "attempt",
+        lease_token: "lease",
+        sink: "git"
+      }
+
+      ready = %Complete{
+        kind: :git,
+        remote: "https://example.com/repo.git",
+        branch: "main",
+        base_sha: "abc",
+        head_sha: "def"
+      }
+
+      {complete, result} = Poller.run_complete(client, execution, {:ready, ready})
+      assert complete.kind == :error
+      assert complete.code == "complete_failed"
+      assert match?({:error, {:error, _}}, result)
+      assert byte_size(complete.message) <= AttemptResult.max_summary_bytes()
+    end
+
+    test "complete error messages stay inside the summary budget" do
+      client = Client.new("http://127.0.0.1:1", "token", mint_mod: AcceptMint)
+
+      execution = %Execution{
+        job_id: "job",
+        attempt_id: "attempt",
+        lease_token: "lease",
+        sink: "git"
+      }
+
+      offer = %Offer{job_id: "job", attempt_id: "attempt", sink: "git"}
+      huge = {:error, String.duplicate("x", 20_000)}
+
+      {complete, :ok} = Poller.run_complete(client, execution, {:build, offer, huge})
+      assert complete.code == "executor_failed"
+      assert byte_size(complete.message) <= AttemptResult.max_summary_bytes()
+      assert complete.message =~ "x"
     end
   end
 
