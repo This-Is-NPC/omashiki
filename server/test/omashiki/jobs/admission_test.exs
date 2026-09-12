@@ -354,20 +354,14 @@ defmodule Omashiki.Jobs.AdmissionTest do
   end
 
   test "duplicate idempotency returns the original without side effects", %{token: token} do
-    assert {:ok, original} = Admission.admit(token, single_request())
-    assert {:ok, duplicate} = Admission.admit(token, single_request())
+    assert {:ok, :created, original} = Admission.admit_once(token, single_request())
+    assert {:ok, :existing, duplicate} = Admission.admit_once(token, single_request())
     assert duplicate.id == original.id
 
     assert Repo.aggregate(from(e in JobEvent, where: e.job_id == ^original.id), :count, :event_id) ==
              1
 
     assert Repo.aggregate(Oban.Job, :count, :id) == 1
-  end
-
-  test "admit_once distinguishes created rows from idempotent replays", %{token: token} do
-    assert {:ok, :created, original} = Admission.admit_once(token, single_request())
-    assert {:ok, :existing, duplicate} = Admission.admit_once(token, single_request())
-    assert duplicate.id == original.id
   end
 
   test "same-owner tokens cannot reuse another token's idempotency key", %{token: token} do

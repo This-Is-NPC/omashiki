@@ -264,7 +264,15 @@ defmodule Omashiki.Jobs.Admission do
   @doc false
   def enforce_token_active_limit!(token_id, incoming)
       when is_binary(token_id) and is_integer(incoming) and incoming >= 0 do
-    locked = lock_token!(token_id)
+    lock_token!(token_id)
+    reject_over_capacity!(token_id, incoming)
+  end
+
+  @doc false
+  def reject_over_capacity!(token_id, incoming)
+      when is_binary(token_id) and is_integer(incoming) and incoming >= 0 do
+    locked = Repo.get(Token, token_id)
+    if is_nil(locked), do: Repo.rollback(:unauthorized)
 
     terminal = Statuses.terminal()
 

@@ -8,7 +8,6 @@ defmodule Omashiki.Worker.Complete do
   import Ecto.Query
 
   alias Omashiki.Jobs.{Job, JobAttempt, Statuses}
-  alias Omashiki.Jobs.AttemptResult
   alias Omashiki.Repo
 
   @terminal Statuses.terminal()
@@ -124,9 +123,9 @@ defmodule Omashiki.Worker.Complete do
        branch: map["branch"],
        base_sha: map["base_sha"],
        head_sha: map["head_sha"],
-       summary: AttemptResult.truncate_summary(Map.get(map, "summary")),
-       changes: AttemptResult.sanitize_changes(Map.get(map, "changes")),
-       compare_url: AttemptResult.sanitize_compare_url(Map.get(map, "compare_url"))
+       summary: Map.get(map, "summary"),
+       changes: Map.get(map, "changes"),
+       compare_url: Map.get(map, "compare_url")
      }}
   end
 

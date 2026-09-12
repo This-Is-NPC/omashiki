@@ -12,6 +12,7 @@ defmodule Omashiki.Jobs.Webhooks do
   alias Omashiki.Jobs.{Job, JobAttempt, JobEvent, WebhookDelivery, WebhookDeliveryWorker}
   alias Omashiki.Repo
   alias Omashiki.Security.Network
+  alias Omashiki.Tx
 
   @retry_window_seconds 24 * 60 * 60
   @max_timestamp_age_seconds 300
@@ -234,7 +235,7 @@ defmodule Omashiki.Jobs.Webhooks do
   defp requeue(%WebhookDelivery{} = delivery) do
     now = DateTime.utc_now(:microsecond)
 
-    Repo.transaction(fn ->
+    Tx.run(fn ->
       updated =
         update_delivery!(delivery, %{
           status: "pending",
@@ -274,7 +275,7 @@ defmodule Omashiki.Jobs.Webhooks do
   end
 
   defp persist_configuration(token, destination, secret, key_id) do
-    Repo.transaction(fn ->
+    Tx.run(fn ->
       persisted =
         from(t in Token, where: t.id == ^token.id, lock: "FOR UPDATE")
         |> Repo.one()
@@ -306,7 +307,7 @@ defmodule Omashiki.Jobs.Webhooks do
   end
 
   defp claim_delivery(id) do
-    Repo.transaction(fn ->
+    Tx.run(fn ->
       case from(d in WebhookDelivery, where: d.id == ^id, lock: "FOR UPDATE") |> Repo.one() do
         nil ->
           Repo.rollback(:not_found)
@@ -353,7 +354,7 @@ defmodule Omashiki.Jobs.Webhooks do
   defp finish_delivery(%WebhookDelivery{} = delivery, {:ok, status}) when status in 200..299 do
     now = DateTime.utc_now(:microsecond)
 
-    Repo.transaction(fn ->
+    Tx.run(fn ->
       current = locked_delivery!(delivery.id)
 
       update_delivery!(current, %{
@@ -379,7 +380,7 @@ defmodule Omashiki.Jobs.Webhooks do
     do: finish_failure(delivery, reason, nil)
 
   defp finish_failure(delivery, reason, response_status) do
-    Repo.transaction(fn ->
+    Tx.run(fn ->
       current = locked_delivery!(delivery.id)
       now = DateTime.utc_now(:microsecond)
       next = DateTime.add(now, backoff_seconds(current.attempts), :second)

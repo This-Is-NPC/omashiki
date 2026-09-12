@@ -29,7 +29,7 @@ defmodule Omashiki.Jobs.DispatchWorker do
   alias Omashiki.Worker.Offer
 
   @terminal Statuses.terminal()
-  @active ~w(provisioning running)
+  @active Statuses.active()
 
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}),

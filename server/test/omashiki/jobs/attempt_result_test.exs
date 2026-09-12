@@ -9,6 +9,12 @@ defmodule Omashiki.Jobs.AttemptResultTest do
            |> byte_size() == 4_096
   end
 
+  test "truncates summary by bytes and keeps valid UTF-8" do
+    truncated = AttemptResult.truncate_summary(String.duplicate("🙂", 2_000))
+    assert byte_size(truncated) <= AttemptResult.max_summary_bytes()
+    assert String.valid?(truncated)
+  end
+
   test "drops malformed change lists" do
     assert AttemptResult.sanitize_changes(%{"files" => ["hello.py"]}) == nil
     assert AttemptResult.sanitize_changes("nope") == nil
@@ -28,14 +34,17 @@ defmodule Omashiki.Jobs.AttemptResultTest do
            }
   end
 
-  test "rejects javascript compare URLs" do
-    assert AttemptResult.sanitize_compare_url("javascript:alert(1)") == nil
-    assert AttemptResult.sanitize_compare_url("http://evil.example/compare/a...b") == nil
-  end
+  test "does not persist a worker compare URL without an admitted remote" do
+    job = %Job{admitted_repository: %{"name" => "local"}}
+    base = String.duplicate("a", 40)
+    head = String.duplicate("b", 40)
 
-  test "accepts GitHub HTTPS compare URLs" do
-    url = "https://github.com/acme/repo/compare/a...b"
-    assert AttemptResult.sanitize_compare_url(url) == url
+    assert AttemptResult.resolve_compare_url(
+             job,
+             base,
+             head,
+             "https://github.com/evil/repo/compare/#{base}...#{head}"
+           ) == nil
   end
 
   test "recomputes compare_url from the admitted remote" do

@@ -112,6 +112,8 @@ defmodule Omashiki.Runtime.LeaseRenewer do
     %{state | tracked: Map.new(kept)}
   end
 
+  defp log_failure(%DBConnection.OwnershipError{}), do: :ok
+
   defp log_failure(reason) do
     Logger.warning("[LeaseRenewer] batch renewal failed: #{inspect(reason)}")
   end

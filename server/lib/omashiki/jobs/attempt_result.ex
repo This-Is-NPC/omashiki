@@ -1,15 +1,25 @@
 defmodule Omashiki.Jobs.AttemptResult do
   @moduledoc false
 
-  alias Omashiki.Jobs.{GitArtifact, Job, Statuses}
+  require Logger
 
+  alias Omashiki.Jobs.{GitArtifact, Job}
+
+  @max_summary_bytes 4_096
   @max_change_files 1_000
   @max_path_bytes 4_096
-  @max_compare_url_bytes 2_048
   @max_stat 1_000_000_000
 
+  def max_summary_bytes, do: @max_summary_bytes
+
   def truncate_summary(text) when is_binary(text) do
-    text |> String.trim() |> String.slice(0, Statuses.max_summary_bytes())
+    text = String.trim(text)
+
+    cond do
+      text == "" -> nil
+      byte_size(text) <= @max_summary_bytes -> text
+      true -> binary_prefix(text, @max_summary_bytes)
+    end
   end
 
   def truncate_summary(_), do: nil
@@ -27,30 +37,20 @@ defmodule Omashiki.Jobs.AttemptResult do
         }
 
       :error ->
+        Logger.warning("dropping malformed job change list")
         nil
     end
   end
 
-  def sanitize_changes(_), do: nil
+  def sanitize_changes(nil), do: nil
 
-  def sanitize_compare_url(url)
-      when is_binary(url) and byte_size(url) <= @max_compare_url_bytes do
-    uri = URI.parse(url)
-
-    if uri.scheme == "https" and is_nil(uri.userinfo) and
-         uri.host in ["github.com", "gitlab.com"] and
-         is_binary(uri.path) and String.contains?(uri.path, "/compare/") do
-      url
-    else
-      nil
-    end
+  def sanitize_changes(other) do
+    Logger.warning("dropping malformed job changes: #{inspect(other)}")
+    nil
   end
 
-  def sanitize_compare_url(_), do: nil
-
-  def resolve_compare_url(%Job{} = job, base_sha, head_sha, worker_url) do
-    GitArtifact.web_compare_url(admitted_remote(job), base_sha, head_sha) ||
-      sanitize_compare_url(worker_url)
+  def resolve_compare_url(%Job{} = job, base_sha, head_sha, _worker_url \\ nil) do
+    GitArtifact.web_compare_url(admitted_remote(job), base_sha, head_sha)
   end
 
   defp admitted_remote(%Job{admitted_repository: %{"remote" => remote}})
@@ -61,6 +61,16 @@ defmodule Omashiki.Jobs.AttemptResult do
     do: remote
 
   defp admitted_remote(_), do: nil
+
+  defp binary_prefix(text, max) do
+    part = binary_part(text, 0, max)
+
+    case :unicode.characters_to_binary(part) do
+      valid when is_binary(valid) -> valid
+      {:incomplete, good, _rest} -> good
+      {:error, good, _rest} -> good
+    end
+  end
 
   defp sanitize_file_list(files) when is_list(files) and length(files) <= @max_change_files do
     files

@@ -24,7 +24,7 @@ defmodule Omashiki.Jobs do
   alias Omashiki.Tx
 
   @terminal Statuses.terminal()
-  @active ~w(provisioning running)
+  @active Statuses.active()
   @transitions %{
     "blocked" => ~w(cancelled),
     "queued" => ~w(provisioning cancelled),
@@ -72,7 +72,7 @@ defmodule Omashiki.Jobs do
          true <- runner_id != "" do
       lease_ms = Keyword.get(opts, :lease_ms, @default_lease_ms)
 
-      Repo.transaction(fn ->
+      Tx.run(fn ->
         now = now()
 
         # Stale-lease reclamation belongs to `Jobs.Recovery` alone. Running it
@@ -109,7 +109,7 @@ defmodule Omashiki.Jobs do
       with true <- runner_id != "" do
         lease_ms = Keyword.get(opts, :lease_ms, @default_lease_ms)
 
-        Repo.transaction(fn ->
+        Tx.run(fn ->
           case next_queued_job() do
             nil -> :empty
             %Job{} = job -> claim_locked(job, runner_id, now(), lease_ms, opts)
@@ -135,7 +135,7 @@ defmodule Omashiki.Jobs do
          true <- lease_token != "" do
       lease_ms = Keyword.get(opts, :lease_ms, @default_lease_ms)
 
-      Repo.transaction(fn ->
+      Tx.run(fn ->
         now = now()
 
         case locked_attempt(attempt_id) do
@@ -161,7 +161,7 @@ defmodule Omashiki.Jobs do
   def unclaim(attempt_or_id, lease_token) when is_binary(lease_token) do
     with {:ok, attempt_id} <- attempt_id(attempt_or_id),
          true <- lease_token != "" do
-      Repo.transaction(fn ->
+      Tx.run(fn ->
         now = now()
 
         case locked_attempt_with_job(attempt_id) do
@@ -215,7 +215,7 @@ defmodule Omashiki.Jobs do
   @doc "Advance a claimed provisioning attempt to running without changing its fence."
   def mark_running(attempt_or_id, lease_token) when is_binary(lease_token) do
     with {:ok, attempt_id} <- attempt_id(attempt_or_id) do
-      Repo.transaction(fn ->
+      Tx.run(fn ->
         now = now()
 
         case locked_attempt_with_job(attempt_id) do
@@ -252,7 +252,7 @@ defmodule Omashiki.Jobs do
     with {:ok, attempt_id} <- attempt_id(attempt_or_id),
          status <- normalize_status(status),
          :ok <- valid_terminal(status) do
-      Repo.transaction(fn ->
+      Tx.run(fn ->
         now = now()
 
         case locked_attempt_with_job(attempt_id) do
@@ -329,7 +329,7 @@ defmodule Omashiki.Jobs do
   def recover_stale(at \\ nil) do
     at = at || now()
 
-    Repo.transaction(fn -> recover_stale_locked(at) end)
+    Tx.run(fn -> recover_stale_locked(at) end)
     |> normalize_transaction_result()
   end
 
@@ -360,7 +360,7 @@ defmodule Omashiki.Jobs do
   def recover_orphaned_dispatches(at \\ nil) do
     at = at || now()
 
-    Repo.transaction(fn -> recover_orphaned_locked(at) end)
+    Tx.run(fn -> recover_orphaned_locked(at) end)
     |> normalize_transaction_result()
   end
 
@@ -739,7 +739,7 @@ defmodule Omashiki.Jobs do
   defp apply_transition(%Job{} = job, "queued", %{retry: true}) do
     if Statuses.retry_allowed?(job.status) do
       if is_binary(job.api_token_id) do
-        Admission.enforce_token_active_limit!(job.api_token_id, 1)
+        Admission.reject_over_capacity!(job.api_token_id, 1)
       end
 
       now = now()
@@ -1159,7 +1159,6 @@ defmodule Omashiki.Jobs do
   end
 
   defp normalize_transaction_result({:ok, value}), do: {:ok, value}
-  defp normalize_transaction_result({:error, :busy}), do: {:error, :busy}
   defp normalize_transaction_result({:error, reason}), do: {:error, reason}
 
   @doc """
