@@ -31,6 +31,7 @@ case System.get_env("OMASHIKI_ROLE") do
     config :omashiki, :boot_role, :worker
     config :omashiki, :worker_executor, Omashiki.Worker.Snapshot
     config :omashiki, OmashikiWeb.Endpoint, server: false
+
   other ->
     raise "OMASHIKI_ROLE must be embedded, manager, or worker; got #{inspect(other)}"
 end
@@ -62,7 +63,8 @@ case System.get_env("OMASHIKI_MANAGERS") do
     end
 end
 
-config :omashiki, :enroll_port,
+config :omashiki,
+       :enroll_port,
        String.to_integer(System.get_env("OMASHIKI_ENROLL_PORT") || "4012")
 
 config :omashiki, :enroll_secret, System.get_env("OMASHIKI_ENROLL_SECRET")
@@ -87,8 +89,6 @@ case System.get_env("OMASHIKI_WORKER_CONFIG") do
       end
     end
 end
-
-
 
 if path = System.get_env("OMASHIKI_LLM_EGRESS_SOCKET_PATH") do
   if Path.type(path) != :absolute,
@@ -151,11 +151,13 @@ if config_env() == :prod do
         You can generate one by calling: mix phx.gen.secret
         """
 
+    idle_ms = Application.get_env(:omashiki, :http_idle_timeout_ms, 90_000)
+
     config :omashiki, OmashikiWeb.Endpoint,
       http: [
         ip: {0, 0, 0, 0, 0, 0, 0, 0},
         port: String.to_integer(System.get_env("PORT") || "4000"),
-        http_options: [idle_timeout: 90_000]
+        thousand_island_options: [read_timeout: idle_ms]
       ],
       secret_key_base: secret_key_base,
       server: true
@@ -174,7 +176,6 @@ if config_env() == :prod do
       server: false
   end
 end
-
 
 # ---------------------------------------------------------------------------
 # omashiki.toml — local configuration file at the repo root.
@@ -242,11 +243,13 @@ if File.exists?(omashiki_toml) and config_env() != :test do
         end
     end
 
+  idle_ms = Application.get_env(:omashiki, :http_idle_timeout_ms, 90_000)
+
   http_opts =
     []
     |> then(&if(http_port, do: [{:port, http_port} | &1], else: &1))
     |> then(&if(http_ip, do: [{:ip, http_ip} | &1], else: &1))
-    |> Keyword.put(:http_options, idle_timeout: 90_000)
+    |> Keyword.put(:thousand_island_options, read_timeout: idle_ms)
 
   if http_opts != [] do
     existing = Application.get_env(:omashiki, OmashikiWeb.Endpoint, [])[:http] || []
@@ -263,7 +266,9 @@ if File.exists?(omashiki_toml) and config_env() != :test do
   end
 
   case get.("auth", "token_max_ttl_days") do
-    nil -> :ok
+    nil ->
+      :ok
+
     days when is_integer(days) and days >= 1 and days <= 365 ->
       config(:omashiki, :token_max_ttl_days, days)
 
@@ -272,7 +277,9 @@ if File.exists?(omashiki_toml) and config_env() != :test do
   end
 
   case get.("auth", "token_audit_retention_days") do
-    nil -> :ok
+    nil ->
+      :ok
+
     days when is_integer(days) and days >= 1 ->
       config(:omashiki, :token_audit_retention_days, days)
 

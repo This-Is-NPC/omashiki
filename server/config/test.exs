@@ -33,7 +33,7 @@ config :omashiki, OmashikiWeb.Endpoint,
   http: [
     ip: if(real_provider_e2e?, do: {0, 0, 0, 0}, else: {127, 0, 0, 1}),
     port: 4002,
-    http_options: [idle_timeout: 90_000]
+    thousand_island_options: [read_timeout: 90_000]
   ],
   # Fixed on purpose so the suite is deterministic, and not a secret: production
   # takes SECRET_KEY_BASE from the environment. See config/dev.exs.
