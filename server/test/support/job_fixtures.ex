@@ -1,4 +1,6 @@
 defmodule Omashiki.JobFixtures do
+  import Omashiki.Jobs.Statuses, only: [is_unsuccessful: 1]
+
   alias Omashiki.Jobs.{Job, JobAttempt, Statuses}
   alias Omashiki.Repo
 
@@ -37,7 +39,7 @@ defmodule Omashiki.JobFixtures do
           started_at: if(status in ~w(provisioning running succeeded failed), do: now),
           finished_at: if(Statuses.terminal?(status), do: now),
           terminal_result: if(status == "succeeded", do: %{"ok" => true}),
-          terminal_error: if(status in ~w(failed cancelled), do: %{"code" => status})
+          terminal_error: if(is_unsuccessful(status), do: %{"code" => status})
         },
         attrs
       )
@@ -50,7 +52,7 @@ defmodule Omashiki.JobFixtures do
       status: status,
       finished_at: if(Statuses.terminal?(status), do: now),
       result: if(status == "succeeded", do: %{"ok" => true}),
-      error: if(status in ~w(failed cancelled), do: %{"code" => status}),
+      error: if(is_unsuccessful(status), do: %{"code" => status}),
       started_at: if(status in ~w(provisioning running succeeded failed), do: now),
       lease_token: if(Statuses.active?(status), do: "fixture-lease"),
       lease_expires_at: if(Statuses.active?(status), do: DateTime.add(now, 60, :second)),

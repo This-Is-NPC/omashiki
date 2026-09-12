@@ -14,6 +14,8 @@ defmodule Omashiki.Jobs.DispatchWorkerTest do
 
   import Omashiki.JobFixtures
 
+  import Omashiki.Jobs.Statuses, only: [is_unsuccessful: 1]
+
   alias Omashiki.Jobs
   alias Omashiki.Jobs.{DispatchWorker, ExecutionCapacity, Job, JobAttempt, JobEvent}
   alias Omashiki.Repo
@@ -192,7 +194,7 @@ defmodule Omashiki.Jobs.DispatchWorkerTest do
     perform_final_attempt(job.id)
 
     events = Repo.all(from(e in JobEvent, where: e.job_id == ^job.id, order_by: e.sequence))
-    assert Enum.any?(events, &(&1.status in ~w(failed cancelled)))
+    assert Enum.any?(events, &is_unsuccessful(&1.status))
   end
 
   test "capacity exhaustion still snoozes rather than burning the retry budget", %{
