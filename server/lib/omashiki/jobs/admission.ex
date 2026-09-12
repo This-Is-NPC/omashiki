@@ -242,17 +242,6 @@ defmodule Omashiki.Jobs.Admission do
   end
 
   @doc false
-  def enforce_token_active_limit!(token_id, incoming)
-      when is_binary(token_id) and is_integer(incoming) and incoming >= 0 do
-    reject_over_capacity!(lock_token!(token_id), incoming)
-  end
-
-  @doc false
-  def reject_over_capacity!(token_id, incoming)
-      when is_binary(token_id) and is_integer(incoming) and incoming >= 0 do
-    reject_over_capacity!(lock_token!(token_id), incoming)
-  end
-
   def reject_over_capacity!(%Token{} = locked, incoming)
       when is_integer(incoming) and incoming >= 0 do
     terminal = Statuses.terminal()
@@ -271,8 +260,8 @@ defmodule Omashiki.Jobs.Admission do
     end
   end
 
-  defp enforce_active_limit!(%Token{id: token_id}, incoming) do
-    enforce_token_active_limit!(token_id, incoming)
+  defp enforce_active_limit!(%Token{} = token, incoming) do
+    reject_over_capacity!(lock_token!(token.id), incoming)
   end
 
   defp authorize(%Token{id: id}) when is_binary(id) do

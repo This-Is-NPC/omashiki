@@ -720,7 +720,8 @@ defmodule Omashiki.Jobs do
 
   defp apply_transition(%Job{} = job, "queued", %{retry: true}) do
     if is_binary(job.api_token_id) do
-      Admission.reject_over_capacity!(job.api_token_id, 1)
+      # `transition_locked/3` already `FOR UPDATE`s this token before the job row.
+      Admission.reject_over_capacity!(Repo.get!(Omashiki.ApiTokens.Token, job.api_token_id), 1)
     end
 
     now = now()
