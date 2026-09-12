@@ -87,8 +87,10 @@ A successful result includes `summary`, `changes` (`files_changed`, `insertions`
 `GET /jobs` pages with an opaque `cursor` and returns `next_cursor`.
 The page size is 50.
 Filter by `status`, `environment`, `repository`, `worker`, `correlation_id`, and `since`.
+An unknown `status` value returns HTTP `422` with `code` `invalid_status`.
 
 ## Webhook redelivery
 
 `POST /jobs/{id}/webhook-deliveries/{delivery_id}/redeliver` requeues a `failed` or `dead` delivery with the same signature material and `idempotency_key`.
 A `delivered` delivery is refused with `409` and `code` `already_delivered`.
+HTTP `503` with `code` `busy` means a lock conflict; retry the same request.

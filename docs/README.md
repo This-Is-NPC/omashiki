@@ -37,6 +37,7 @@ curl --fail-with-body -sS "$OMASHIKI_URL/api/v1/agent-skill" \
 
 The served skill is [`server/priv/agent_skill/SKILL.md`](../server/priv/agent_skill/SKILL.md).
 [`.agents/skills/omashiki/SKILL.md`](../.agents/skills/omashiki/SKILL.md) is a symlink of that file so a local agent loads the same text.
+Git must follow symlinks (`core.symlinks=true`); otherwise copy the priv file.
 
 ## References
 

@@ -153,5 +153,6 @@ It does not contain the house database or provider keys.
 | `OMASHIKI_MANAGER_URL` | Manager URL used by the enrollment task. |
 | `OMASHIKI_WORKER_URL` | Worker listener URL used by the enrollment task. |
 | `OMASHIKI_HOST_HOME` | Host path used by the worker Compose mounts. |
+| `OMASHIKI_TRUST_FORWARDED` | When `1` or `true`, take the client IP from the rightmost `X-Forwarded-For` hop. Enable only behind a proxy that appends or overwrites that header. |
 
 Follow [worker setup](how-to-add-a-worker.md) for URL selection and deployment commands.

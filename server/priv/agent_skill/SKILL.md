@@ -121,7 +121,8 @@ admission, or environment policy errors.
 Common codes: `missing_token`, `token_expired`, `invalid_token`,
 `insufficient_scope`, `forbidden`, `not_found`, `result_not_ready`,
 `environment_not_allowed`, `max_active_jobs`, `capacity_exhausted`,
-`unknown_repository`, `unknown_environment`, `invalid_request`.
+`unknown_repository`, `unknown_environment`, `invalid_request`,
+and HTTP `503` with `code` `busy` (retry the same request).
 
 ## Report Back
 
