@@ -86,9 +86,9 @@ mise run stop
 Keep the database volume when you need the existing queue and account state.
 Do not use `up:fresh` unless you intend to delete local state.
 
-Phoenix.Ecto.CheckRepoStatus runs on the first HTTP request in development when
-migrations are pending. Start Postgres and apply migrations before exercising
-the app:
+Phoenix.Ecto.CheckRepoStatus is a request plug: while migrations are pending it
+halts HTTP requests until you migrate. Start Postgres and apply migrations
+before exercising the app:
 
 ```bash
 mise run db-up
@@ -97,8 +97,9 @@ mise run migrate
 
 The Ecto default in `config/dev.exs` is port `5432`. Local Compose publishes
 Postgres on host port `5442` through `omashiki.toml` / `OMASHIKI_DB_PORT`.
-`mix ecto.reset` drops the development database and rebuilds it; the initial
-migration's `down` raises and tells you to use that task. `e2e:prepare` runs
+The initial migration's `down` raises and tells you to use `mix ecto.reset`.
+An existing development database from an older schema cannot be repaired by
+migrate; use `mix ecto.reset` or `mise run up:fresh`. `e2e:prepare` runs
 `MIX_ENV=test mix ecto.reset` against `omashiki_test` only and does not repair
 `omashiki_dev`.
 
