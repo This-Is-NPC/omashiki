@@ -13,9 +13,12 @@ defmodule Omashiki.Jobs.Statuses do
 
   def all, do: @all
   def terminal, do: @terminal
-  def terminal?(status), do: status in @terminal
+  def terminal?(status) when is_terminal(status), do: true
+  def terminal?(_), do: false
   def active, do: @active
-  def active?(status), do: status in @active
-  def unsuccessful?(status), do: status in @unsuccessful
+  def active?(status) when is_active(status), do: true
+  def active?(_), do: false
+  def unsuccessful?(status) when is_unsuccessful(status), do: true
+  def unsuccessful?(_), do: false
   def max_payload_bytes, do: @max_payload_bytes
 end
