@@ -154,6 +154,7 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
 
     @tag :unauthenticated
     test "a parallel burst cannot exceed the failure budget", _ctx do
+      await_window_room()
       _ = user_fixture(%{username: "bob", password: "right-password-1"})
       grants = token_grants(%{"username" => "bob", "password" => "wrong"})
 
@@ -244,6 +245,7 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
 
       assert forwarded.status == 401
       assert Jason.decode!(forwarded.resp_body)["code"] == "invalid_credentials"
+      assert issue_count("9.9.9.9") == 1
 
       with_port =
         conn
@@ -255,6 +257,7 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
 
       assert with_port.status == 401
       assert Jason.decode!(with_port.resp_body)["code"] == "invalid_credentials"
+      assert issue_count("8.8.8.8") == 1
 
       ipv6_with_port =
         conn
@@ -266,6 +269,7 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
 
       assert ipv6_with_port.status == 401
       assert Jason.decode!(ipv6_with_port.resp_body)["code"] == "invalid_credentials"
+      assert issue_count("::1") == 1
 
       ipv6_junk =
         conn
@@ -276,6 +280,7 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
         )
 
       assert ipv6_junk.status == 429
+      assert issue_count("::1") == 1
 
       spoofed =
         conn
@@ -340,6 +345,45 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
 
       assert abbreviated.status == 429
     end
+
+    @tag :unauthenticated
+    test "audit records the forwarded hop without the port", %{conn: conn} do
+      trust_forwarded()
+      user = user_fixture(%{username: "bob", password: "right-password-1"})
+      grants = token_grants(%{"username" => "bob", "password" => "right-password-1"})
+
+      ipv6 =
+        conn
+        |> Plug.Conn.put_req_header("x-forwarded-for", "[::1]:5678")
+        |> post(~p"/api/v1/sessions/issue_token", grants)
+
+      assert ipv6.status == 200
+      [issued | _] = Omashiki.ApiTokens.Audit.recent_for_user(user)
+      assert issued.action == "issue"
+      assert issued.ip == "::1"
+
+      junk =
+        conn
+        |> Plug.Conn.put_req_header("x-forwarded-for", "[::1]lixo")
+        |> post(~p"/api/v1/sessions/issue_token", grants)
+
+      assert junk.status == 200
+      [fallback | _] = Omashiki.ApiTokens.Audit.recent_for_user(user)
+      assert fallback.action == "issue"
+      assert fallback.ip == "127.0.0.1"
+    end
+  end
+
+  defp await_window_room(per_ms \\ 60_000, min_ms \\ 15_000) do
+    remaining = per_ms - rem(System.system_time(:millisecond), per_ms)
+    if remaining < min_ms, do: Process.sleep(remaining + 10)
+  end
+
+  defp issue_count(ip) do
+    Enum.find_value(:ets.tab2list(OmashikiWeb.RateLimiter), 0, fn
+      {{"issue_token", ^ip, _window}, n} when is_integer(n) -> n
+      _ -> nil
+    end)
   end
 
   defp trust_forwarded do
