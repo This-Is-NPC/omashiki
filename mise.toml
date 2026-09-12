@@ -90,14 +90,6 @@ MIX_ENV=test mix compile --warnings-as-errors
 MIX_ENV=test mix test
 """
 
-[tasks."ci:api:contract"]
-description = "OpenAPI route coverage, document lint ($ref, operationId, path params), and security scheme"
-run         = """
-mise run db-up
-cd server
-MIX_ENV=test mix test test/omashiki_web/controllers/api/api_contract_test.exs --exclude integration
-"""
-
 [tasks."ci:server:fast"]
 description = "Server tests excluding :integration and real providers"
 run         = """
