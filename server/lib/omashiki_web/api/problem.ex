@@ -518,13 +518,20 @@ defmodule OmashikiWeb.Api.Problem do
   end
 
   defp matched_controller(router, conn) do
-    case Phoenix.Router.route_info(router, conn.method, conn.path_info, conn.host) do
+    case Phoenix.Router.route_info(router, conn.method, decoded_path_info(conn), conn.host) do
       %{plug: plug, plug_opts: action} when is_atom(plug) and is_atom(action) ->
         {plug, action}
 
       _ ->
         nil
     end
+  end
+
+  # `route_info/4` does not decode list segments. Plug usually already has, but
+  # a leftover `%20` / `%2F` must still match the served operation. Passing the
+  # list (not a joined string) keeps a decoded `/` inside one segment.
+  defp decoded_path_info(conn) do
+    Enum.map(conn.path_info, &URI.decode/1)
   end
 
   defp declared_status?(%{responses: responses}, status) when is_map(responses) do

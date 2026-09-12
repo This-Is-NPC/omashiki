@@ -78,6 +78,28 @@ defmodule OmashikiWeb.Api.ApiContractTest do
     end
   end
 
+  test "encoded path segments still match the served operation" do
+    spec_conn = fn path_info ->
+      Phoenix.ConnTest.build_conn()
+      |> Map.put(:method, "GET")
+      |> Map.put(:path_info, path_info)
+      |> Plug.Conn.put_private(:phoenix_router, Router)
+      |> OpenApiSpex.Plug.PutApiSpec.call(OmashikiWeb.ApiSpec)
+    end
+
+    for path_info <- [
+          ["api", "v1", "jobs", "abc%20def"],
+          ["api", "v1", "jobs", "abc%2Fdef"]
+        ] do
+      conn = spec_conn.(path_info)
+      refute conn.private[:phoenix_controller]
+
+      assert_raise ArgumentError, ~r/undeclared problem status 400/, fn ->
+        OmashikiWeb.ErrorJSON.render("400.json", %{conn: conn})
+      end
+    end
+  end
+
   test "pipeline 401 and unmatched API 404 are Problem documents" do
     spec = OmashikiWeb.ApiSpec.spec()
 
