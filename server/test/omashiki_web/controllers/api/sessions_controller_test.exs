@@ -155,9 +155,7 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
 
     @tag :unauthenticated
     test "uses X-Forwarded-For when forwarded headers are trusted", %{conn: conn} do
-      previous = Application.get_env(:omashiki, :http_forwarded)
-      Application.put_env(:omashiki, :http_forwarded, true)
-      on_exit(fn -> Application.put_env(:omashiki, :http_forwarded, previous) end)
+      trust_forwarded()
 
       _ = user_fixture(%{username: "bob", password: "right-password-1"})
 
@@ -193,9 +191,7 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
 
     @tag :unauthenticated
     test "uses the last X-Forwarded-For header line as the trusted hop", %{conn: conn} do
-      previous = Application.get_env(:omashiki, :http_forwarded)
-      Application.put_env(:omashiki, :http_forwarded, true)
-      on_exit(fn -> Application.put_env(:omashiki, :http_forwarded, previous) end)
+      trust_forwarded()
 
       _ = user_fixture(%{username: "bob", password: "right-password-1"})
 
@@ -220,5 +216,36 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
 
       assert spoofed_first_line.status == 429
     end
+
+    @tag :unauthenticated
+    test "rejects abbreviated forwarded addresses", %{conn: conn} do
+      trust_forwarded()
+      conn = %{conn | remote_ip: {10, 0, 0, 1}}
+      _ = user_fixture(%{username: "bob", password: "right-password-1"})
+
+      for _ <- 1..10 do
+        post(
+          conn,
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+      end
+
+      abbreviated =
+        conn
+        |> Plug.Conn.put_req_header("x-forwarded-for", "127.1")
+        |> post(
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+
+      assert abbreviated.status == 429
+    end
+  end
+
+  defp trust_forwarded do
+    previous = Application.get_env(:omashiki, :http_forwarded)
+    Application.put_env(:omashiki, :http_forwarded, true)
+    on_exit(fn -> Application.put_env(:omashiki, :http_forwarded, previous) end)
   end
 end

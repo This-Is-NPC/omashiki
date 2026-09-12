@@ -26,7 +26,9 @@ defmodule OmashikiWeb.Api.Conn do
   end
 
   # Every header line is a hop list. The rightmost hop of the last line is what
-  # the trusted proxy appended. Earlier lines and hops are client-controlled.
+  # the last trusted proxy appended (CDN, then load balancer). Earlier lines and
+  # hops are client-controlled. Addresses are parsed strictly and rendered with
+  # :inet.ntoa/1 so they match `remote_ip`.
   defp forwarded_client_ip(conn) do
     conn
     |> Plug.Conn.get_req_header("x-forwarded-for")
@@ -41,8 +43,8 @@ defmodule OmashikiWeb.Api.Conn do
   defp parse_ip(""), do: nil
 
   defp parse_ip(raw) do
-    case :inet.parse_address(String.to_charlist(raw)) do
-      {:ok, _} -> raw
+    case :inet.parse_strict_address(String.to_charlist(raw)) do
+      {:ok, tuple} -> tuple |> :inet.ntoa() |> to_string()
       _ -> nil
     end
   end
