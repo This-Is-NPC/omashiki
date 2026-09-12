@@ -518,12 +518,9 @@ defmodule OmashikiWeb.Api.Problem do
   end
 
   defp matched_controller(router, conn) do
-    path = Enum.map(conn.path_info, &URI.decode/1)
-    host = conn.host || "www.example.com"
-
-    case router.__match_route__(conn.method, path, host) do
-      {_metadata, _prepare, _pipeline, {plug, opts}} when is_atom(plug) and is_atom(opts) ->
-        {plug, opts}
+    case Phoenix.Router.route_info(router, conn.method, conn.path_info, conn.host) do
+      %{plug: plug, plug_opts: action} when is_atom(plug) and is_atom(action) ->
+        {plug, action}
 
       _ ->
         nil
