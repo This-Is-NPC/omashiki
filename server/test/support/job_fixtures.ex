@@ -37,7 +37,7 @@ defmodule Omashiki.JobFixtures do
           started_at: if(status in ~w(provisioning running succeeded failed), do: now),
           finished_at: if(Statuses.terminal?(status), do: now),
           terminal_result: if(status == "succeeded", do: %{"ok" => true}),
-          terminal_error: if(Statuses.retry_allowed?(status), do: %{"code" => status})
+          terminal_error: if(Statuses.unsuccessful?(status), do: %{"code" => status})
         },
         attrs
       )
@@ -50,7 +50,7 @@ defmodule Omashiki.JobFixtures do
       status: status,
       finished_at: if(Statuses.terminal?(status), do: now),
       result: if(status == "succeeded", do: %{"ok" => true}),
-      error: if(Statuses.retry_allowed?(status), do: %{"code" => status}),
+      error: if(Statuses.unsuccessful?(status), do: %{"code" => status}),
       started_at: if(status in ~w(provisioning running succeeded failed), do: now),
       lease_token: if(Statuses.active?(status), do: "fixture-lease"),
       lease_expires_at: if(Statuses.active?(status), do: DateTime.add(now, 60, :second)),

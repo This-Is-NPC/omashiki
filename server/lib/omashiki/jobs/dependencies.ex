@@ -49,7 +49,7 @@ defmodule Omashiki.Jobs.Dependencies do
         Enum.find_value(edges, fn {dep_id, on_failure} ->
           dep = Map.fetch!(dep_jobs, dep_id)
 
-          if Statuses.retry_allowed?(dep.status) and on_failure == "cancel" do
+          if Statuses.unsuccessful?(dep.status) and on_failure == "cancel" do
             dep
           end
         end)

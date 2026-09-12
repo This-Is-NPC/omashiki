@@ -16,6 +16,6 @@ defmodule Omashiki.Jobs.Statuses do
   def terminal?(status), do: status in @terminal
   def active, do: @active
   def active?(status), do: status in @active
-  def retry_allowed?(status), do: status in @unsuccessful
+  def unsuccessful?(status), do: status in @unsuccessful
   def max_payload_bytes, do: @max_payload_bytes
 end

@@ -685,7 +685,7 @@ defmodule Omashiki.Jobs do
           Repo.rollback(:lease_required)
         else
           if status in Map.get(@transitions, job.status, []) or
-               (status == "queued" and Statuses.retry_allowed?(job.status) and retry?) do
+               (status == "queued" and is_unsuccessful(job.status) and retry?) do
             apply_transition(job, status, attrs)
           else
             Repo.rollback({:invalid_transition, job.status, status})
@@ -719,32 +719,28 @@ defmodule Omashiki.Jobs do
   end
 
   defp apply_transition(%Job{} = job, "queued", %{retry: true}) do
-    if Statuses.retry_allowed?(job.status) do
-      if is_binary(job.api_token_id) do
-        Admission.reject_over_capacity!(job.api_token_id, 1)
-      end
-
-      now = now()
-      number = job.current_attempt + 1
-
-      updated =
-        update_job!(job, %{
-          status: "queued",
-          current_attempt: number,
-          queued_at: now,
-          started_at: nil,
-          finished_at: nil,
-          terminal_result: nil,
-          terminal_error: nil
-        })
-
-      insert_attempt!(updated, %{number: number, status: "queued"})
-      record_event!(updated, "queued", %{"retry" => true, "attempt" => number})
-      enqueue!(updated)
-      updated
-    else
-      Repo.rollback({:invalid_transition, job.status, "queued"})
+    if is_binary(job.api_token_id) do
+      Admission.reject_over_capacity!(job.api_token_id, 1)
     end
+
+    now = now()
+    number = job.current_attempt + 1
+
+    updated =
+      update_job!(job, %{
+        status: "queued",
+        current_attempt: number,
+        queued_at: now,
+        started_at: nil,
+        finished_at: nil,
+        terminal_result: nil,
+        terminal_error: nil
+      })
+
+    insert_attempt!(updated, %{number: number, status: "queued"})
+    record_event!(updated, "queued", %{"retry" => true, "attempt" => number})
+    enqueue!(updated)
+    updated
   end
 
   defp recover_stale_locked(at) do
