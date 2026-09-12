@@ -45,7 +45,11 @@ end
 
 config :omashiki, :worker_token, System.get_env("OMASHIKI_WORKER_TOKEN")
 config :omashiki, :manager_url, System.get_env("OMASHIKI_MANAGER_URL")
-config :omashiki, :http_forwarded, System.get_env("OMASHIKI_TRUST_FORWARDED") in ~w(1 true)
+
+case System.get_env("OMASHIKI_TRUST_FORWARDED") do
+  nil -> :ok
+  raw -> config :omashiki, :http_forwarded, raw in ~w(1 true)
+end
 
 case System.get_env("OMASHIKI_MANAGERS") do
   nil ->
@@ -247,8 +251,7 @@ if File.exists?(omashiki_toml) and config_env() != :test do
     |> then(&if(http_ip, do: [{:ip, http_ip} | &1], else: &1))
 
   if http_opts != [] do
-    existing = Application.get_env(:omashiki, OmashikiWeb.Endpoint, [])[:http] || []
-    config(:omashiki, OmashikiWeb.Endpoint, http: Keyword.merge(existing, http_opts))
+    config(:omashiki, OmashikiWeb.Endpoint, http: http_opts)
   end
 
   # `auth.enabled` maps onto the `:auth_mode` that already exists rather than
