@@ -283,15 +283,11 @@ if File.exists?(omashiki_toml) and config_env() != :test do
   end
 end
 
-# Mix config files cannot read Application.get_env/2 reliably. Apply the
-# idle timeout here, after config.exs has been loaded into the application env.
+# Mix config files cannot read Application.get_env/2 reliably. Merge only
+# thousand_island_options so a later get_env rewrite cannot replace app.host
+# and app.port from omashiki.toml.
 idle_ms = Application.get_env(:omashiki, :http_idle_timeout_ms)
 
 if is_integer(idle_ms) do
-  existing = Application.get_env(:omashiki, OmashikiWeb.Endpoint, [])[:http] || []
-
-  thousand =
-    Keyword.merge(Keyword.get(existing, :thousand_island_options, []), read_timeout: idle_ms)
-
-  config :omashiki, OmashikiWeb.Endpoint, http: Keyword.put(existing, :thousand_island_options, thousand)
+  config :omashiki, OmashikiWeb.Endpoint, http: [thousand_island_options: [read_timeout: idle_ms]]
 end

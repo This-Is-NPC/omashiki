@@ -66,11 +66,12 @@ defmodule OmashikiWeb.Api.ApiContractTest do
            )
   end
 
-  test "HTTP read timeout is an integer at runtime" do
+  test "HTTP read timeout is an integer and does not replace the test bind" do
     http = Application.get_env(:omashiki, OmashikiWeb.Endpoint)[:http]
     timeout = Keyword.get(http[:thousand_island_options] || [], :read_timeout)
     assert is_integer(timeout)
     assert timeout > 0
+    assert Keyword.get(http, :port) == 4002
   end
 
   test "OpenAPI document lints as a valid 3.0 document" do

@@ -82,7 +82,8 @@ config :omashiki, :job_event_retention_days, 30
 config :omashiki, :token_max_ttl_days, 365
 config :omashiki, :token_audit_retention_days, 90
 
-# GET /jobs/{id}/result?wait= can hold the connection for up to 60s.
+# Bandit/Thousand Island idle read timeout. Long enough for
+# GET /jobs/{id}/result?wait= (up to 60s) without tying the value to that query.
 config :omashiki, :http_idle_timeout_ms, 90_000
 
 # Trust X-Forwarded-For only when the house sits behind a known proxy.
