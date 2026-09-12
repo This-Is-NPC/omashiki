@@ -41,6 +41,11 @@ defmodule OmashikiWeb.Api.ApiContractTest do
     assert Enum.sort(Problem.codes()) == Enum.sort(enum)
   end
 
+  test "deadlock maps to busy, not internal_error" do
+    assert Problem.code_for(:busy) == "busy"
+    assert Problem.status_for("busy") == 503
+  end
+
   test "GET /api/v1/openapi.json matches ApiSpec.spec/0" do
     conn = Phoenix.ConnTest.build_conn() |> get("/api/v1/openapi.json")
     assert conn.status == 200

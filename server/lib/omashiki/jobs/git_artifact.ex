@@ -389,7 +389,7 @@ defmodule Omashiki.Jobs.GitArtifact do
          head_sha: head_sha,
          worktree_clean: true,
          changes: changes,
-         compare_url: compare_url(remote, artifact.base_sha, head_sha),
+         compare_url: web_compare_url(remote, artifact.base_sha, head_sha),
          result: %{
            "job_id" => to_string(job.id),
            "remote" => remote,
@@ -503,8 +503,9 @@ defmodule Omashiki.Jobs.GitArtifact do
   defp parse_stat_int("-"), do: 0
   defp parse_stat_int(value), do: String.to_integer(value)
 
-  defp compare_url(remote, base_sha, head_sha)
-       when is_binary(remote) and is_binary(base_sha) and is_binary(head_sha) do
+  @doc "HTTPS compare URL for a GitHub or GitLab remote; otherwise nil."
+  def web_compare_url(remote, base_sha, head_sha)
+      when is_binary(remote) and is_binary(base_sha) and is_binary(head_sha) do
     cond do
       web = github_web(remote) -> "#{web}/compare/#{base_sha}...#{head_sha}"
       web = gitlab_web(remote) -> "#{web}/-/compare/#{base_sha}...#{head_sha}"
@@ -512,7 +513,7 @@ defmodule Omashiki.Jobs.GitArtifact do
     end
   end
 
-  defp compare_url(_, _, _), do: nil
+  def web_compare_url(_, _, _), do: nil
 
   defp github_web(remote) do
     case Regex.run(~r{(?:git@github\.com:|https://github\.com/)([^/]+/[^/]+?)(?:\.git)?$}, remote) do

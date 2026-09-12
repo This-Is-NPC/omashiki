@@ -54,11 +54,10 @@ defmodule OmashikiWeb.Api.JobsController do
 
   def create(conn, _params) do
     attrs = body(conn) |> with_idempotency_header(conn)
-    started = DateTime.utc_now()
 
     with {:ok, token} <- submission_token(conn),
-         {:ok, job} <- Admission.admit(token, attrs) do
-      if newly_persisted?(job, started), do: ApiConn.audit(conn, token, "submit", job_id: job.id)
+         {:ok, origin, job} <- Admission.admit_once(token, attrs) do
+      if origin == :created, do: ApiConn.audit(conn, token, "submit", job_id: job.id)
 
       conn
       |> put_status(:accepted)
@@ -78,18 +77,17 @@ defmodule OmashikiWeb.Api.JobsController do
 
   def batch(conn, _params) do
     attrs = body(conn)
-    started = DateTime.utc_now()
 
     with {:ok, token} <- submission_token(conn),
-         {:ok, admitted} <- Admission.admit_batch(token, attrs) do
-      Enum.each(admitted, fn job ->
-        if newly_persisted?(job, started),
-          do: ApiConn.audit(conn, token, "submit", job_id: job.id)
+         {:ok, tagged} <- Admission.admit_batch_once(token, attrs) do
+      Enum.each(tagged, fn
+        {:created, job} -> ApiConn.audit(conn, token, "submit", job_id: job.id)
+        {:existing, _job} -> :ok
       end)
 
       conn
       |> put_status(:accepted)
-      |> json(%{data: Enum.map(admitted, &job_json/1), next_cursor: nil})
+      |> json(%{data: Enum.map(tagged, fn {_origin, job} -> job_json(job) end), next_cursor: nil})
     end
   end
 
@@ -271,10 +269,6 @@ defmodule OmashikiWeb.Api.JobsController do
   end
 
   defp actor_token_id(conn), do: conn.assigns[:current_token] && conn.assigns.current_token.id
-
-  defp newly_persisted?(%Job{inserted_at: at}, started) do
-    DateTime.compare(at, started) != :lt
-  end
 
   defp body(conn), do: Maps.stringify_keys(conn.body_params)
 

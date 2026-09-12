@@ -364,6 +364,12 @@ defmodule Omashiki.Jobs.AdmissionTest do
     assert Repo.aggregate(Oban.Job, :count, :id) == 1
   end
 
+  test "admit_once distinguishes created rows from idempotent replays", %{token: token} do
+    assert {:ok, :created, original} = Admission.admit_once(token, single_request())
+    assert {:ok, :existing, duplicate} = Admission.admit_once(token, single_request())
+    assert duplicate.id == original.id
+  end
+
   test "same-owner tokens cannot reuse another token's idempotency key", %{token: token} do
     user = Repo.get!(Omashiki.Accounts.User, token.user_id)
     {other_token, _plaintext} = api_token_fixture(user)

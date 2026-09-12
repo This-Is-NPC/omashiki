@@ -21,6 +21,7 @@ defmodule Omashiki.Jobs.Admission do
   }
 
   alias Omashiki.Repo
+  alias Omashiki.Tx
 
   @default_queue "default"
   @max_batch_size 100
@@ -30,6 +31,21 @@ defmodule Omashiki.Jobs.Admission do
 
   @doc "Admit one root job for an active, persisted API token."
   def admit(%Token{} = token, attrs) when is_map(attrs) do
+    case admit_once(token, attrs) do
+      {:ok, _origin, job} -> {:ok, job}
+      other -> other
+    end
+  end
+
+  def admit(_, _), do: {:error, :unauthorized}
+
+  @doc """
+  Admit one job and say whether the row was created or replayed.
+
+  Idempotent retries return `{:ok, :existing, job}` so callers do not guess
+  from `inserted_at`.
+  """
+  def admit_once(%Token{} = token, attrs) when is_map(attrs) do
     with :ok <- admission_open(),
          {:ok, request} <- validate_single(attrs),
          :ok <- environment_allowed(token, request["environment"]),
@@ -38,34 +54,47 @@ defmodule Omashiki.Jobs.Admission do
          {:ok, resolved} <- resolve(request) do
       user_id |> insert_single(token, request, resolved) |> notify_admitted()
     else
-      %Job{} = existing -> {:ok, existing}
+      %Job{} = existing -> {:ok, :existing, existing}
       {:error, reason} -> {:error, reason}
       {:conflict, _existing} -> {:error, :idempotency_conflict}
     end
   end
 
-  def admit(_, _), do: {:error, :unauthorized}
+  def admit_once(_, _), do: {:error, :unauthorized}
 
   @doc "Admit an ordered, atomically persisted batch of jobs."
   def admit_batch(%Token{} = token, attrs) when is_map(attrs) do
-    with :ok <- admission_open(),
-         {:ok, request} <- validate_batch(attrs),
-         :ok <- batch_environments_allowed(token, request["jobs"]),
-         {:ok, user_id} <- authorize(token),
-         {:ok, items} <- prepare_batch(user_id, token.id, request),
-         result <- insert_batch(token, request["correlation_id"], items) do
-      notify_admitted(result)
+    case admit_batch_once(token, attrs) do
+      {:ok, tagged} -> {:ok, Enum.map(tagged, fn {_origin, job} -> job end)}
+      other -> other
     end
   end
 
   def admit_batch(_, _), do: {:error, :unauthorized}
 
+  @doc "Admit a batch and tag each job as `:created` or `:existing`."
+  def admit_batch_once(%Token{} = token, attrs) when is_map(attrs) do
+    with :ok <- admission_open(),
+         {:ok, request} <- validate_batch(attrs),
+         :ok <- batch_environments_allowed(token, request["jobs"]),
+         {:ok, user_id} <- authorize(token),
+         {:ok, items} <- prepare_batch(user_id, token.id, request),
+         {:ok, tagged} <- insert_batch(token, request["correlation_id"], items) do
+      notify_admitted({:ok, Enum.map(tagged, fn {_origin, job} -> job end)})
+      {:ok, tagged}
+    end
+  end
+
+  def admit_batch_once(_, _), do: {:error, :unauthorized}
+
   # Admission inserts rows directly rather than through `Jobs`, so it announces
   # new jobs itself, after the transaction commits.
-  defp notify_admitted({:ok, %Job{id: id}} = result) do
+  defp notify_admitted({:ok, :created, %Job{id: id} = job}) do
     Omashiki.Jobs.broadcast_updated(id)
-    result
+    {:ok, :created, job}
   end
+
+  defp notify_admitted({:ok, :existing, job}), do: {:ok, :existing, job}
 
   defp notify_admitted({:ok, jobs} = result) when is_list(jobs) do
     Enum.each(jobs, &Omashiki.Jobs.broadcast_updated(&1.id))
@@ -225,13 +254,17 @@ defmodule Omashiki.Jobs.Admission do
   end
 
   @doc false
+  def lock_token!(token_id) when is_binary(token_id) do
+    case from(t in Token, where: t.id == ^token_id, lock: "FOR UPDATE") |> Repo.one() do
+      nil -> Repo.rollback(:unauthorized)
+      %Token{} = locked -> locked
+    end
+  end
+
+  @doc false
   def enforce_token_active_limit!(token_id, incoming)
       when is_binary(token_id) and is_integer(incoming) and incoming >= 0 do
-    locked =
-      from(t in Token, where: t.id == ^token_id, lock: "FOR UPDATE")
-      |> Repo.one()
-
-    if is_nil(locked), do: Repo.rollback(:unauthorized)
+    locked = lock_token!(token_id)
 
     terminal = Statuses.terminal()
 
@@ -372,7 +405,7 @@ defmodule Omashiki.Jobs.Admission do
 
   defp insert_single(user_id, %Token{} = token, request, resolved) do
     result =
-      Repo.transaction(fn ->
+      Tx.run(fn ->
         enforce_active_limit!(token, 1)
 
         case resolve_depends_on(user_id, request, %{}, nil) do
@@ -398,10 +431,13 @@ defmodule Omashiki.Jobs.Admission do
 
     case result do
       {:ok, job} ->
-        {:ok, job}
+        {:ok, :created, job}
 
       {:error, :duplicate_idempotency} ->
-        fetch_after_race(user_id, token.id, request["idempotency_key"])
+        case fetch_after_race(user_id, token.id, request["idempotency_key"]) do
+          {:ok, job} -> {:ok, :existing, job}
+          error -> error
+        end
 
       {:error, {:persistence, changeset}} ->
         {:error, changeset}
@@ -454,7 +490,7 @@ defmodule Omashiki.Jobs.Admission do
 
   defp insert_batch(%Token{} = token, correlation_id, items) do
     result =
-      Repo.transaction(fn ->
+      Tx.run(fn ->
         incoming = Enum.count(items, &is_nil(Map.get(&1, :existing)))
         enforce_active_limit!(token, incoming)
 
@@ -468,7 +504,12 @@ defmodule Omashiki.Jobs.Admission do
 
     case result do
       {:ok, jobs_by_ref} ->
-        {:ok, Enum.map(items, &Map.fetch!(jobs_by_ref, &1.request["ref"]))}
+        {:ok,
+         Enum.map(items, fn item ->
+           job = Map.fetch!(jobs_by_ref, item.request["ref"])
+           origin = if(Map.has_key?(item, :existing), do: :existing, else: :created)
+           {origin, job}
+         end)}
 
       {:error, :duplicate_idempotency} ->
         retry_batch(token, correlation_id, items)

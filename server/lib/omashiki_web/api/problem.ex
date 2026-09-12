@@ -36,6 +36,7 @@ defmodule OmashikiWeb.Api.Problem do
     lease_required
     invalid_parent_reference
     admission_paused
+    busy
     unknown_repository
     unknown_environment
     invalid_reference
@@ -86,6 +87,7 @@ defmodule OmashikiWeb.Api.Problem do
     "lease_required" => "Active execution must finish through its lease",
     "invalid_parent_reference" => "Batch parent references could not be resolved",
     "admission_paused" => "Configuration rollout is draining active work",
+    "busy" => "The server could not complete the request without a lock conflict",
     "unknown_repository" => "Repository is not registered",
     "unknown_environment" => "Environment is not registered",
     "invalid_reference" => "Repository and environment are invalid",
@@ -136,6 +138,7 @@ defmodule OmashikiWeb.Api.Problem do
     "lease_required" => 409,
     "invalid_parent_reference" => 422,
     "admission_paused" => 503,
+    "busy" => 503,
     "unknown_repository" => 422,
     "unknown_environment" => 422,
     "invalid_reference" => 422,
@@ -283,6 +286,9 @@ defmodule OmashikiWeb.Api.Problem do
       :admission_paused ->
         "admission_paused"
 
+      :busy ->
+        "busy"
+
       :unknown_repository ->
         "unknown_repository"
 
@@ -403,6 +409,9 @@ defmodule OmashikiWeb.Api.Problem do
 
       :admission_paused ->
         [retry_after: 5]
+
+      :busy ->
+        [retry_after: 1]
 
       _ ->
         []

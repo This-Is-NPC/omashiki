@@ -10,6 +10,7 @@ defmodule Omashiki.Jobs do
 
   alias Omashiki.Jobs.{
     Admission,
+    AttemptResult,
     DispatchWorker,
     ExecutionCapacity,
     Job,
@@ -20,6 +21,7 @@ defmodule Omashiki.Jobs do
   }
 
   alias Omashiki.Repo
+  alias Omashiki.Tx
 
   @terminal Statuses.terminal()
   @active ~w(provisioning running)
@@ -279,7 +281,7 @@ defmodule Omashiki.Jobs do
     with {:ok, job_id} <- job_id(job_or_id),
          status <- normalize_status(status),
          :ok <- valid_status(status) do
-      Repo.transaction(fn -> transition_locked(job_id, status, attrs) end)
+      Tx.run(fn -> transition_locked(job_id, status, attrs) end)
       |> normalize_transaction_result()
       |> notify_job()
     end
@@ -536,9 +538,15 @@ defmodule Omashiki.Jobs do
           capacity_reserved: false,
           lease_token: nil,
           lease_expires_at: nil,
-          summary: truncate_summary(get_attr(attrs, :summary)),
-          changes: get_attr(attrs, :changes),
-          compare_url: get_attr(attrs, :compare_url)
+          summary: AttemptResult.truncate_summary(get_attr(attrs, :summary)),
+          changes: AttemptResult.sanitize_changes(get_attr(attrs, :changes)),
+          compare_url:
+            AttemptResult.resolve_compare_url(
+              job,
+              base_sha,
+              head_sha,
+              get_attr(attrs, :compare_url)
+            )
         }
         |> maybe_put_git_fields(branch, base_sha, head_sha, worktree_clean)
 
@@ -640,8 +648,13 @@ defmodule Omashiki.Jobs do
     })
   end
 
-  defp truncate_summary(text) when is_binary(text), do: String.slice(String.trim(text), 0, 4_096)
-  defp truncate_summary(_), do: nil
+  defp lock_token_before_job!(job_id) do
+    token_id =
+      from(j in Job, where: j.id == ^job_id, select: j.api_token_id)
+      |> Repo.one()
+
+    if is_binary(token_id), do: Admission.lock_token!(token_id)
+  end
 
   defp success_event_data(branch, base_sha, head_sha)
        when is_binary(branch) and is_binary(base_sha) and is_binary(head_sha) do
@@ -672,6 +685,10 @@ defmodule Omashiki.Jobs do
   defp completion_job(result), do: result
 
   defp transition_locked(job_id, status, attrs) do
+    if get_attr(attrs, :retry) == true do
+      lock_token_before_job!(job_id)
+    end
+
     case locked_job(job_id) do
       nil ->
         Repo.rollback(:not_found)
@@ -1142,6 +1159,7 @@ defmodule Omashiki.Jobs do
   end
 
   defp normalize_transaction_result({:ok, value}), do: {:ok, value}
+  defp normalize_transaction_result({:error, :busy}), do: {:error, :busy}
   defp normalize_transaction_result({:error, reason}), do: {:error, reason}
 
   @doc """

@@ -356,14 +356,14 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
                  "branch" => "omashiki/test",
                  "base_sha" => base,
                  "head_sha" => head,
-                 "summary" => "added hello.py",
+                 "summary" => String.duplicate("a", 5_000),
                  "changes" => %{
                    "files_changed" => 1,
                    "insertions" => 2,
                    "deletions" => 0,
                    "files" => [%{"path" => "hello.py", "insertions" => 2, "deletions" => 0}]
                  },
-                 "compare_url" => "https://github.com/acme/repo/compare/#{base}...#{head}"
+                 "compare_url" => "javascript:alert(1)"
                })
 
       reloaded = Repo.get!(Job, job.id)
@@ -371,10 +371,10 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
       assert reloaded.terminal_result["branch"] == "omashiki/test"
 
       attempt = Repo.get!(JobAttempt, attempt.id)
-      assert attempt.summary == "added hello.py"
+      assert byte_size(attempt.summary) == 4_096
       assert attempt.changes["files_changed"] == 1
       assert [%{"path" => "hello.py"}] = attempt.changes["files"]
-      assert attempt.compare_url =~ "/compare/"
+      assert is_nil(attempt.compare_url)
     end
 
     test "heartbeat returns cancel when the job was cancelled", %{user: user, token: token_record} do
