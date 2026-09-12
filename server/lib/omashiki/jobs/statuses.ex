@@ -18,7 +18,5 @@ defmodule Omashiki.Jobs.Statuses do
   def active, do: @active
   def active?(status) when is_active(status), do: true
   def active?(_), do: false
-  def unsuccessful?(status) when is_unsuccessful(status), do: true
-  def unsuccessful?(_), do: false
   def max_payload_bytes, do: @max_payload_bytes
 end
