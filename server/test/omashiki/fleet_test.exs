@@ -50,27 +50,31 @@ defmodule Omashiki.FleetTest do
 
   describe "presence reports" do
     test "a report is recorded with the worker and survives a later poll" do
+      machine_id = "vps-#{System.unique_integer([:positive])}"
       container = %{id: "a1b2c3d4e5f60718", attempt_id: @attempt_id, state: "running"}
 
-      :ok = Presence.report("vps-1", %{free_slots: 1, capacity: 4, containers: [container]})
-      :ok = Presence.touch("vps-1", %{free_slots: 1})
+      :ok = Presence.report(machine_id, %{free_slots: 1, capacity: 4, containers: [container]})
+      :ok = Presence.touch(machine_id, %{free_slots: 1})
 
       assert %{kind: :worker, capacity: 4, free_slots: 1, containers: [^container]} =
-               Enum.find(Fleet.nodes(), &(&1.machine_id == "vps-1"))
+               Enum.find(Fleet.nodes(), &(&1.machine_id == machine_id))
     end
 
     test "only a change is announced" do
       Fleet.subscribe()
+      on_exit(fn -> Phoenix.PubSub.unsubscribe(Omashiki.PubSub, Fleet.topic()) end)
+
+      machine_id = "vps-#{System.unique_integer([:positive])}"
       report = %{free_slots: 2, capacity: 4, containers: []}
 
-      :ok = Presence.report("vps-2", report)
-      assert_receive {:fleet_updated, "vps-2"}
+      :ok = Presence.report(machine_id, report)
+      assert_receive {:fleet_updated, ^machine_id}, 1_000
 
-      :ok = Presence.report("vps-2", report)
-      refute_receive {:fleet_updated, "vps-2"}, 50
+      :ok = Presence.report(machine_id, report)
+      refute_receive {:fleet_updated, ^machine_id}, 200
 
-      :ok = Presence.report("vps-2", %{report | free_slots: 1})
-      assert_receive {:fleet_updated, "vps-2"}
+      :ok = Presence.report(machine_id, %{report | free_slots: 1})
+      assert_receive {:fleet_updated, ^machine_id}, 1_000
     end
   end
 
