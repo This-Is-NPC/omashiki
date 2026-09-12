@@ -63,7 +63,6 @@ defmodule Omashiki.Runtime.ClaimsTest do
 
     attrs = %{
       user_id: user.id,
-      schema_version: 1,
       idempotency_key: "claims-#{System.unique_integer([:positive])}",
       correlation_id: "claims-correlation",
       repository: "repo",

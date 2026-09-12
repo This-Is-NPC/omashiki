@@ -42,6 +42,12 @@ port = 5442
 # depend on `current_user` continue to work.
 enabled = false
 
+# Ceiling for token TTL at issuance. Callers still send ttl_days (1–365).
+token_max_ttl_days = 365
+
+# How long token audit rows are kept before the nightly prune.
+token_audit_retention_days = 90
+
 # ---------------------------------------------------------------------------
 # Execution registry
 # ---------------------------------------------------------------------------

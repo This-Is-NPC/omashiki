@@ -1,10 +1,17 @@
 defmodule OmashikiWeb.Api.FleetController do
-  use OmashikiWeb, :controller
+  use OmashikiWeb.Api.Controller
 
   alias Omashiki.Fleet
   alias Omashiki.Jobs.Api
+  alias OmashikiWeb.ApiSpec.Schemas
 
-  @doc "Nodes that run this house's jobs and the containers on each. Read-only."
+  tags ["fleet"]
+
+  operation :index,
+    summary: "List worker nodes and containers",
+    security: [%{"bearer" => ["read"]}],
+    responses: %{200 => {"Fleet", "application/json", Schemas.FleetResponse}}
+
   def index(conn, _params) do
     nodes = Fleet.nodes()
 
@@ -34,8 +41,6 @@ defmodule OmashikiWeb.Api.FleetController do
     }
   end
 
-  # A job id is shown only for a job the caller may read. Any other container
-  # stays anonymous, as it does on the fleet graph.
   defp container_json(container, jobs) do
     %{
       id: container.id,

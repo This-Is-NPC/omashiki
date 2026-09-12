@@ -78,7 +78,6 @@ defmodule Omashiki.Integration.QueueRealProviderE2ETest do
     assert {_, 0} = System.cmd("docker", ["image", "inspect", image])
 
     request = %{
-      "schema_version" => 1,
       "idempotency_key" => idempotency_key,
       "correlation_id" => "overture-real-provider-e2e-#{harness}",
       "repo" => "overture",

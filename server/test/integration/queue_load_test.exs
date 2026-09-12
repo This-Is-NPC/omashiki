@@ -5,7 +5,7 @@ defmodule Omashiki.Integration.QueueLoadTest do
 
   alias Omashiki.Config
   alias Omashiki.Jobs
-  alias Omashiki.Jobs.{Admission, ExecutionCapacity, Job, JobEvent}
+  alias Omashiki.Jobs.{Admission, Job, JobEvent}
   alias Omashiki.Repo
 
   @tag :integration
@@ -125,7 +125,7 @@ defmodule Omashiki.Integration.QueueLoadTest do
   end
 
   defp batch(requests),
-    do: %{"schema_version" => 1, "correlation_id" => "load", "jobs" => requests}
+    do: %{"correlation_id" => "load", "jobs" => requests}
 
   defp request(number) do
     %{

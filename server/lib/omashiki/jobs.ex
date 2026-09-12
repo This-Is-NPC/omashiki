@@ -524,7 +524,10 @@ defmodule Omashiki.Jobs do
           error: nil,
           capacity_reserved: false,
           lease_token: nil,
-          lease_expires_at: nil
+          lease_expires_at: nil,
+          summary: truncate_summary(get_attr(attrs, :summary)),
+          changes: get_attr(attrs, :changes),
+          compare_url: get_attr(attrs, :compare_url)
         }
         |> maybe_put_git_fields(branch, base_sha, head_sha, worktree_clean)
 
@@ -625,6 +628,9 @@ defmodule Omashiki.Jobs do
       worktree_clean: nil
     })
   end
+
+  defp truncate_summary(text) when is_binary(text), do: String.slice(String.trim(text), 0, 4_096)
+  defp truncate_summary(_), do: nil
 
   defp success_event_data(branch, base_sha, head_sha)
        when is_binary(branch) and is_binary(base_sha) and is_binary(head_sha) do
@@ -1007,8 +1013,7 @@ defmodule Omashiki.Jobs do
       correlation_id: job.correlation_id,
       occurred_at: now,
       recorded_at: now,
-      data: data,
-      schema_version: 1
+      data: data
     }
 
     case %JobEvent{} |> JobEvent.changeset(attrs) |> Repo.insert() do

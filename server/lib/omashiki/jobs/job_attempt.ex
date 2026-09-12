@@ -27,6 +27,9 @@ defmodule Omashiki.Jobs.JobAttempt do
     field :worktree_clean, :boolean
     field :result, :map
     field :error, :map
+    field :summary, :string
+    field :changes, :map
+    field :compare_url, :string
 
     belongs_to :job, Omashiki.Jobs.Job
     has_many :steps, Omashiki.Jobs.JobStep, foreign_key: :attempt_id
@@ -55,7 +58,10 @@ defmodule Omashiki.Jobs.JobAttempt do
       :head_sha,
       :worktree_clean,
       :result,
-      :error
+      :error,
+      :summary,
+      :changes,
+      :compare_url
     ])
     |> validate_required([:job_id, :number, :status])
     |> validate_number(:number, greater_than: 0)

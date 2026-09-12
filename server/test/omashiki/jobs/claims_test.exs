@@ -742,7 +742,6 @@ defmodule Omashiki.Jobs.ClaimsTest do
 
   defp request(key) do
     %{
-      "schema_version" => 1,
       "idempotency_key" => key,
       "correlation_id" => "correlation-#{key}",
       "repo" => "app",
@@ -758,7 +757,6 @@ defmodule Omashiki.Jobs.ClaimsTest do
 
   defp batch_request do
     %{
-      "schema_version" => 1,
       "correlation_id" => "cancel-batch",
       "jobs" => [batch_job("parent"), batch_job("blocked", [%{"ref" => "parent"}])]
     }

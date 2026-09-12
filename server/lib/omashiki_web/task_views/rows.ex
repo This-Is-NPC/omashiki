@@ -34,11 +34,15 @@ defmodule OmashikiWeb.TaskViews.Rows do
 
   @doc "Read the rows of `view` for `user`, resolving relative time filters against `now`."
   def load(user, %View{} = view, %DateTime{} = now) do
-    Api.list_for_view(user,
-      filter: resolve_filter(view.filter, now),
-      sort: view.sort,
-      limit: view.limit
-    )
+    {:ok, %{entries: rows}} =
+      Api.list(user,
+        filter: resolve_filter(view.filter, now),
+        sort: view.sort,
+        page_size: view.limit,
+        as: :rows
+      )
+
+    rows
   end
 
   @doc "Turn a view's relative filters into absolute ones at `now`."

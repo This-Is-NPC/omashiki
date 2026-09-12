@@ -1,6 +1,8 @@
 defmodule Omashiki.Jobs.EventStreamTest do
   use OmashikiWeb.ConnCase, async: false
 
+  @moduletag :api
+
   alias Omashiki.Jobs.{EventStream, Job, JobAttempt, JobEvent}
   alias Omashiki.Repo
 
@@ -221,7 +223,6 @@ defmodule Omashiki.Jobs.EventStreamTest do
       occurred_at: now,
       recorded_at: now,
       data: %{},
-      schema_version: 1
     })
     |> Repo.insert!()
   end

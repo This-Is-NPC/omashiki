@@ -77,6 +77,14 @@ config :mime, :types, %{
 # Job events remain streamable for this durable observation horizon.
 config :omashiki, :job_event_retention_days, 30
 
+# Token issuance TTL ceiling and audit retention. Overridden by omashiki.toml
+# `[auth] token_max_ttl_days` / `token_audit_retention_days` in runtime.exs.
+config :omashiki, :token_max_ttl_days, 365
+config :omashiki, :token_audit_retention_days, 90
+
+# GET /jobs/{id}/result?wait= can hold the connection for up to 60s.
+config :omashiki, :http_idle_timeout_ms, 90_000
+
 # Outbound provider HTTP must not block a DispatchWorker forever. The receive
 # loop enforces this as a total request deadline (connect timeout is separate).
 config :omashiki, :gateway_provider_request_timeout_ms, 120_000
@@ -107,9 +115,9 @@ oban_scheduler_limit =
 
 oban_queues =
   if oban_scheduler_limit == 0 do
-    [webhooks: 5]
+    [webhooks: 5, token_audit: 1]
   else
-    [scheduler: oban_scheduler_limit, webhooks: 5]
+    [scheduler: oban_scheduler_limit, webhooks: 5, token_audit: 1]
   end
 
 config :omashiki, Oban,
@@ -131,7 +139,11 @@ config :omashiki, Oban,
     # is the floor, not a number to trim. A premature rescue is not a double
     # container run in any case: the re-dispatch finds the job past `queued` and
     # `Jobs.claim/3` refuses it, so the retry is a no-op.
-    {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(60)}
+    {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(60)},
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"0 3 * * *", Omashiki.ApiTokens.PruneAuditWorker}
+     ]}
   ]
 
 # Import environment specific config. This must remain at the bottom

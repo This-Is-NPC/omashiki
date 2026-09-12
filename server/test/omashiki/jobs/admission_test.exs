@@ -288,24 +288,21 @@ defmodule Omashiki.Jobs.AdmissionTest do
     end)
   end
 
-  test "rejects malformed, unknown, and oversized submissions without writes", %{token: token} do
-    assert {:error, {:validation, errors}} = Admission.admit(token, %{})
-    assert %{field: "environment", code: "required"} in errors
-
+  test "rejects oversized submissions without writes", %{token: token} do
     assert {:error, :unknown_repository} =
              Admission.admit(token, Map.put(single_request(), "repo", "missing"))
 
     oversized = %{
       "instruction" => "run",
       "context" => %{
-        "data" => String.duplicate("x", Omashiki.Jobs.Contract.V1.max_payload_bytes())
+        "data" => String.duplicate("x", Admission.max_payload_bytes())
       }
     }
 
     assert {:error, {:validation, errors}} =
              Admission.admit(token, Map.put(single_request(), "payload", oversized))
 
-    assert %{field: "payload.context", code: "too_large"} in errors
+    assert %{field: "payload", code: "too_large"} in errors
     assert Repo.aggregate(Job, :count, :id) == 0
     assert Repo.aggregate(Oban.Job, :count, :id) == 0
   end
@@ -339,13 +336,13 @@ defmodule Omashiki.Jobs.AdmissionTest do
     assert job.payload == exact
 
     oversized = %{
-      "instruction" => String.duplicate("x", Omashiki.Jobs.Contract.V1.max_payload_bytes() + 1)
+      "instruction" => String.duplicate("x", Admission.max_payload_bytes() + 1)
     }
 
     assert {:error, {:validation, errors}} =
              Admission.admit(token, Map.put(single_request("next"), "payload", oversized))
 
-    assert %{field: "payload.instruction", code: "too_large"} in errors
+    assert %{field: "payload", code: "too_large"} in errors
   end
 
   test "rejects a token that is not active or persisted", %{token: token} do
@@ -432,7 +429,6 @@ defmodule Omashiki.Jobs.AdmissionTest do
   defp single_request(overrides) do
     Map.merge(
       %{
-        "schema_version" => 1,
         "idempotency_key" => "request-1",
         "correlation_id" => "correlation-1",
         "repo" => "app",
@@ -446,9 +442,8 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
   defp batch_request do
     %{
-      "schema_version" => 1,
       "correlation_id" => "batch-1",
-      "jobs" => [batch_job("root", []), batch_job("child", [%{"ref" => "root"}])]
+      "jobs" => [batch_job("root"), batch_job("child", [%{"ref" => "root"}])]
     }
   end
 

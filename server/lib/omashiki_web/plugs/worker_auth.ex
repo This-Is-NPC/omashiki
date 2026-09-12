@@ -9,6 +9,7 @@ defmodule OmashikiWeb.Plugs.WorkerAuth do
   import Plug.Conn
 
   alias Omashiki.Worker.Tokens
+  alias OmashikiWeb.Api.Problem
 
   @behaviour Plug
 
@@ -40,17 +41,10 @@ defmodule OmashikiWeb.Plugs.WorkerAuth do
   end
 
   defp send_unauthorized(conn) do
-    send_error(conn, 401, "missing_token", "Worker bearer token required")
+    Problem.halt(conn, "missing_token")
   end
 
   defp send_forbidden(conn) do
-    send_error(conn, 403, "invalid_token", "Worker bearer token is not valid")
-  end
-
-  defp send_error(conn, status, code, message) do
-    conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(status, Jason.encode!(%{error: %{code: code, message: message}}))
-    |> halt()
+    Problem.halt(conn, "invalid_token")
   end
 end

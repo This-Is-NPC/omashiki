@@ -54,7 +54,6 @@ defmodule Omashiki.Jobs.Webhooks do
   @doc "Build the fixed terminal payload signed by the delivery worker."
   def payload(%Job{} = job, %JobAttempt{} = attempt, %JobEvent{} = event) do
     %{
-      "schema_version" => 1,
       "event_id" => event.event_id,
       "timestamp" => DateTime.to_iso8601(event.occurred_at),
       "job_id" => job.id,
@@ -196,6 +195,66 @@ defmodule Omashiki.Jobs.Webhooks do
   end
 
   def list_for_job(_, _), do: {:error, :not_found}
+
+  @doc """
+  Requeue a failed or dead delivery with the same payload, signature material,
+  and idempotency key. Delivered deliveries are refused.
+  """
+  def redeliver(job_id, delivery_id, actor)
+      when is_binary(job_id) and is_binary(delivery_id) do
+    with {:ok, _job} <- Omashiki.Jobs.EventStream.authorize(job_id, actor),
+         %WebhookDelivery{} = delivery <- Repo.get(WebhookDelivery, delivery_id),
+         true <- delivery_belongs_to_job?(delivery, job_id) do
+      case delivery.status do
+        "delivered" ->
+          {:error, :already_delivered}
+
+        status when status in ~w(failed dead pending) ->
+          requeue(delivery)
+
+        _ ->
+          {:error, :not_found}
+      end
+    else
+      nil -> {:error, :not_found}
+      false -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def redeliver(_, _, _), do: {:error, :not_found}
+
+  defp delivery_belongs_to_job?(%WebhookDelivery{event_id: event_id}, job_id) do
+    case Repo.get(JobEvent, event_id) do
+      %JobEvent{job_id: ^job_id} -> true
+      _ -> false
+    end
+  end
+
+  defp requeue(%WebhookDelivery{} = delivery) do
+    now = DateTime.utc_now(:microsecond)
+
+    Repo.transaction(fn ->
+      updated =
+        update_delivery!(delivery, %{
+          status: "pending",
+          next_attempt_at: now,
+          last_error: nil
+        })
+
+      case Oban.insert(
+             WebhookDeliveryWorker.new(%{"delivery_id" => delivery.id}, scheduled_at: now)
+           ) do
+        {:ok, _job} ->
+          status(updated)
+
+        {:error, changeset} ->
+          if unique_error?(changeset),
+            do: status(updated),
+            else: Repo.rollback({:webhook_dispatch, changeset})
+      end
+    end)
+  end
 
   @doc "Return operator-safe delivery fields without payloads or key material."
   def status(%WebhookDelivery{} = delivery) do

@@ -489,7 +489,6 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
 
     attrs = %{
       user_id: user.id,
-      schema_version: 1,
       idempotency_key: "cm-#{System.unique_integer([:positive])}",
       correlation_id: "cm-correlation",
       repository: "repo",

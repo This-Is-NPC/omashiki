@@ -1,11 +1,24 @@
 defmodule OmashikiWeb.Api.DiscoveryController do
-  use OmashikiWeb, :controller
+  use OmashikiWeb.Api.Controller
 
   alias Omashiki.Config
+  alias OmashikiWeb.ApiSpec.Schemas
+
+  tags ["discovery"]
+
+  operation :repositories,
+    summary: "List registered repositories",
+    security: [%{"bearer" => ["read"]}],
+    responses: %{200 => {"Repositories", "application/json", Schemas.RepositoryListResponse}}
 
   def repositories(conn, _params) do
     json(conn, %{data: Enum.map(Config.repositories(), &repository_json/1)})
   end
+
+  operation :environments,
+    summary: "List registered environments",
+    security: [%{"bearer" => ["read"]}],
+    responses: %{200 => {"Environments", "application/json", Schemas.EnvironmentListResponse}}
 
   def environments(conn, _params) do
     json(conn, %{data: Enum.map(Config.environments(), &environment_json/1)})

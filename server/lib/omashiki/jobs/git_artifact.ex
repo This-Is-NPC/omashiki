@@ -374,7 +374,8 @@ defmodule Omashiki.Jobs.GitArtifact do
          :ok <- verify_head(artifact, head_sha, previous_head, opts),
          :ok <- publish_run_branch(artifact, remote, job, opts),
          :ok <-
-           maybe_update_task_branch(artifact, remote, head_sha, update_task_branch, job, opts) do
+           maybe_update_task_branch(artifact, remote, head_sha, update_task_branch, job, opts),
+         {:ok, changes} <- diff_stat(artifact.path, artifact.base_sha, head_sha, opts) do
       result_branch =
         if update_task_branch, do: artifact.task_branch, else: artifact.run_branch
 
@@ -387,6 +388,8 @@ defmodule Omashiki.Jobs.GitArtifact do
          base_sha: artifact.base_sha,
          head_sha: head_sha,
          worktree_clean: true,
+         changes: changes,
+         compare_url: compare_url(remote, artifact.base_sha, head_sha),
          result: %{
            "job_id" => to_string(job.id),
            "remote" => remote,
@@ -460,6 +463,70 @@ defmodule Omashiki.Jobs.GitArtifact do
 
   @doc "Return the configured automatic-commit bound."
   def max_bytes, do: @max_bytes
+
+  defp diff_stat(path, base_sha, head_sha, opts)
+       when is_binary(base_sha) and is_binary(head_sha) do
+    case git(path, ["diff", "--numstat", "#{base_sha}..#{head_sha}"], opts) do
+      {:ok, output} -> {:ok, parse_numstat(output)}
+      error -> error
+    end
+  end
+
+  defp parse_numstat(output) do
+    files =
+      output
+      |> String.split("\n", trim: true)
+      |> Enum.flat_map(fn line ->
+        case String.split(line, "\t") do
+          [insertions, deletions, file] ->
+            [
+              %{
+                "path" => file,
+                "insertions" => parse_stat_int(insertions),
+                "deletions" => parse_stat_int(deletions)
+              }
+            ]
+
+          _ ->
+            []
+        end
+      end)
+
+    %{
+      "files_changed" => length(files),
+      "insertions" => Enum.reduce(files, 0, &(&1["insertions"] + &2)),
+      "deletions" => Enum.reduce(files, 0, &(&1["deletions"] + &2)),
+      "files" => Enum.map(files, & &1["path"])
+    }
+  end
+
+  defp parse_stat_int("-"), do: 0
+  defp parse_stat_int(value), do: String.to_integer(value)
+
+  defp compare_url(remote, base_sha, head_sha)
+       when is_binary(remote) and is_binary(base_sha) and is_binary(head_sha) do
+    cond do
+      web = github_web(remote) -> "#{web}/compare/#{base_sha}...#{head_sha}"
+      web = gitlab_web(remote) -> "#{web}/-/compare/#{base_sha}...#{head_sha}"
+      true -> nil
+    end
+  end
+
+  defp compare_url(_, _, _), do: nil
+
+  defp github_web(remote) do
+    case Regex.run(~r{(?:git@github\.com:|https://github\.com/)([^/]+/[^/]+?)(?:\.git)?$}, remote) do
+      [_, repo] -> "https://github.com/#{String.trim_trailing(repo, ".git")}"
+      _ -> nil
+    end
+  end
+
+  defp gitlab_web(remote) do
+    case Regex.run(~r{(?:git@gitlab\.com:|https://gitlab\.com/)(.+?)(?:\.git)?$}, remote) do
+      [_, repo] -> "https://gitlab.com/#{String.trim_trailing(repo, ".git")}"
+      _ -> nil
+    end
+  end
 
   defp retention_candidates(repo_path, nil, opts) do
     with {:ok, output} <-

@@ -35,7 +35,6 @@ defmodule Omashiki.Jobs.Job do
   @admission_fields [
     :user_id,
     :api_token_id,
-    :schema_version,
     :idempotency_key,
     :correlation_id,
     :repository,
@@ -64,7 +63,6 @@ defmodule Omashiki.Jobs.Job do
   ]
 
   schema "jobs" do
-    field :schema_version, :integer, default: 1
     field :idempotency_key, :string
     field :correlation_id, :string
     field :repository, :string

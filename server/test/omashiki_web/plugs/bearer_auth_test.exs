@@ -1,6 +1,8 @@
 defmodule OmashikiWeb.Plugs.BearerAuthTest do
   use OmashikiWeb.ConnCase, async: false
 
+  @moduletag :api
+
   alias OmashikiWeb.Plugs.BearerAuth
 
   describe "missing credential" do
@@ -10,7 +12,7 @@ defmodule OmashikiWeb.Plugs.BearerAuthTest do
       conn = BearerAuth.call(conn, BearerAuth.init([]))
       assert conn.status == 401
       assert conn.halted
-      assert Jason.decode!(conn.resp_body)["error"]["code"] == "missing_token"
+      assert Jason.decode!(conn.resp_body)["code"] == "missing_token"
     end
   end
 
@@ -25,7 +27,7 @@ defmodule OmashikiWeb.Plugs.BearerAuthTest do
 
       assert conn.status == 403
       assert conn.halted
-      assert Jason.decode!(conn.resp_body)["error"]["code"] == "invalid_token"
+      assert Jason.decode!(conn.resp_body)["code"] == "invalid_token"
     end
   end
 

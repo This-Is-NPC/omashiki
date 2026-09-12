@@ -59,6 +59,38 @@ defmodule OmashikiWeb.RateLimiter do
     end
   end
 
+  @doc """
+  Increment a concurrent-use counter. Returns `{:ok, count}` or
+  `{:error, :rate_limited}` when `max` is already held.
+  """
+  def checkout(scope, identifier, max) when is_binary(scope) and is_integer(max) and max > 0 do
+    ensure_table()
+    key = {:conc, scope, identifier}
+
+    case :ets.update_counter(@table, key, {2, 1}, {key, 0}) do
+      n when n > max ->
+        :ets.update_counter(@table, key, {2, -1})
+        {:error, :rate_limited}
+
+      n ->
+        {:ok, n}
+    end
+  end
+
+  @doc "Decrement a concurrent-use counter opened by `checkout/3`."
+  def checkin(scope, identifier) when is_binary(scope) do
+    ensure_table()
+    key = {:conc, scope, identifier}
+
+    try do
+      n = :ets.update_counter(@table, key, {2, -1, 0, 0})
+      if n == 0, do: :ets.delete(@table, key)
+      :ok
+    rescue
+      ArgumentError -> :ok
+    end
+  end
+
   @doc "Test helper — clears every bucket."
   def reset! do
     ensure_table()

@@ -90,6 +90,14 @@ MIX_ENV=test mix compile --warnings-as-errors
 MIX_ENV=test mix test
 """
 
+[tasks."ci:api:contract"]
+description = "OpenAPI route coverage and problem-code enum"
+run         = """
+mise run db-up
+cd server
+MIX_ENV=test mix test test/omashiki_web/controllers/api/api_contract_test.exs test/omashiki_web/controllers/api/jobs_controller_test.exs test/omashiki_web/controllers/api/sessions_controller_test.exs test/omashiki_web/controllers/api/sessions_controller_signup_test.exs --exclude integration
+"""
+
 [tasks."ci:server:fast"]
 description = "Server tests excluding :integration and real providers"
 run         = """
@@ -244,10 +252,6 @@ run         = ".scripts/arch_check.sh --fast --strict"
 [tasks."hooks:install"]
 description = "Install the versioned pre-push hook that runs local CI"
 run         = ".scripts/install-hooks.sh"
-
-[tasks."skill:install"]
-description = "Install the Omashiki Agent Skill in ~/.agents/skills"
-run         = "install -Dm0644 .agents/skills/omashiki/SKILL.md \"${HOME:?HOME must be set}/.agents/skills/omashiki/SKILL.md\""
 
 [tasks."agent:build"]
 description = "Build the configured OpenCode image (idempotent — Docker caches layers)"

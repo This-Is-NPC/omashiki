@@ -19,6 +19,8 @@ defmodule OmashikiWeb.Api.GatewayControllerTest do
 
   use OmashikiWeb.ConnCase, async: false
 
+  @moduletag :api
+
   import Ecto.Query
 
   alias Omashiki.Gateway
@@ -304,7 +306,6 @@ defmodule OmashikiWeb.Api.GatewayControllerTest do
     %Job{}
     |> Job.changeset(%{
       user_id: user.id,
-      schema_version: 1,
       idempotency_key: "gateway-#{n}",
       correlation_id: "gateway-corr-#{n}",
       repository: "repo",

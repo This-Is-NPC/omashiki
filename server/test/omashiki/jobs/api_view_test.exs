@@ -20,7 +20,7 @@ defmodule Omashiki.Jobs.ApiViewTest do
     insert_step(attempt, 1, "agent", "running")
 
     assert [%{job: %Job{id: id}, attempt: %{id: attempt_id}, steps: steps}] =
-             Api.list_for_view(user)
+             list_rows(user)
 
     assert id == job.id
     assert attempt_id == attempt.id
@@ -33,10 +33,7 @@ defmodule Omashiki.Jobs.ApiViewTest do
     job_fixture(user, token, %{status: "running", priority: 3})
     job_fixture(user, token, %{status: "failed", priority: 3, environment: "codex"})
 
-    rows =
-      Api.list_for_view(user,
-        filter: %{status: ["failed"], priority: [3], environment: ["opencode"]}
-      )
+    rows = list_rows(user, filter: %{status: ["failed"], priority: [3], environment: ["opencode"]})
 
     assert Enum.map(rows, & &1.job.id) == [wanted.id]
   end
@@ -50,7 +47,7 @@ defmodule Omashiki.Jobs.ApiViewTest do
       set: [inserted_at: DateTime.add(now, -3, :day)]
     )
 
-    rows = Api.list_for_view(user, filter: %{since: DateTime.add(now, -1, :day)})
+    rows = list_rows(user, filter: %{since: DateTime.add(now, -1, :day)})
     assert Enum.map(rows, & &1.job.id) == [recent.id]
   end
 
@@ -59,7 +56,7 @@ defmodule Omashiki.Jobs.ApiViewTest do
     attempt |> Ecto.Changeset.change(machine_id: "vps-1") |> Repo.update!()
     job_fixture(user, token, %{status: "running"})
 
-    assert [%{job: %Job{id: id}}] = Api.list_for_view(user, filter: %{worker: ["vps-1"]})
+    assert [%{job: %Job{id: id}}] = list_rows(user, filter: %{worker: ["vps-1"]})
     assert id == job.id
   end
 
@@ -68,10 +65,10 @@ defmodule Omashiki.Jobs.ApiViewTest do
     {high, _} = job_fixture(user, token, %{priority: 3})
     {middle, _} = job_fixture(user, token, %{priority: 2})
 
-    assert Enum.map(Api.list_for_view(user, sort: {:priority, :desc}), & &1.job.id) ==
+    assert Enum.map(list_rows(user, sort: {:priority, :desc}), & &1.job.id) ==
              [high.id, middle.id, low.id]
 
-    assert Enum.map(Api.list_for_view(user, sort: {:priority, :asc}, limit: 1), & &1.job.id) ==
+    assert Enum.map(list_rows(user, sort: {:priority, :asc}, page_size: 1), & &1.job.id) ==
              [low.id]
   end
 
@@ -81,7 +78,12 @@ defmodule Omashiki.Jobs.ApiViewTest do
     job_fixture(other, other_token)
     {mine, _} = job_fixture(user, token)
 
-    assert Enum.map(Api.list_for_view(user), & &1.job.id) == [mine.id]
+    assert Enum.map(list_rows(user), & &1.job.id) == [mine.id]
+  end
+
+  defp list_rows(user, opts \\ []) do
+    {:ok, %{entries: rows}} = Api.list(user, Keyword.put(opts, :as, :rows))
+    rows
   end
 
   defp insert_step(attempt, sequence, key, status) do

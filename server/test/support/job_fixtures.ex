@@ -12,7 +12,6 @@ defmodule Omashiki.JobFixtures do
         %{
           user_id: user.id,
           api_token_id: token.id,
-          schema_version: 1,
           idempotency_key: "fixture-#{id}",
           correlation_id: "corr-#{id}",
           repository: "omashiki",

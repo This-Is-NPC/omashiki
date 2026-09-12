@@ -1,9 +1,13 @@
 defmodule OmashikiWeb.Api.JobsControllerTest do
   use OmashikiWeb.ConnCase, async: false
 
+  @moduletag :api
+
   alias Omashiki.Config
   alias Omashiki.Jobs.{Job, JobEvent}
   alias Omashiki.Repo
+
+  @api_spec OmashikiWeb.ApiSpec.spec()
 
   setup do
     root = Path.join(System.tmp_dir!(), "omashiki-api-#{System.unique_integer([:positive])}")
@@ -53,11 +57,13 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
   end
 
   @tag :unauthenticated
-  test "requires a bearer token with a stable error envelope" do
+  test "requires a bearer token with problem+json", %{conn: _conn} do
     conn = Phoenix.ConnTest.build_conn() |> get("/api/v1/jobs")
 
     assert conn.status == 401
-    assert get_in(json_response(conn, 401), ["error", "code"]) == "missing_token"
+    body = json_response(conn, 401)
+    assert body["code"] == "missing_token"
+    assert_schema(body, "Problem", @api_spec)
   end
 
   test "submits idempotently and returns the same job without duplicate effects", %{
@@ -72,6 +78,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     assert first.status == 202
     assert second.status == 202
     assert json_response(first, 202)["data"]["id"] == json_response(second, 202)["data"]["id"]
+    assert_schema(json_response(first, 202), "JobResponse", @api_spec)
     assert Repo.aggregate(Job, :count, :id) == 1
     assert Repo.aggregate(JobEvent, :count, :event_id) == 1
   end
@@ -83,9 +90,11 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     {:ok, job} = Omashiki.Jobs.Admission.admit(token, request())
     {_other, plaintext} = api_token_fixture(user)
 
-    conn = build_conn() |> Plug.Conn.put_req_header("authorization", "Bearer #{plaintext}")
+    conn = json_conn() |> Plug.Conn.put_req_header("authorization", "Bearer #{plaintext}")
 
-    assert get(conn, "/api/v1/jobs/#{job.id}").status == 403
+    forbidden = get(conn, "/api/v1/jobs/#{job.id}")
+    assert forbidden.status == 403
+    assert json_response(forbidden, 403)["code"] == "forbidden"
     assert post(conn, "/api/v1/jobs/#{job.id}/cancel", %{}).status == 403
   end
 
@@ -94,26 +103,28 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     {_other, _plaintext} = api_token_fixture(user)
 
     conn =
-      build_conn()
+      json_conn()
       |> Plug.Test.init_test_session(%{"user_id" => user.id})
 
-    assert get(conn, "/api/v1/jobs/#{job.id}").status == 200
+    shown = get(conn, "/api/v1/jobs/#{job.id}")
+    assert shown.status == 200
+    assert_schema(json_response(shown, 200), "JobResponse", @api_spec)
   end
 
-  test "rejects list limits outside the documented boundary", %{conn: conn} do
-    assert get(conn, "/api/v1/jobs?limit=0").status == 400
-    assert get(conn, "/api/v1/jobs?limit=101").status == 400
-    assert get(conn, "/api/v1/jobs?status=not-a-status").status == 400
+  test "rejects an unknown status filter", %{conn: conn} do
+    conn = get(conn, "/api/v1/jobs?status=not-a-status")
+    assert conn.status == 400
+    assert json_response(conn, 400)["code"] == "invalid_status"
   end
 
   test "rejects a batch over the atomic admission limit without writes", %{conn: conn} do
     jobs = Enum.map(1..101, fn n -> batch_job("job-#{n}") end)
 
     response =
-      post(conn, "/api/v1/jobs/batch", %{schema_version: 1, correlation_id: "batch", jobs: jobs})
+      post(conn, "/api/v1/jobs/batch", %{correlation_id: "batch", jobs: jobs})
 
     assert response.status == 413
-    assert get_in(json_response(response, 413), ["error", "code"]) == "batch_too_large"
+    assert json_response(response, 413)["code"] == "batch_too_large"
     assert Repo.aggregate(Job, :count, :id) == 0
   end
 
@@ -133,6 +144,103 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     assert repeated.status == 200
     assert retried.status == 202
     assert json_response(retried, 202)["data"]["attempt"] == 2
+  end
+
+  test "a read-only token cannot submit", %{user: user} do
+    {_token, plaintext} =
+      api_token_fixture(user, %{
+        scopes: ["read"],
+        allowed_environments: ["*"],
+        max_active_jobs: 10,
+        ttl_days: 7
+      })
+
+    conn = json_conn() |> Plug.Conn.put_req_header("authorization", "Bearer #{plaintext}")
+    listed = get(conn, "/api/v1/jobs")
+    assert listed.status == 200
+
+    submitted = post(conn, "/api/v1/jobs", request())
+    assert submitted.status == 403
+    assert json_response(submitted, 403)["code"] == "insufficient_scope"
+  end
+
+  test "admission outside allowed environments is refused", %{user: user} do
+    {_token, plaintext} =
+      api_token_fixture(user, %{
+        scopes: ["read", "submit", "cancel"],
+        allowed_environments: ["other"],
+        max_active_jobs: 10,
+        ttl_days: 7
+      })
+
+    conn = json_conn() |> Plug.Conn.put_req_header("authorization", "Bearer #{plaintext}")
+    response = post(conn, "/api/v1/jobs", request())
+    assert response.status == 422
+    assert json_response(response, 422)["code"] == "environment_not_allowed"
+    assert Repo.aggregate(Job, :count, :id) == 0
+  end
+
+  test "the third active job with max_active_jobs 2 is 429", %{user: user} do
+    {_token, plaintext} =
+      api_token_fixture(user, %{
+        scopes: ["read", "submit", "cancel"],
+        allowed_environments: ["*"],
+        max_active_jobs: 2,
+        ttl_days: 7
+      })
+
+    conn = json_conn() |> Plug.Conn.put_req_header("authorization", "Bearer #{plaintext}")
+    assert post(conn, "/api/v1/jobs", request(%{"idempotency_key" => "a"})).status == 202
+    assert post(conn, "/api/v1/jobs", request(%{"idempotency_key" => "b"})).status == 202
+
+    third = post(conn, "/api/v1/jobs", request(%{"idempotency_key" => "c"}))
+    assert third.status == 429
+    assert json_response(third, 429)["code"] == "max_active_jobs"
+  end
+
+  test "an expired token is 401", %{user: user} do
+    expires = DateTime.add(DateTime.utc_now(:microsecond), -1, :second)
+
+    {_token, plaintext} =
+      api_token_fixture(user, %{
+        scopes: ["read"],
+        allowed_environments: ["*"],
+        max_active_jobs: 10,
+        expires_at: expires
+      })
+
+    conn = json_conn() |> Plug.Conn.put_req_header("authorization", "Bearer #{plaintext}")
+    response = get(conn, "/api/v1/jobs")
+    assert response.status == 401
+    assert json_response(response, 401)["code"] == "token_expired"
+  end
+
+  test "cursor pages 250 jobs without duplicates", %{conn: conn, user: user, token: token} do
+    for n <- 1..250 do
+      Omashiki.JobFixtures.job_fixture(user, token, %{
+        idempotency_key: "page-#{n}",
+        correlation_id: "page"
+      })
+    end
+
+    {ids, cursor} = collect_ids(conn, nil, [])
+    assert length(ids) == 250
+    assert length(Enum.uniq(ids)) == 250
+    assert cursor == nil
+  end
+
+  test "result without wait is 409 while the job is running", %{conn: conn, token: token} do
+    {:ok, job} = Omashiki.Jobs.Admission.admit(token, request())
+    response = get(conn, "/api/v1/jobs/#{job.id}/result")
+    assert response.status == 409
+    assert json_response(response, 409)["code"] == "result_not_ready"
+  end
+
+  test "result wait times out with 202", %{conn: conn, token: token} do
+    {:ok, job} = Omashiki.Jobs.Admission.admit(token, request())
+    response = get(conn, "/api/v1/jobs/#{job.id}/result?wait=1")
+    assert response.status == 202
+    assert get_resp_header(response, "retry-after") != []
   end
 
   test "discovery is read-only and does not expose repository paths", %{
@@ -156,10 +264,22 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     assert environment["image"] == "omashiki/agent:latest"
   end
 
+  defp collect_ids(conn, cursor, acc) do
+    path = if cursor, do: "/api/v1/jobs?cursor=#{cursor}", else: "/api/v1/jobs"
+    response = get(conn, path)
+    assert response.status == 200
+    body = json_response(response, 200)
+    ids = acc ++ Enum.map(body["data"], & &1["id"])
+
+    case body["next_cursor"] do
+      nil -> {ids, nil}
+      next -> collect_ids(conn, next, ids)
+    end
+  end
+
   defp request(overrides \\ %{}) do
     Map.merge(
       %{
-        "schema_version" => 1,
         "idempotency_key" => "request-#{System.unique_integer([:positive])}",
         "correlation_id" => "correlation-1",
         "repo" => "app",
@@ -180,14 +300,13 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
       "payload" => %{
         "instruction" => "run",
         "context" => %{"ref" => ref},
-        "branch" => "feat-batch-#{ref}"
+        "branch" => "feat-#{ref}"
       },
       "priority" => 0
     }
   end
 
   defp build_conn_with_auth(plaintext) do
-    Phoenix.ConnTest.build_conn()
-    |> Plug.Conn.put_req_header("authorization", "Bearer " <> plaintext)
+    json_conn() |> Plug.Conn.put_req_header("authorization", "Bearer #{plaintext}")
   end
 end

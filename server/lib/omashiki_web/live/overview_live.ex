@@ -38,7 +38,7 @@ defmodule OmashikiWeb.OverviewLive do
 
   defp assign_snapshot(socket) do
     user = socket.assigns.current_user
-    jobs = Api.list_for_operator(user, limit: 100)
+    {:ok, %{entries: jobs}} = Api.list(user, page_size: 100)
     slots = safe_slots(jobs)
     cache = cache_summary()
 
@@ -49,6 +49,8 @@ defmodule OmashikiWeb.OverviewLive do
     |> assign(:running, Enum.count(jobs, &(&1.status in ["provisioning", "running"])))
     |> assign(:terminal_events, Api.recent_terminal_events(user))
     |> assign(:webhook_failures, Api.recent_webhook_failures(user))
+    |> assign(:token_audit, Omashiki.ApiTokens.Audit.recent_for_user(user))
+    |> assign(:expiring_tokens, Omashiki.ApiTokens.expiring_soon(user))
     |> assign(:workers, Omashiki.Worker.Presence.list())
     |> assign(:cache, cache)
   end
@@ -166,6 +168,41 @@ defmodule OmashikiWeb.OverviewLive do
           </ul>
           <p :if={@webhook_failures == []} class="font-mono text-xs text-on-surface-variant">
             No webhook failures.
+          </p>
+        </.panel>
+
+        <.panel title="Token audit" meta="submit, cancel, retry, issue, rotate">
+          <ul :if={@token_audit != []} class="divide-y divide-outline-variant/40">
+            <li
+              :for={event <- @token_audit}
+              class="flex flex-wrap items-baseline justify-between gap-3 py-3"
+            >
+              <span class="font-mono text-xs uppercase text-on-surface">{event.action}</span>
+              <span class="font-mono text-xs text-on-surface-variant">{Ops.short_id(event.api_token_id)}</span>
+              <time class="font-mono text-xs text-on-surface-variant" datetime={event.occurred_at}>{Ops.age(
+                event.occurred_at
+              )} ago</time>
+            </li>
+          </ul>
+          <p :if={@token_audit == []} class="font-mono text-xs text-on-surface-variant">
+            No token audit events.
+          </p>
+        </.panel>
+
+        <.panel title="Tokens expiring" meta="within 7 days">
+          <ul :if={@expiring_tokens != []} class="divide-y divide-outline-variant/40">
+            <li
+              :for={token <- @expiring_tokens}
+              class="flex flex-wrap items-baseline justify-between gap-3 py-3"
+            >
+              <span class="font-mono text-xs text-on-surface">{token.name}</span>
+              <time class="font-mono text-xs text-on-surface-variant" datetime={token.expires_at}>{Ops.age(
+                token.expires_at
+              )}</time>
+            </li>
+          </ul>
+          <p :if={@expiring_tokens == []} class="font-mono text-xs text-on-surface-variant">
+            No tokens expire in the next 7 days.
           </p>
         </.panel>
 

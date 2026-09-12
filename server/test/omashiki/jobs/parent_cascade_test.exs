@@ -55,7 +55,6 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
 
   test "cycle A->B->A at admission is rejected", %{token: token} do
     batch = %{
-      "schema_version" => 1,
       "correlation_id" => "cycle-batch",
       "jobs" => [
         batch_job("a", [%{"ref" => "b"}]),
@@ -72,7 +71,6 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
              Jobs.Admission.admit_batch(
                token,
                %{
-                 "schema_version" => 1,
                  "correlation_id" => "block-edge",
                  "jobs" => [
                    batch_job("a", []),
@@ -91,7 +89,6 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
              Jobs.Admission.admit_batch(
                token,
                %{
-                 "schema_version" => 1,
                  "correlation_id" => "cancel-edge",
                  "jobs" => [
                    batch_job("a", []),
@@ -113,7 +110,6 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
              Jobs.Admission.admit_batch(
                token,
                %{
-                 "schema_version" => 1,
                  "correlation_id" => "proceed-edge",
                  "jobs" => [
                    batch_job("a", []),
@@ -223,7 +219,6 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
              Jobs.Admission.admit_batch(
                token,
                %{
-                 "schema_version" => 1,
                  "correlation_id" => "default-base-proceed",
                  "jobs" => [
                    batch_job("a", []),
@@ -256,7 +251,6 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
              Jobs.Admission.admit_batch(
                token,
                %{
-                 "schema_version" => 1,
                  "correlation_id" => "parent-cancel",
                  "jobs" => [
                    batch_job("parent", []),
@@ -308,7 +302,6 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
 
   defp diamond_batch do
     %{
-      "schema_version" => 1,
       "correlation_id" => "diamond-batch",
       "jobs" => [
         batch_job("a", []),
@@ -336,7 +329,6 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
 
   defp single_job(key, payload_extra, depends_on \\ []) do
     %{
-      "schema_version" => 1,
       "idempotency_key" => key,
       "correlation_id" => "single-#{key}",
       "repo" => "app",

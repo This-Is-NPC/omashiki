@@ -21,7 +21,7 @@ defmodule Omashiki.Jobs.SchemaTest do
       |> List.flatten()
 
     assert tables ==
-             ~w(api_tokens execution_capacity job_attempts job_dependencies job_events job_steps jobs usage_ledger users webhook_deliveries)
+             ~w(api_tokens execution_capacity job_attempts job_dependencies job_events job_steps jobs token_audit_events usage_ledger users webhook_deliveries)
 
     oban_tables =
       Repo.query!(
@@ -49,7 +49,11 @@ defmodule Omashiki.Jobs.SchemaTest do
         user_id: other.id,
         name: "other",
         token_hash:
-          String.duplicate("c", 64) <> Integer.to_string(System.unique_integer([:positive]))
+          String.duplicate("c", 64) <> Integer.to_string(System.unique_integer([:positive])),
+        expires_at: DateTime.add(DateTime.utc_now(:microsecond), 30, :day),
+        scopes: ["read", "submit", "cancel"],
+        allowed_environments: ["*"],
+        max_active_jobs: 100
       })
       |> Repo.insert!()
 
@@ -341,9 +345,12 @@ defmodule Omashiki.Jobs.SchemaTest do
       assert indexes[name] =~ "USING brin"
     end
 
-    assert [{Oban.Plugins.Pruner, options}, {Oban.Plugins.Lifeline, lifeline}] =
-             Application.fetch_env!(:omashiki, Oban)[:plugins]
+    plugins = Application.fetch_env!(:omashiki, Oban)[:plugins]
+    pruner = Enum.find(plugins, &match?({Oban.Plugins.Pruner, _}, &1))
+    lifeline = Enum.find(plugins, &match?({Oban.Plugins.Lifeline, _}, &1))
+    cron = Enum.find(plugins, &match?({Oban.Plugins.Cron, _}, &1))
 
+    assert {Oban.Plugins.Pruner, options} = pruner
     assert options[:max_age] == 60 * 60 * 24 * 30
 
     # Lifeline is what reclaims a dispatch orphaned in `executing` by a dead
@@ -351,7 +358,11 @@ defmodule Omashiki.Jobs.SchemaTest do
     # alone because `executing` is an incomplete state. `rescue_after` has to
     # stay above the longest legitimate run (harness `timeout_ms` is 30 min plus
     # pre-steps) or a live attempt gets rescued out from under itself.
-    assert lifeline[:rescue_after] >= :timer.minutes(60)
+    assert {Oban.Plugins.Lifeline, lifeline_opts} = lifeline
+    assert lifeline_opts[:rescue_after] >= :timer.minutes(60)
+
+    assert {Oban.Plugins.Cron, cron_opts} = cron
+    assert {"0 3 * * *", Omashiki.ApiTokens.PruneAuditWorker} in cron_opts[:crontab]
   end
 
   defp persist_user do
@@ -367,7 +378,11 @@ defmodule Omashiki.Jobs.SchemaTest do
     |> Token.create_changeset(%{
       user_id: user.id,
       name: "automation",
-      token_hash: String.duplicate("b", 64)
+      token_hash: String.duplicate("b", 64),
+      expires_at: DateTime.add(DateTime.utc_now(:microsecond), 30, :day),
+      scopes: ["read", "submit", "cancel"],
+      allowed_environments: ["*"],
+      max_active_jobs: 100
     })
     |> Repo.insert!()
   end

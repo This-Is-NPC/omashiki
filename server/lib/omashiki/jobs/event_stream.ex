@@ -109,8 +109,7 @@ defmodule Omashiki.Jobs.EventStream do
       correlation_id: event.correlation_id,
       occurred_at: DateTime.to_iso8601(event.occurred_at),
       recorded_at: DateTime.to_iso8601(event.recorded_at),
-      data: event.data,
-      schema_version: event.schema_version
+      data: event.data
     }
   end
 

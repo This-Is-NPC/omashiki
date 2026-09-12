@@ -1,48 +1,77 @@
 defmodule Omashiki.Jobs.Api do
-  @moduledoc "Owner-aware reads for the public queue API."
+  @moduledoc "Owner-aware reads for the public queue API, Home, and System."
 
   import Ecto.Query
 
   alias Omashiki.Accounts.User
   alias Omashiki.ApiTokens.Token
-  alias Omashiki.Jobs.{Job, JobAttempt, JobDependency, JobEvent, JobStep, WebhookDelivery}
+  alias Omashiki.Jobs.{Job, JobAttempt, JobDependency, JobEvent, JobStep, Statuses}
   alias Omashiki.Repo
   alias Omashiki.UsageLedger.Entry
+  alias Omashiki.Jobs.WebhookDelivery
 
-  @statuses ~w(blocked queued provisioning running succeeded failed cancelled)
-  @terminal_statuses ~w(succeeded failed cancelled)
-  @default_limit 50
-  @max_limit 100
-  @view_max_limit 500
+  @default_page_size 50
+  @max_page_size 500
   @view_sorts [:inserted_at, :started_at, :finished_at, :priority]
 
-  def statuses, do: @statuses
-  def default_limit, do: @default_limit
-  def max_limit, do: @max_limit
+  def statuses, do: Statuses.all()
+  def default_page_size, do: @default_page_size
 
-  @doc "List jobs visible to the exact submitting token or local operator."
+  @doc """
+  List jobs visible to the actor.
+
+  Options:
+
+    * `:filter` — `:status`, `:environment`, `:repository`, `:priority`,
+      `:worker` (lists or a single value), `:correlation_id`, `:since`,
+      and `:attempt_ids`
+    * `:cursor` — opaque `inserted_at` + `id` cursor
+    * `:page_size` — page length, default #{@default_page_size}, max #{@max_page_size}
+    * `:sort` — `{field, :asc | :desc}` for Home; API uses insertion order
+    * `:as` — `:jobs` (default) or `:rows` (job + current attempt + steps)
+  """
   def list(actor, opts \\ []) do
-    limit = Keyword.get(opts, :limit, @default_limit)
-    status = Keyword.get(opts, :status)
+    page_size = opts |> Keyword.get(:page_size, @default_page_size) |> max(1) |> min(@max_page_size)
+    as = Keyword.get(opts, :as, :jobs)
+    filter = opts |> Keyword.get(:filter, %{}) |> normalize_filter()
+    {sort_field, direction} = Keyword.get(opts, :sort, {:inserted_at, :desc})
 
-    cond do
-      not is_integer(limit) or limit < 1 or limit > @max_limit ->
-        {:error, :invalid_limit}
+    with :ok <- validate_filter(filter),
+         {:ok, cursor} <- decode_cursor(Keyword.get(opts, :cursor)) do
+      query =
+        from(j in Job,
+          as: :job,
+          left_join: a in JobAttempt,
+          as: :attempt,
+          on: a.job_id == j.id and a.number == j.current_attempt
+        )
+        |> apply_named_actor_scope(actor)
+        |> filter_view(filter)
+        |> apply_cursor(cursor, direction)
+        |> order_view(sort_field, direction)
+        |> limit(^(page_size + 1))
 
-      not is_nil(status) and status not in @statuses ->
-        {:error, :invalid_status}
+      case as do
+        :rows ->
+          rows = query |> select([job: j, attempt: a], {j, a}) |> Repo.all()
+          {page, rest} = split_page(rows, page_size)
 
-      true ->
-        query =
-          from(j in Job,
-            order_by: [desc: j.inserted_at, desc: j.id],
-            limit: ^limit
-          )
+          {:ok,
+           %{
+             entries: with_steps(page),
+             next_cursor: next_cursor_from_rows(rest, page)
+           }}
 
-        query = if is_nil(status), do: query, else: where(query, [j], j.status == ^status)
-        query = apply_actor_scope(query, actor)
+        _ ->
+          jobs = query |> select([job: j], j) |> Repo.all()
+          {page, rest} = split_page(jobs, page_size)
 
-        {:ok, Repo.all(query)}
+          {:ok,
+           %{
+             entries: page,
+             next_cursor: next_cursor(rest, page)
+           }}
+      end
     end
   end
 
@@ -63,80 +92,6 @@ defmodule Omashiki.Jobs.Api do
       from(a in JobAttempt, where: a.job_id == ^job.id and a.number == ^job.current_attempt)
     )
   end
-
-  @doc "Return the operator's jobs, including only queue-operation fields."
-  def list_for_operator(%User{} = user, opts \\ []) do
-    limit = Keyword.get(opts, :limit, @max_limit)
-
-    from(j in Job,
-      where: j.user_id == ^user.id,
-      order_by: [desc: j.inserted_at, desc: j.id],
-      limit: ^limit
-    )
-    |> Repo.all()
-  end
-
-  @doc """
-  Return the operator's jobs for a display-only task view. Each row carries the
-  job, its current attempt, and that attempt's steps. Reads only.
-
-  `:filter` accepts `:status`, `:environment`, `:repository`, `:priority`, and
-  `:worker` value lists, and `:since`, a `DateTime` compared with submission.
-  `:sort` is `{field, :asc | :desc}` over submission, start, finish, or priority.
-  """
-  def list_for_view(%User{} = user, opts \\ []) do
-    limit = opts |> Keyword.get(:limit, @default_limit) |> max(1) |> min(@view_max_limit)
-    {sort_field, direction} = Keyword.get(opts, :sort, {:inserted_at, :desc})
-
-    rows =
-      from(j in Job,
-        as: :job,
-        left_join: a in JobAttempt,
-        as: :attempt,
-        on: a.job_id == j.id and a.number == j.current_attempt,
-        where: j.user_id == ^user.id,
-        limit: ^limit,
-        select: {j, a}
-      )
-      |> filter_view(Keyword.get(opts, :filter, %{}))
-      |> order_view(sort_field, direction)
-      |> Repo.all()
-
-    attempt_ids = for {_job, %JobAttempt{id: id}} <- rows, do: id
-
-    steps =
-      from(s in JobStep,
-        where: s.attempt_id in ^attempt_ids,
-        order_by: [asc: s.attempt_id, asc: s.sequence]
-      )
-      |> Repo.all()
-      |> Enum.group_by(& &1.attempt_id)
-
-    Enum.map(rows, fn {job, attempt} ->
-      %{job: job, attempt: attempt, steps: attempt_steps(steps, attempt)}
-    end)
-  end
-
-  defp filter_view(query, filter) do
-    Enum.reduce(filter, query, fn
-      {:status, values}, query -> where(query, [job: j], j.status in ^values)
-      {:environment, values}, query -> where(query, [job: j], j.environment in ^values)
-      {:repository, values}, query -> where(query, [job: j], j.repository in ^values)
-      {:priority, values}, query -> where(query, [job: j], j.priority in ^values)
-      {:worker, values}, query -> where(query, [attempt: a], a.machine_id in ^values)
-      {:since, %DateTime{} = since}, query -> where(query, [job: j], j.inserted_at >= ^since)
-      {:attempt_ids, ids}, query -> where(query, [attempt: a], a.id in ^ids)
-    end)
-  end
-
-  defp order_view(query, field, :asc) when field in @view_sorts,
-    do: order_by(query, [job: j], asc_nulls_last: field(j, ^field), asc: j.id)
-
-  defp order_view(query, field, :desc) when field in @view_sorts,
-    do: order_by(query, [job: j], desc_nulls_last: field(j, ^field), desc: j.id)
-
-  defp attempt_steps(_steps, nil), do: []
-  defp attempt_steps(steps, %JobAttempt{id: id}), do: Map.get(steps, id, [])
 
   @doc "Map attempt ids to job ids, only for jobs `actor` may read."
   def job_ids_for_attempts(actor, attempt_ids) when is_list(attempt_ids) do
@@ -211,12 +166,12 @@ defmodule Omashiki.Jobs.Api do
 
   @doc "Return recent terminal events belonging to the operator."
   def recent_terminal_events(%User{} = user, limit \\ 8) do
-    terminal_statuses = @terminal_statuses
+    terminal = Statuses.terminal()
 
     from(e in JobEvent,
       join: j in Job,
       on: j.id == e.job_id,
-      where: j.user_id == ^user.id and e.status in ^terminal_statuses,
+      where: j.user_id == ^user.id and e.status in ^terminal,
       order_by: [desc: e.occurred_at, desc: e.sequence],
       limit: ^limit
     )
@@ -270,6 +225,140 @@ defmodule Omashiki.Jobs.Api do
 
   defp apply_actor_scope(query, %User{id: user_id}), do: where(query, [j], j.user_id == ^user_id)
   defp apply_actor_scope(query, _), do: where(query, [j], false)
+
+  defp apply_named_actor_scope(query, %Token{id: token_id, user_id: user_id}) do
+    where(query, [job: j], j.user_id == ^user_id and j.api_token_id == ^token_id)
+  end
+
+  defp apply_named_actor_scope(query, %User{id: user_id}),
+    do: where(query, [job: j], j.user_id == ^user_id)
+
+  defp apply_named_actor_scope(query, _), do: where(query, [job: j], false)
+
+  defp normalize_filter(filter) when is_map(filter) do
+    Enum.reduce(filter, %{}, fn
+      {key, value}, acc
+      when key in [:status, :environment, :repository, :priority, :worker] and is_binary(value) ->
+        Map.put(acc, key, [value])
+
+      {key, value}, acc
+      when key in [:status, :environment, :repository, :priority, :worker] and is_list(value) ->
+        Map.put(acc, key, value)
+
+      {:correlation_id, value}, acc when is_binary(value) and value != "" ->
+        Map.put(acc, :correlation_id, value)
+
+      {:since, %DateTime{} = since}, acc ->
+        Map.put(acc, :since, since)
+
+      {:attempt_ids, ids}, acc when is_list(ids) ->
+        Map.put(acc, :attempt_ids, ids)
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp validate_filter(filter) do
+    case Map.get(filter, :status) do
+      nil ->
+        :ok
+
+      values when is_list(values) ->
+        if Enum.all?(values, &(&1 in Statuses.all())), do: :ok, else: {:error, :invalid_status}
+
+      _ ->
+        {:error, :invalid_status}
+    end
+  end
+
+  defp filter_view(query, filter) do
+    Enum.reduce(filter, query, fn
+      {:status, values}, query -> where(query, [job: j], j.status in ^values)
+      {:environment, values}, query -> where(query, [job: j], j.environment in ^values)
+      {:repository, values}, query -> where(query, [job: j], j.repository in ^values)
+      {:priority, values}, query -> where(query, [job: j], j.priority in ^values)
+      {:worker, values}, query -> where(query, [attempt: a], a.machine_id in ^values)
+      {:correlation_id, value}, query -> where(query, [job: j], j.correlation_id == ^value)
+      {:since, %DateTime{} = since}, query -> where(query, [job: j], j.inserted_at >= ^since)
+      {:attempt_ids, ids}, query -> where(query, [attempt: a], a.id in ^ids)
+    end)
+  end
+
+  defp apply_cursor(query, nil, _direction), do: query
+
+  defp apply_cursor(query, {at, id}, :desc) do
+    where(query, [job: j], j.inserted_at < ^at or (j.inserted_at == ^at and j.id < ^id))
+  end
+
+  defp apply_cursor(query, {at, id}, :asc) do
+    where(query, [job: j], j.inserted_at > ^at or (j.inserted_at == ^at and j.id > ^id))
+  end
+
+  defp order_view(query, field, :asc) when field in @view_sorts,
+    do: order_by(query, [job: j], asc_nulls_last: field(j, ^field), asc: j.id)
+
+  defp order_view(query, field, :desc) when field in @view_sorts,
+    do: order_by(query, [job: j], desc_nulls_last: field(j, ^field), desc: j.id)
+
+  defp with_steps(rows) do
+    attempt_ids = for {_job, %JobAttempt{id: id}} <- rows, do: id
+
+    steps =
+      from(s in JobStep,
+        where: s.attempt_id in ^attempt_ids,
+        order_by: [asc: s.attempt_id, asc: s.sequence]
+      )
+      |> Repo.all()
+      |> Enum.group_by(& &1.attempt_id)
+
+    Enum.map(rows, fn {job, attempt} ->
+      %{job: job, attempt: attempt, steps: attempt_steps(steps, attempt)}
+    end)
+  end
+
+  defp attempt_steps(_steps, nil), do: []
+  defp attempt_steps(steps, %JobAttempt{id: id}), do: Map.get(steps, id, [])
+
+  defp split_page(items, page_size) do
+    {Enum.take(items, page_size), Enum.drop(items, page_size)}
+  end
+
+  defp next_cursor([], _page), do: nil
+  defp next_cursor(_rest, page), do: page |> List.last() |> encode_cursor()
+
+  defp next_cursor_from_rows([], _page), do: nil
+
+  defp next_cursor_from_rows(_rest, page) do
+    case List.last(page) do
+      {job, _} -> encode_cursor(job)
+      %{job: job} -> encode_cursor(job)
+    end
+  end
+
+  defp encode_cursor(nil), do: nil
+
+  defp encode_cursor(%{inserted_at: at, id: id}) do
+    %{"t" => DateTime.to_iso8601(at), "id" => id}
+    |> Jason.encode!()
+    |> Base.url_encode64(padding: false)
+  end
+
+  defp decode_cursor(nil), do: {:ok, nil}
+  defp decode_cursor(""), do: {:ok, nil}
+
+  defp decode_cursor(cursor) when is_binary(cursor) do
+    with {:ok, json} <- Base.url_decode64(cursor, padding: false),
+         {:ok, %{"t" => t, "id" => id}} <- Jason.decode(json),
+         {:ok, at, _} <- DateTime.from_iso8601(t),
+         {:ok, uuid} <- Ecto.UUID.cast(id) do
+      {:ok, {at, uuid}}
+    else
+      _ -> {:error, :invalid_cursor}
+    end
+  end
+
+  defp decode_cursor(_), do: {:error, :invalid_cursor}
 
   defp cast_id(id) do
     case Ecto.UUID.cast(id) do

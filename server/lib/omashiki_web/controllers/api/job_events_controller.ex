@@ -1,10 +1,24 @@
 defmodule OmashikiWeb.Api.JobEventsController do
-  use OmashikiWeb, :controller
+  use OmashikiWeb.Api.Controller
 
   alias Omashiki.Jobs.EventStream
 
-  @doc "Stream only persisted events for the authenticated job client."
-  def stream(conn, %{"id" => job_id}) do
+  tags ["jobs"]
+
+  operation :stream,
+    summary: "Stream job events as SSE",
+    security: [%{"bearer" => ["read"]}],
+    parameters: [
+      id: [in: :path, type: :string, required: true]
+    ],
+    responses: %{
+      200 =>
+        {"Event stream", "text/event-stream",
+         %OpenApiSpex.Schema{type: :string, description: "Server-sent events"}}
+    }
+
+  def stream(conn, params) do
+    job_id = Map.get(params, :id) || Map.get(params, "id")
     actor = conn.assigns[:current_token] || conn.assigns[:current_user]
 
     case EventStream.prepare(job_id, actor, last_event_id(conn)) do
@@ -18,7 +32,7 @@ defmodule OmashikiWeb.Api.JobEventsController do
         |> EventStream.stream(job, after_sequence)
 
       {:error, reason} ->
-        error_response(conn, reason)
+        {:error, reason}
     end
   end
 
@@ -29,21 +43,4 @@ defmodule OmashikiWeb.Api.JobEventsController do
       _ -> :invalid_cursor
     end
   end
-
-  defp error_response(conn, :not_found), do: json_error(conn, 404, "not_found")
-  defp error_response(conn, :forbidden), do: json_error(conn, 403, "forbidden")
-
-  defp error_response(conn, reason)
-       when reason in ~w(invalid_cursor cursor_mismatch cursor_expired)a,
-       do: json_error(conn, 400, "invalid_cursor")
-
-  defp json_error(conn, status, code) do
-    conn
-    |> put_status(status)
-    |> json(%{error: %{code: code, message: message_for(code), details: %{}}})
-  end
-
-  defp message_for("not_found"), do: "Job not found"
-  defp message_for("forbidden"), do: "Job is not owned by this token"
-  defp message_for("invalid_cursor"), do: "Last-Event-ID is invalid"
 end

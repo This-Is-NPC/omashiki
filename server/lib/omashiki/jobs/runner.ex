@@ -324,6 +324,9 @@ defmodule Omashiki.Jobs.Runner do
           base_sha: Map.get(final, :base_sha, Map.get(final, "base_sha")),
           head_sha: Map.get(final, :head_sha, Map.get(final, "head_sha")),
           worktree_clean: Map.get(final, :worktree_clean, Map.get(final, "worktree_clean")),
+          summary: harness_summary(state.harness_result),
+          changes: Map.get(final, :changes, Map.get(final, "changes")),
+          compare_url: Map.get(final, :compare_url, Map.get(final, "compare_url")),
           result:
             deep_stringify(
               Map.get(final, :result, Map.get(final, "result", state.harness_result))
@@ -715,6 +718,18 @@ defmodule Omashiki.Jobs.Runner do
 
   defp output_summary(output) when is_map(output), do: deep_stringify(output)
   defp output_summary(output), do: %{"output" => truncate(output)}
+
+  defp harness_summary(%_{} = result), do: harness_summary(Map.from_struct(result))
+
+  defp harness_summary(result) when is_map(result) do
+    text =
+      result["text"] || result["message"] || result["output"] || result["assistant_text"] ||
+        result[:text] || result[:message] || result[:output] || result[:assistant_text]
+
+    if is_binary(text) and text != "", do: String.slice(String.trim(text), 0, 4_096)
+  end
+
+  defp harness_summary(_), do: nil
 
   defp error_map(code, reason) when is_binary(code),
     do: %{

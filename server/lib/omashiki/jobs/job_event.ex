@@ -18,7 +18,6 @@ defmodule Omashiki.Jobs.JobEvent do
     field :occurred_at, :utc_datetime_usec
     field :recorded_at, :utc_datetime_usec
     field :data, :map, default: %{}
-    field :schema_version, :integer, default: 1
 
     belongs_to :job, Omashiki.Jobs.Job
   end
@@ -37,8 +36,7 @@ defmodule Omashiki.Jobs.JobEvent do
       :correlation_id,
       :occurred_at,
       :recorded_at,
-      :data,
-      :schema_version
+      :data
     ])
     |> validate_required([
       :job_id,
@@ -48,8 +46,7 @@ defmodule Omashiki.Jobs.JobEvent do
       :status,
       :occurred_at,
       :recorded_at,
-      :data,
-      :schema_version
+      :data
     ])
     |> validate_number(:attempt, greater_than: 0)
     |> validate_number(:sequence, greater_than: 0)

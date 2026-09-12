@@ -2,10 +2,10 @@ defmodule Omashiki.Repo.Migrations.InitialSchema do
   use Ecto.Migration
 
   @moduledoc """
-  Clean queue-only schema. Declarative repository/environment configuration
-  lives in `omashiki.toml`; PostgreSQL stores admitted jobs and their effects.
+  Queue schema. Declarative repository and environment configuration lives in
+  `omashiki.toml`; PostgreSQL stores admitted jobs and their effects.
 
-  There is intentionally no legacy migration or `down`; use `mix ecto.reset`.
+  There is no `down`. Use `mix ecto.reset`.
   """
 
   def up do
@@ -31,8 +31,11 @@ defmodule Omashiki.Repo.Migrations.InitialSchema do
       add :name, :text, null: false
       add :token_hash, :text, null: false
       add :last_used_at, :utc_datetime_usec
-      add :expires_at, :utc_datetime_usec
+      add :expires_at, :utc_datetime_usec, null: false
       add :revoked_at, :utc_datetime_usec
+      add :scopes, {:array, :text}, null: false
+      add :allowed_environments, {:array, :text}, null: false
+      add :max_active_jobs, :integer, null: false
       add :webhook_destination, :text
       add :webhook_secret_ciphertext, :text
       add :webhook_previous_secret_ciphertext, :text
@@ -46,22 +49,35 @@ defmodule Omashiki.Repo.Migrations.InitialSchema do
     create index(:api_tokens, [:user_id, :inserted_at])
     create constraint(:api_tokens, :api_tokens_name_not_blank, check: "btrim(name) <> ''")
 
+    create constraint(:api_tokens, :api_tokens_scopes_check,
+             check:
+               "cardinality(scopes) > 0 AND scopes <@ ARRAY['read','submit','cancel']::text[]"
+           )
+
+    create constraint(:api_tokens, :api_tokens_allowed_environments_check,
+             check: "cardinality(allowed_environments) > 0"
+           )
+
+    create constraint(:api_tokens, :api_tokens_max_active_jobs_check,
+             check: "max_active_jobs > 0"
+           )
+
     create table(:jobs, primary_key: false) do
       add :id, :binary_id, primary_key: true
       add :user_id, references(:users, type: :binary_id, on_delete: :restrict), null: false
       add :api_token_id, references(:api_tokens, type: :binary_id, on_delete: :nilify_all)
-      add :parent_job_id, references(:jobs, type: :binary_id, on_delete: :restrict)
-      add :schema_version, :integer, null: false, default: 1
       add :idempotency_key, :text, null: false
       add :correlation_id, :text, null: false
-      add :repository, :text, null: false
+      add :repository, :text
       add :environment, :text, null: false
       add :payload, :map, null: false
       add :payload_hash, :text, null: false
-      add :repository_snapshot, :map, null: false
-      add :repository_digest, :text, null: false
-      add :environment_snapshot, :map, null: false
-      add :environment_digest, :text, null: false
+      add :admitted_repository, :map
+      add :admitted_repository_digest, :text
+      add :admitted_environment, :map, null: false
+      add :admitted_environment_digest, :text, null: false
+      add :admitted_plugin, :map, null: false
+      add :admitted_plugin_digest, :text, null: false
       add :registry_digest, :text, null: false
       add :queue, :text, null: false, default: "default"
       add :priority, :integer, null: false, default: 0
@@ -72,15 +88,16 @@ defmodule Omashiki.Repo.Migrations.InitialSchema do
       add :finished_at, :utc_datetime_usec
       add :terminal_result, :map
       add :terminal_error, :map
+      add :dependency_artifacts, :map
       timestamps(type: :utc_datetime_usec)
     end
 
     create unique_index(:jobs, [:user_id, :idempotency_key])
     create unique_index(:jobs, [:id, :user_id])
-    create index(:jobs, [:parent_job_id])
     create index(:jobs, [:api_token_id])
     create index(:jobs, [:correlation_id])
     create index(:jobs, [:status])
+    create index(:jobs, [desc: :inserted_at, desc: :id], name: :jobs_inserted_at_id_index)
 
     create index(:jobs, [:queue, desc: :priority, asc: :queued_at, asc: :id],
              name: :jobs_queue_order_index,
@@ -88,21 +105,12 @@ defmodule Omashiki.Repo.Migrations.InitialSchema do
            )
 
     create index(:jobs, [:finished_at], using: "BRIN")
-    create constraint(:jobs, :jobs_schema_version_check, check: "schema_version = 1")
     create constraint(:jobs, :jobs_priority_check, check: "priority BETWEEN 0 AND 3")
     create constraint(:jobs, :jobs_current_attempt_positive, check: "current_attempt > 0")
-
-    create constraint(:jobs, :jobs_parent_not_self,
-             check: "parent_job_id IS NULL OR parent_job_id <> id"
-           )
 
     create constraint(:jobs, :jobs_status_check,
              check:
                "status IN ('blocked','queued','provisioning','running','succeeded','failed','cancelled')"
-           )
-
-    create constraint(:jobs, :jobs_blocked_requires_parent,
-             check: "status <> 'blocked' OR parent_job_id IS NOT NULL"
            )
 
     create constraint(:jobs, :jobs_queue_timestamps,
@@ -119,11 +127,18 @@ defmodule Omashiki.Repo.Migrations.InitialSchema do
              check: "octet_length(payload::text) <= 1048576"
            )
 
-    for field <- ~w(payload_hash repository_digest environment_digest registry_digest) do
+    for field <- ~w(payload_hash admitted_environment_digest admitted_plugin_digest registry_digest) do
       create constraint(:jobs, String.to_atom("jobs_#{field}_sha256"),
                check: "#{field} ~ '^[0-9a-f]{64}$'"
              )
     end
+
+    create constraint(:jobs, :jobs_admitted_repository_digest_sha256,
+             check: """
+             (admitted_repository IS NULL AND admitted_repository_digest IS NULL)
+             OR (admitted_repository IS NOT NULL AND admitted_repository_digest ~ '^[0-9a-f]{64}$')
+             """
+           )
 
     create constraint(:jobs, :jobs_terminal_shape,
              check: """
@@ -140,25 +155,19 @@ defmodule Omashiki.Repo.Migrations.InitialSchema do
     """
 
     execute """
-    ALTER TABLE jobs
-    ADD CONSTRAINT jobs_parent_owner_fkey
-    FOREIGN KEY (parent_job_id, user_id) REFERENCES jobs(id, user_id) ON DELETE RESTRICT
-    """
-
-    execute """
     CREATE FUNCTION prevent_job_identity_update() RETURNS trigger AS $$
     BEGIN
-      IF ROW(OLD.user_id, OLD.api_token_id, OLD.parent_job_id, OLD.schema_version,
-             OLD.idempotency_key, OLD.correlation_id, OLD.repository, OLD.environment,
-             OLD.payload, OLD.payload_hash, OLD.repository_snapshot, OLD.repository_digest,
-             OLD.environment_snapshot, OLD.environment_digest, OLD.registry_digest,
-             OLD.queue, OLD.priority)
+      IF ROW(OLD.user_id, OLD.api_token_id, OLD.idempotency_key,
+             OLD.correlation_id, OLD.repository, OLD.environment, OLD.payload, OLD.payload_hash,
+             OLD.admitted_repository, OLD.admitted_repository_digest, OLD.admitted_environment,
+             OLD.admitted_environment_digest, OLD.admitted_plugin, OLD.admitted_plugin_digest,
+             OLD.registry_digest, OLD.queue, OLD.priority)
          IS DISTINCT FROM
-         ROW(NEW.user_id, NEW.api_token_id, NEW.parent_job_id, NEW.schema_version,
-             NEW.idempotency_key, NEW.correlation_id, NEW.repository, NEW.environment,
-             NEW.payload, NEW.payload_hash, NEW.repository_snapshot, NEW.repository_digest,
-             NEW.environment_snapshot, NEW.environment_digest, NEW.registry_digest,
-             NEW.queue, NEW.priority) THEN
+         ROW(NEW.user_id, NEW.api_token_id, NEW.idempotency_key,
+             NEW.correlation_id, NEW.repository, NEW.environment, NEW.payload, NEW.payload_hash,
+             NEW.admitted_repository, NEW.admitted_repository_digest, NEW.admitted_environment,
+             NEW.admitted_environment_digest, NEW.admitted_plugin, NEW.admitted_plugin_digest,
+             NEW.registry_digest, NEW.queue, NEW.priority) THEN
         RAISE EXCEPTION 'admitted job identity is immutable' USING ERRCODE = '23514';
       END IF;
       RETURN NEW;
@@ -172,19 +181,56 @@ defmodule Omashiki.Repo.Migrations.InitialSchema do
     FOR EACH ROW EXECUTE FUNCTION prevent_job_identity_update()
     """
 
+    create table(:job_dependencies, primary_key: false) do
+      add :id, :binary_id, primary_key: true
+      add :job_id, references(:jobs, type: :binary_id, on_delete: :delete_all), null: false
+      add :depends_on_job_id, references(:jobs, type: :binary_id, on_delete: :restrict),
+        null: false
+
+      add :user_id, references(:users, type: :binary_id, on_delete: :restrict), null: false
+      add :on_failure, :text, null: false, default: "cancel"
+      timestamps(type: :utc_datetime_usec)
+    end
+
+    create unique_index(:job_dependencies, [:job_id, :depends_on_job_id])
+    create index(:job_dependencies, [:depends_on_job_id])
+    create index(:job_dependencies, [:user_id])
+
+    create constraint(:job_dependencies, :job_dependencies_not_self,
+             check: "job_id <> depends_on_job_id"
+           )
+
+    create constraint(:job_dependencies, :job_dependencies_on_failure_check,
+             check: "on_failure IN ('cancel', 'block', 'proceed')"
+           )
+
+    execute """
+    ALTER TABLE job_dependencies
+    ADD CONSTRAINT job_dependencies_job_owner_fkey
+    FOREIGN KEY (job_id, user_id) REFERENCES jobs(id, user_id) ON DELETE CASCADE
+    """
+
+    execute """
+    ALTER TABLE job_dependencies
+    ADD CONSTRAINT job_dependencies_dep_owner_fkey
+    FOREIGN KEY (depends_on_job_id, user_id) REFERENCES jobs(id, user_id) ON DELETE RESTRICT
+    """
+
     create table(:execution_capacity, primary_key: false) do
-      add :id, :integer, primary_key: true
+      add :machine_id, :text, primary_key: true
       add :capacity, :integer, null: false, default: 8
       add :active, :integer, null: false, default: 0
       timestamps(type: :utc_datetime_usec)
     end
 
-    execute "INSERT INTO execution_capacity (id, capacity, active, inserted_at, updated_at) VALUES (1, 8, 0, NOW(), NOW())"
-    create constraint(:execution_capacity, :execution_capacity_id_check, check: "id = 1")
-
     create constraint(:execution_capacity, :execution_capacity_values_check,
-             check: "capacity = 8 AND active >= 0 AND active <= capacity"
+             check: "capacity > 0 AND active >= 0 AND active <= capacity"
            )
+
+    execute """
+    INSERT INTO execution_capacity (machine_id, capacity, active, inserted_at, updated_at)
+    VALUES ('local', 8, 0, NOW(), NOW())
+    """
 
     create table(:job_attempts, primary_key: false) do
       add :id, :binary_id, primary_key: true
@@ -193,6 +239,7 @@ defmodule Omashiki.Repo.Migrations.InitialSchema do
       add :status, :text, null: false
       add :oban_job_id, references(:oban_jobs, type: :bigint, on_delete: :nilify_all)
       add :runner_id, :text
+      add :machine_id, :text
       add :lease_token, :text
       add :lease_expires_at, :utc_datetime_usec
       add :heartbeat_at, :utc_datetime_usec
@@ -204,6 +251,9 @@ defmodule Omashiki.Repo.Migrations.InitialSchema do
       add :base_sha, :text
       add :head_sha, :text
       add :worktree_clean, :boolean
+      add :summary, :text
+      add :changes, :map
+      add :compare_url, :text
       add :result, :map
       add :error, :map
       timestamps(type: :utc_datetime_usec)
@@ -240,7 +290,11 @@ defmodule Omashiki.Repo.Migrations.InitialSchema do
 
     create constraint(:job_attempts, :job_attempts_terminal_shape,
              check: """
-             (status = 'succeeded' AND finished_at IS NOT NULL AND branch IS NOT NULL AND base_sha IS NOT NULL AND head_sha IS NOT NULL AND worktree_clean IS TRUE AND result IS NOT NULL AND error IS NULL)
+             (status = 'succeeded' AND finished_at IS NOT NULL AND result IS NOT NULL AND error IS NULL AND (
+               (branch IS NOT NULL AND base_sha IS NOT NULL AND head_sha IS NOT NULL AND worktree_clean IS TRUE)
+               OR
+               (branch IS NULL AND base_sha IS NULL AND head_sha IS NULL AND worktree_clean IS NULL)
+             ))
              OR (status IN ('failed','cancelled') AND finished_at IS NOT NULL AND branch IS NULL AND base_sha IS NULL AND head_sha IS NULL AND worktree_clean IS NULL AND result IS NULL AND error IS NOT NULL)
               OR (status IN ('blocked','queued','provisioning','running') AND finished_at IS NULL AND result IS NULL AND error IS NULL)
              """
@@ -305,7 +359,6 @@ defmodule Omashiki.Repo.Migrations.InitialSchema do
       add :occurred_at, :utc_datetime_usec, null: false
       add :recorded_at, :utc_datetime_usec, null: false
       add :data, :map, null: false, default: %{}
-      add :schema_version, :integer, null: false, default: 1
     end
 
     create unique_index(:job_events, [:job_id, :sequence])
@@ -314,7 +367,6 @@ defmodule Omashiki.Repo.Migrations.InitialSchema do
     create index(:job_events, [:occurred_at], using: "BRIN")
     create constraint(:job_events, :job_events_attempt_positive, check: "attempt > 0")
     create constraint(:job_events, :job_events_sequence_positive, check: "sequence > 0")
-    create constraint(:job_events, :job_events_schema_version_check, check: "schema_version = 1")
 
     create constraint(:job_events, :job_events_data_object_check,
              check: "jsonb_typeof(data) = 'object'"
@@ -448,6 +500,24 @@ defmodule Omashiki.Repo.Migrations.InitialSchema do
     ADD CONSTRAINT usage_ledger_attempt_job_fkey
     FOREIGN KEY (attempt_id, job_id) REFERENCES job_attempts(id, job_id) ON DELETE RESTRICT
     """
+
+    create table(:token_audit_events, primary_key: false) do
+      add :id, :binary_id, primary_key: true
+      add :api_token_id, references(:api_tokens, type: :binary_id, on_delete: :delete_all), null: false
+      add :action, :text, null: false
+      add :job_id, references(:jobs, type: :binary_id, on_delete: :nilify_all)
+      add :ip, :text
+      add :request_id, :text
+      add :occurred_at, :utc_datetime_usec, null: false
+    end
+
+    create index(:token_audit_events, [:api_token_id, :occurred_at])
+    create index(:token_audit_events, [:occurred_at], using: "BRIN")
+
+    create constraint(:token_audit_events, :token_audit_events_action_check,
+             check:
+               "action IN ('submit','cancel','retry','issue','rotate','revoke','redeliver')"
+           )
   end
 
   def down do

@@ -3,7 +3,6 @@ defmodule Omashiki.Jobs.SinkTest do
 
   alias Omashiki.Config
   alias Omashiki.Jobs.{Admission, Job, WorkArtifact}
-  alias Omashiki.Jobs.Contract.V1
 
   setup do
     root =
@@ -123,9 +122,8 @@ defmodule Omashiki.Jobs.SinkTest do
     assert :ok = WorkArtifact.cleanup(artifact)
   end
 
-  test "contract accepts succeeded result without git fields" do
+  test "files sink result has no git fields" do
     result = %{
-      "schema_version" => 1,
       "job_id" => Ecto.UUID.generate(),
       "attempt" => 1,
       "status" => "succeeded",
@@ -133,7 +131,8 @@ defmodule Omashiki.Jobs.SinkTest do
       "finished_at" => "2026-08-24T03:00:00Z"
     }
 
-    assert {:ok, ^result} = V1.validate_result(result)
+    refute Map.has_key?(result, "branch")
+    refute Map.has_key?(result, "base_sha")
   end
 
   defp config_map(state_path) do
@@ -190,7 +189,6 @@ defmodule Omashiki.Jobs.SinkTest do
 
   defp single_request(environment \\ "git-env", repo \\ nil) do
     %{
-      "schema_version" => 1,
       "idempotency_key" => "sink-#{System.unique_integer([:positive])}",
       "correlation_id" => "sink-workflow",
       "environment" => environment,

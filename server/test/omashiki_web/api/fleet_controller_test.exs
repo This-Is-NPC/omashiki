@@ -1,6 +1,8 @@
 defmodule OmashikiWeb.Api.FleetControllerTest do
   use OmashikiWeb.ConnCase, async: false
 
+  @moduletag :api
+
   import Omashiki.JobFixtures
 
   alias Omashiki.Worker.Presence

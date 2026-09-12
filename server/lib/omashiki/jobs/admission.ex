@@ -9,23 +9,24 @@ defmodule Omashiki.Jobs.Admission do
   alias Omashiki.ApiTokens.Token
   alias Omashiki.Config
   alias Omashiki.Config.Rollout
-  alias Omashiki.Jobs.{Dependencies, DispatchWorker, Job, JobAttempt, JobDependency, JobEvent}
-  alias Omashiki.Jobs.Contract.V1
+  alias Omashiki.Jobs.{Dependencies, DispatchWorker, Job, JobAttempt, JobDependency, JobEvent, Statuses}
   alias Omashiki.Repo
 
   @default_queue "default"
   @max_batch_size 100
 
   def max_batch_size, do: @max_batch_size
+  def max_payload_bytes, do: Statuses.max_payload_bytes()
 
   @doc "Admit one root job for an active, persisted API token."
   def admit(%Token{} = token, attrs) when is_map(attrs) do
     with :ok <- admission_open(),
          {:ok, request} <- validate_single(attrs),
+         :ok <- environment_allowed(token, request["environment"]),
          {:ok, user_id} <- authorize(token),
          nil <- find_existing(user_id, token.id, request["idempotency_key"]),
          {:ok, resolved} <- resolve(request) do
-      user_id |> insert_single(token.id, request, resolved) |> notify_admitted()
+      user_id |> insert_single(token, request, resolved) |> notify_admitted()
     else
       %Job{} = existing -> {:ok, existing}
       {:error, reason} -> {:error, reason}
@@ -39,9 +40,10 @@ defmodule Omashiki.Jobs.Admission do
   def admit_batch(%Token{} = token, attrs) when is_map(attrs) do
     with :ok <- admission_open(),
          {:ok, request} <- validate_batch(attrs),
+         :ok <- batch_environments_allowed(token, request["jobs"]),
          {:ok, user_id} <- authorize(token),
          {:ok, items} <- prepare_batch(user_id, token.id, request),
-         result <- insert_batch(user_id, token.id, request["correlation_id"], items) do
+         result <- insert_batch(token, request["correlation_id"], items) do
       notify_admitted(result)
     end
   end
@@ -69,17 +71,156 @@ defmodule Omashiki.Jobs.Admission do
     if Rollout.admission_open?(), do: :ok, else: {:error, :admission_paused}
   end
 
-  defp validate_single(attrs) do
-    case V1.validate_single(attrs) do
-      {:ok, request} -> {:ok, request}
-      {:error, errors} -> {:error, {:validation, errors}}
+  defp validate_single(attrs) when is_map(attrs) do
+    with :ok <- validate_payload_size(attrs) do
+      {:ok, attrs}
     end
   end
 
-  defp validate_batch(attrs) do
-    case V1.validate_batch(attrs) do
-      {:ok, request} -> {:ok, request}
-      {:error, errors} -> {:error, {:validation, errors}}
+  defp validate_single(_), do: {:error, {:validation, [%{field: "$", code: "object_required"}]}}
+
+  defp validate_batch(attrs) when is_map(attrs) do
+    jobs = Map.get(attrs, "jobs")
+
+    with :ok <- validate_batch_jobs(jobs),
+         :ok <- validate_payloads(jobs) do
+      {:ok, attrs}
+    end
+  end
+
+  defp validate_batch(_), do: {:error, {:validation, [%{field: "$", code: "object_required"}]}}
+
+  defp validate_payloads(jobs) do
+    Enum.reduce_while(jobs, :ok, fn job, :ok ->
+      case validate_payload_size(job) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp validate_payload_size(%{"payload" => payload}) do
+    size = payload |> Jason.encode!() |> byte_size()
+
+    if size > Statuses.max_payload_bytes() do
+      {:error, {:validation, [%{field: "payload", code: "too_large"}]}}
+    else
+      :ok
+    end
+  end
+
+  defp validate_payload_size(_),
+    do: {:error, {:validation, [%{field: "payload", code: "required"}]}}
+
+  defp validate_batch_jobs(jobs) when is_list(jobs) and jobs != [] do
+    refs = for job <- jobs, is_map(job), do: job["ref"]
+    keys = Enum.map(jobs, & &1["idempotency_key"])
+    ref_set = refs |> Enum.filter(&is_binary/1) |> MapSet.new()
+
+    errors =
+      duplicate_errors(refs, "jobs.ref") ++
+        duplicate_errors(keys, "jobs.idempotency_key") ++
+        depends_on_errors(jobs, ref_set) ++
+        batch_cycle_errors(jobs)
+
+    if errors == [], do: :ok, else: {:error, {:validation, errors}}
+  end
+
+  defp validate_batch_jobs([]),
+    do: {:error, {:validation, [%{field: "jobs", code: "must_not_be_empty"}]}}
+
+  defp validate_batch_jobs(_),
+    do: {:error, {:validation, [%{field: "jobs", code: "array_required"}]}}
+
+  defp duplicate_errors(values, field) do
+    values
+    |> Enum.filter(&is_binary/1)
+    |> Enum.frequencies()
+    |> Enum.filter(fn {_value, count} -> count > 1 end)
+    |> Enum.map(fn _ -> %{field: field, code: "duplicate"} end)
+  end
+
+  defp depends_on_errors(jobs, ref_set) do
+    Enum.flat_map(jobs, fn job ->
+      ref = Map.get(job, "ref")
+
+      Map.get(job, "depends_on", [])
+      |> Enum.flat_map(fn
+        %{"ref" => dep_ref} = dep ->
+          cond do
+            dep_ref == ref -> [%{field: "jobs.depends_on", code: "self_dependency"}]
+            not MapSet.member?(ref_set, dep_ref) -> [%{field: "jobs.depends_on", code: "unknown_ref"}]
+            is_binary(Map.get(dep, "id")) -> [%{field: "jobs.depends_on", code: "id_or_ref_required"}]
+            true -> []
+          end
+
+        %{"id" => _} ->
+          []
+
+        _ ->
+          [%{field: "jobs.depends_on", code: "id_or_ref_required"}]
+      end)
+    end)
+  end
+
+  defp batch_cycle_errors(jobs) do
+    graph =
+      Map.new(jobs, fn job ->
+        deps =
+          job
+          |> Map.get("depends_on", [])
+          |> Enum.flat_map(fn
+            %{"ref" => ref} -> [ref]
+            _ -> []
+          end)
+
+        {Map.get(job, "ref"), deps}
+      end)
+
+    if Enum.any?(Map.keys(graph), &cycle_from?(&1, graph, MapSet.new())) do
+      [%{field: "jobs.depends_on", code: "cycle"}]
+    else
+      []
+    end
+  end
+
+  defp cycle_from?(ref, graph, path) do
+    cond do
+      is_nil(ref) -> false
+      MapSet.member?(path, ref) -> true
+      true -> Enum.any?(Map.get(graph, ref, []), &cycle_from?(&1, graph, MapSet.put(path, ref)))
+    end
+  end
+
+  defp environment_allowed(%Token{allowed_environments: list}, env) when is_list(list) do
+    if "*" in list or env in list, do: :ok, else: {:error, :environment_not_allowed}
+  end
+
+  defp environment_allowed(_, _), do: {:error, :environment_not_allowed}
+
+  defp batch_environments_allowed(token, jobs) do
+    Enum.reduce_while(jobs, :ok, fn job, :ok ->
+      case environment_allowed(token, job["environment"]) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp enforce_active_limit!(%Token{id: token_id, max_active_jobs: max}, incoming) do
+    terminal = Statuses.terminal()
+
+    active =
+      from(j in Job,
+        where: j.api_token_id == ^token_id and j.status not in ^terminal,
+        select: count(j.id)
+      )
+      |> Repo.one()
+
+    if active + incoming > max do
+      Repo.rollback(:max_active_jobs)
+    else
+      :ok
     end
   end
 
@@ -200,12 +341,14 @@ defmodule Omashiki.Jobs.Admission do
     |> Base.encode16(case: :lower)
   end
 
-  defp insert_single(user_id, token_id, request, resolved) do
+  defp insert_single(user_id, %Token{} = token, request, resolved) do
     result =
       Repo.transaction(fn ->
+        enforce_active_limit!(token, 1)
+
         case resolve_depends_on(user_id, request, %{}, nil) do
           {:ok, edges} ->
-            attrs = job_attrs(user_id, token_id, request, resolved, edges)
+            attrs = job_attrs(user_id, token.id, request, resolved, edges)
 
             case insert_job(attrs) do
               {:ok, job} ->
@@ -229,7 +372,7 @@ defmodule Omashiki.Jobs.Admission do
         {:ok, job}
 
       {:error, :duplicate_idempotency} ->
-        fetch_after_race(user_id, token_id, request["idempotency_key"])
+        fetch_after_race(user_id, token.id, request["idempotency_key"])
 
       {:error, {:persistence, changeset}} ->
         {:error, changeset}
@@ -280,15 +423,18 @@ defmodule Omashiki.Jobs.Admission do
     end
   end
 
-  defp insert_batch(user_id, token_id, correlation_id, items) do
+  defp insert_batch(%Token{} = token, correlation_id, items) do
     result =
       Repo.transaction(fn ->
+        incoming = Enum.count(items, &is_nil(Map.get(&1, :existing)))
+        enforce_active_limit!(token, incoming)
+
         refs =
           items
           |> Enum.filter(&Map.has_key?(&1, :existing))
           |> Map.new(fn %{request: request, existing: job} -> {request["ref"], job} end)
 
-        insert_batch_items(user_id, token_id, correlation_id, items, refs)
+        insert_batch_items(token.user_id, token.id, correlation_id, items, refs)
       end)
 
     case result do
@@ -296,7 +442,7 @@ defmodule Omashiki.Jobs.Admission do
         {:ok, Enum.map(items, &Map.fetch!(jobs_by_ref, &1.request["ref"]))}
 
       {:error, :duplicate_idempotency} ->
-        retry_batch(user_id, token_id, correlation_id, items)
+        retry_batch(token, correlation_id, items)
 
       {:error, {:persistence, changeset}} ->
         {:error, changeset}
@@ -413,7 +559,7 @@ defmodule Omashiki.Jobs.Admission do
         {:ok, {dep["id"], Map.get(dep, "on_failure", "cancel")}}
 
       true ->
-        {:error, :id_or_ref_required}
+        {:error, {:validation, [%{field: "depends_on", code: "id_or_ref_required"}]}}
     end
   end
 
@@ -463,7 +609,6 @@ defmodule Omashiki.Jobs.Admission do
     %{
       user_id: user_id,
       api_token_id: token_id,
-      schema_version: 1,
       idempotency_key: request["idempotency_key"],
       correlation_id: request["correlation_id"],
       repository: request["repo"],
@@ -592,8 +737,7 @@ defmodule Omashiki.Jobs.Admission do
            correlation_id: job.correlation_id,
            occurred_at: now,
            recorded_at: now,
-           data: data,
-           schema_version: 1
+           data: data
          })
          |> Repo.insert() do
       {:ok, _event} -> :ok
@@ -609,15 +753,15 @@ defmodule Omashiki.Jobs.Admission do
     end
   end
 
-  defp retry_batch(user_id, token_id, correlation_id, items) do
+  defp retry_batch(%Token{} = token, correlation_id, items) do
     case Enum.reduce_while(items, {:ok, []}, fn %{request: request} = item, {:ok, acc} ->
-           case find_existing(user_id, token_id, request["idempotency_key"]) do
+           case find_existing(token.user_id, token.id, request["idempotency_key"]) do
              %Job{} = job -> {:cont, {:ok, [%{request: request, existing: job} | acc]}}
              {:conflict, _job} -> {:halt, {:error, :idempotency_conflict}}
              nil -> {:cont, {:ok, [item | acc]}}
            end
          end) do
-      {:ok, refreshed} -> insert_batch(user_id, token_id, correlation_id, Enum.reverse(refreshed))
+      {:ok, refreshed} -> insert_batch(token, correlation_id, Enum.reverse(refreshed))
       {:error, reason} -> {:error, reason}
     end
   end

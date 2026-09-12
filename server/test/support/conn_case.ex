@@ -29,6 +29,7 @@ defmodule OmashikiWeb.ConnCase do
       import Phoenix.ConnTest
       import OmashikiWeb.ConnCase
       import Omashiki.Fixtures
+      import OpenApiSpex.TestAssertions
     end
   end
 
@@ -38,6 +39,7 @@ defmodule OmashikiWeb.ConnCase do
 
     {conn, ctx} =
       Phoenix.ConnTest.build_conn()
+      |> OmashikiWeb.ConnCase.maybe_json(tags)
       |> OmashikiWeb.ConnCase.maybe_authenticate(tags)
 
     {:ok, [conn: conn] ++ ctx}
@@ -66,6 +68,19 @@ defmodule OmashikiWeb.ConnCase do
     Enum.join([Floki.text(document, sep: " ") | labels], " ")
   end
 
+  def json_headers(conn) do
+    conn
+    |> Plug.Conn.put_req_header("content-type", "application/json")
+    |> Plug.Conn.put_req_header("accept", "application/json")
+  end
+
+  def json_conn do
+    json_headers(Phoenix.ConnTest.build_conn())
+  end
+
+  def maybe_json(conn, %{api: true}), do: json_headers(conn)
+  def maybe_json(conn, _tags), do: conn
+
   @doc """
   Adds the bearer-token header AND a `:user_id` session cookie to the
   given conn unless the test is tagged `:unauthenticated`.
@@ -89,5 +104,19 @@ defmodule OmashikiWeb.ConnCase do
       |> Plug.Test.init_test_session(%{"user_id" => user.id})
 
     {conn, user: user, token: token, token_plaintext: plaintext}
+  end
+
+  def api_spec, do: OmashikiWeb.ApiSpec.spec()
+
+  def token_grants(extra \\ %{}) do
+    Map.merge(
+      %{
+        "scopes" => ["read", "submit", "cancel"],
+        "allowed_environments" => ["*"],
+        "max_active_jobs" => 100,
+        "ttl_days" => 30
+      },
+      extra
+    )
   end
 end

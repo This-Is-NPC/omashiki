@@ -5,12 +5,12 @@ defmodule Omashiki.Config.ObanTest do
 
   test "zero omits the scheduler queue" do
     assert {output, 0} = config_output("0")
-    assert output =~ "QUEUE=[webhooks: 5]"
+    assert output =~ "QUEUE=[webhooks: 5, token_audit: 1]"
   end
 
   test "positive limits keep the scheduler queue" do
     assert {output, 0} = config_output("3")
-    assert output =~ "QUEUE=[scheduler: 3, webhooks: 5]"
+    assert output =~ "QUEUE=[scheduler: 3, webhooks: 5, token_audit: 1]"
   end
 
   test "negative and non-integer limits fail clearly" do

@@ -30,7 +30,11 @@ config :omashiki, Omashiki.Repo,
 real_provider_e2e? = System.get_env("OMASHIKI_REAL_PROVIDER_E2E") in ["1", "true"]
 
 config :omashiki, OmashikiWeb.Endpoint,
-  http: [ip: if(real_provider_e2e?, do: {0, 0, 0, 0}, else: {127, 0, 0, 1}), port: 4002],
+  http: [
+    ip: if(real_provider_e2e?, do: {0, 0, 0, 0}, else: {127, 0, 0, 1}),
+    port: 4002,
+    http_options: [idle_timeout: 90_000]
+  ],
   # Fixed on purpose so the suite is deterministic, and not a secret: production
   # takes SECRET_KEY_BASE from the environment. See config/dev.exs.
   secret_key_base: "jSFNlVDVIxgZfZLWyf5VWNo2dpYxAVeg2GVvf0ljqPdJyeR03ShT9UtkaZXJ/mfx",

@@ -1,6 +1,8 @@
 defmodule OmashikiWeb.Api.HealthControllerTest do
   use OmashikiWeb.ConnCase, async: false
 
+  @moduletag :api
+
   describe "GET /api/v1/health" do
     test "returns ok status", %{conn: conn} do
       conn = get(conn, ~p"/api/v1/health")

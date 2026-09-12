@@ -39,6 +39,7 @@ defmodule OmashikiWeb.Plugs.BearerAuth do
   require Logger
 
   alias Omashiki.{Accounts, ApiTokens}
+  alias OmashikiWeb.Api.Problem
   alias OmashikiWeb.AuthMode
 
   @behaviour Plug
@@ -89,7 +90,7 @@ defmodule OmashikiWeb.Plugs.BearerAuth do
   end
 
   defp authenticate_bearer(conn, plaintext) do
-    case ApiTokens.find_active_by_plaintext(plaintext) do
+    case ApiTokens.find_presented_by_plaintext(plaintext) do
       {:ok, token} ->
         ApiTokens.record_use(token)
 
@@ -98,9 +99,13 @@ defmodule OmashikiWeb.Plugs.BearerAuth do
         |> assign(:current_token, token)
         |> assign(:authenticated, true)
 
-      :error ->
+      {:error, :token_expired} ->
+        Logger.debug("[BearerAuth] expired bearer on #{conn.method} #{conn.request_path}")
+        Problem.halt(conn, "token_expired")
+
+      {:error, :invalid_token} ->
         Logger.debug("[BearerAuth] bad bearer on #{conn.method} #{conn.request_path}")
-        send_forbidden(conn)
+        Problem.halt(conn, "invalid_token")
     end
   end
 
@@ -146,26 +151,14 @@ defmodule OmashikiWeb.Plugs.BearerAuth do
   end
 
   defp send_unauthorized(conn) do
-    send_error(conn, 401, "missing_token", "Bearer token required")
+    Problem.halt(conn, "missing_token")
   end
 
   defp send_none_loopback_only(conn) do
-    send_error(
-      conn,
-      401,
-      "auth_mode_none_loopback_only",
-      "auth_mode :none is only valid on loopback; Bearer required on LAN"
-    )
+    Problem.halt(conn, "auth_mode_none_loopback_only")
   end
 
   defp send_forbidden(conn) do
-    send_error(conn, 403, "invalid_token", "Bearer token is not valid")
-  end
-
-  defp send_error(conn, status, code, message) do
-    conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(status, Jason.encode!(%{error: %{code: code, message: message, details: %{}}}))
-    |> halt()
+    Problem.halt(conn, "invalid_token")
   end
 end

@@ -62,6 +62,6 @@ defmodule Omashiki.ApplicationBootTest do
     [{Oban, config}] =
       Enum.filter(Application.children_for(:manager), &match?({Oban, _}, &1))
 
-    assert Keyword.fetch!(config, :queues) == [webhooks: 5]
+    assert Keyword.fetch!(config, :queues) == [webhooks: 5, token_audit: 1]
   end
 end

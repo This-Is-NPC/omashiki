@@ -66,7 +66,10 @@ defmodule Omashiki.Fixtures do
     attrs =
       Enum.into(attrs, %{
         name: "Test token #{n}",
-        expires_at: nil
+        scopes: ["read", "submit", "cancel"],
+        allowed_environments: ["*"],
+        max_active_jobs: 100,
+        ttl_days: 30
       })
 
     {:ok, token, plaintext} = ApiTokens.create_for_user(user, attrs)

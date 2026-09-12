@@ -211,8 +211,7 @@ defmodule Omashiki.Jobs.Dependencies do
       correlation_id: job.correlation_id,
       occurred_at: now,
       recorded_at: now,
-      data: data,
-      schema_version: 1
+      data: data
     }
 
     case %JobEvent{} |> JobEvent.changeset(attrs) |> Repo.insert() do

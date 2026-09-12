@@ -218,7 +218,6 @@ defmodule Omashiki.Jobs.OrderingTest do
 
   defp batch_request(jobs) do
     %{
-      "schema_version" => 1,
       "correlation_id" => "batch-#{System.unique_integer([:positive])}",
       "jobs" =>
         Enum.map(jobs, fn {ref, depends_on, priority} ->
@@ -242,7 +241,6 @@ defmodule Omashiki.Jobs.OrderingTest do
 
   defp single_request do
     %{
-      "schema_version" => 1,
       "idempotency_key" => "restart-#{System.unique_integer([:positive])}",
       "correlation_id" => "restart-correlation",
       "repo" => "app",

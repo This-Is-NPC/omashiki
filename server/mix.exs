@@ -83,7 +83,8 @@ defmodule Omashiki.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:bandit, "~> 1.12.5"},
       {:argon2_elixir, "~> 4.0"},
-      {:oban, "~> 2.19"}
+      {:oban, "~> 2.19"},
+      {:open_api_spex, "~> 3.21"}
     ]
   end
 

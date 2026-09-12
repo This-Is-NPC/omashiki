@@ -1,6 +1,8 @@
 defmodule OmashikiWeb.Api.WorkControllerTest do
   use OmashikiWeb.ConnCase, async: false
 
+  @moduletag :api
+
   import Omashiki.JobFixtures
   import Ecto.Query
 
@@ -118,14 +120,14 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
           containers: [%{id: "; rm -rf /", state: "running"}]
         })
 
-      assert %{"error" => %{"code" => "invalid_containers"}} = json_response(conn, 422)
+      assert %{"code" => "invalid_containers"} = json_response(conn, 422)
       refute Enum.any?(Omashiki.Fleet.nodes(), &(&1.machine_id == "box-r"))
     end
 
     @tag :unauthenticated
     test "requires the worker token", %{conn: conn} do
       conn = post(conn, "/internal/work/report", %{machine_id: "box-r", free_slots: 1})
-      assert %{"error" => %{"code" => "missing_token"}} = json_response(conn, 401)
+      assert %{"code" => "missing_token"} = json_response(conn, 401)
     end
   end
 
@@ -133,21 +135,21 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
     @tag :unauthenticated
     test "returns 401 without a worker token", %{conn: conn} do
       conn = post(conn, @worker_poll, %{machine_id: "box-a", free_slots: 1})
-      assert %{"error" => %{"code" => "missing_token"}} = json_response(conn, 401)
+      assert %{"code" => "missing_token"} = json_response(conn, 401)
     end
 
     @tag :unauthenticated
     test "returns 403 with the wrong worker token", %{conn: conn} do
       conn = worker_conn(conn, "not-the-worker-token")
       conn = post(conn, @worker_poll, %{machine_id: "box-a", free_slots: 1})
-      assert %{"error" => %{"code" => "invalid_token"}} = json_response(conn, 403)
+      assert %{"code" => "invalid_token"} = json_response(conn, 403)
     end
 
     @tag :unauthenticated
     test "rejects operator API tokens on worker routes", %{conn: conn, api_plaintext: api} do
       conn = worker_conn(conn, api)
       conn = post(conn, @worker_poll, %{machine_id: "box-a", free_slots: 1})
-      assert %{"error" => %{"code" => "invalid_token"}} = json_response(conn, 403)
+      assert %{"code" => "invalid_token"} = json_response(conn, 403)
     end
 
     @tag :unauthenticated
@@ -156,17 +158,17 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
 
       conn = worker_conn(conn, "anything")
       conn = post(conn, @worker_poll, %{machine_id: "box-a", free_slots: 1})
-      assert %{"error" => %{"code" => "invalid_token"}} = json_response(conn, 403)
+      assert %{"code" => "invalid_token"} = json_response(conn, 403)
     end
 
     @tag :unauthenticated
     test "returns 401 without a worker token on accept and reject", %{conn: conn} do
       conn = post(conn, @worker_accept, %{attempt_id: Ecto.UUID.generate(), lease_token: "t"})
-      assert %{"error" => %{"code" => "missing_token"}} = json_response(conn, 401)
+      assert %{"code" => "missing_token"} = json_response(conn, 401)
 
       conn = build_conn()
       conn = post(conn, @worker_reject, %{attempt_id: Ecto.UUID.generate(), lease_token: "t"})
-      assert %{"error" => %{"code" => "missing_token"}} = json_response(conn, 401)
+      assert %{"code" => "missing_token"} = json_response(conn, 401)
     end
   end
 
@@ -214,7 +216,6 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
 
     @tag :unauthenticated
     test "poll claims a files job with payload and no repository snapshot", %{
-      conn: conn,
       worker_token: token,
       user: user,
       token: token_record,
@@ -377,7 +378,6 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
 
     @tag :unauthenticated
     test "accept returns 200 after poll", %{
-      conn: conn,
       worker_token: token,
       user: user,
       token: token_record

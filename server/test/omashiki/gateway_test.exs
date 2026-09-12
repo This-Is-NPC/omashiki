@@ -843,7 +843,6 @@ defmodule Omashiki.GatewayTest do
     %Job{}
     |> Job.changeset(%{
       user_id: user.id,
-      schema_version: 1,
       idempotency_key: "gw-cap-#{n}",
       correlation_id: "gw-cap-corr-#{n}",
       repository: "repo",
@@ -921,7 +920,6 @@ defmodule Omashiki.GatewayTest do
     %Job{}
     |> Job.changeset(%{
       user_id: user.id,
-      schema_version: 1,
       idempotency_key: "gw-#{n}",
       correlation_id: "gw-corr-#{n}",
       repository: "repo",

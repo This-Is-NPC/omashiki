@@ -357,7 +357,6 @@ defmodule Omashiki.Jobs.RunnerTest do
 
   defp request(key) do
     %{
-      "schema_version" => 1,
       "idempotency_key" => key,
       "correlation_id" => "correlation-#{key}",
       "repo" => "app",

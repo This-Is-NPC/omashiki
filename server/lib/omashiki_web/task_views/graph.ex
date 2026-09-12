@@ -56,12 +56,18 @@ defmodule OmashikiWeb.TaskViews.Graph do
     if attempt_ids == [] do
       %{}
     else
-      user
-      |> Api.list_for_view(
-        filter: Map.put(job_filter, :attempt_ids, attempt_ids),
-        limit: @max_rows
-      )
-      |> Map.new(&{&1.attempt.id, &1})
+      {:ok, %{entries: rows}} =
+        Api.list(user,
+          filter: Map.put(job_filter, :attempt_ids, attempt_ids),
+          page_size: @max_rows,
+          as: :rows
+        )
+
+      Map.new(rows, fn
+        %{attempt: %{id: id}} = row -> {id, row}
+        _ -> {nil, nil}
+      end)
+      |> Map.delete(nil)
     end
   end
 

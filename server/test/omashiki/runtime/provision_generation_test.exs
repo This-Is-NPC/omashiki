@@ -151,7 +151,6 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
 
   defp request do
     %{
-      "schema_version" => 1,
       "idempotency_key" => "provision-#{System.unique_integer([:positive])}",
       "correlation_id" => "provision-corr",
       "repo" => "app",

@@ -6,7 +6,7 @@ defmodule Omashiki.ApiTokensTest do
 
   test "creates an owner-bound token and stores only its hash" do
     user = user_fixture()
-    assert {:ok, token, plaintext} = ApiTokens.create_for_user(user, %{name: "automation"})
+    assert {:ok, token, plaintext} = ApiTokens.create_for_user(user, token_attrs())
     assert token.user_id == user.id
     assert token.token_hash == Hash.hmac(plaintext)
     refute Map.has_key?(Map.from_struct(token), :plaintext)
@@ -17,7 +17,7 @@ defmodule Omashiki.ApiTokensTest do
   test "revocation is owner-scoped" do
     owner = user_fixture()
     other = user_fixture()
-    {:ok, token, plaintext} = ApiTokens.create_for_user(owner, %{name: "automation"})
+    {:ok, token, plaintext} = ApiTokens.create_for_user(owner, token_attrs())
 
     assert {:error, :not_found} = ApiTokens.revoke(other, token.id)
     assert {:ok, _} = ApiTokens.revoke(owner, token.id)
@@ -27,7 +27,7 @@ defmodule Omashiki.ApiTokensTest do
   describe "record_use/1" do
     setup do
       user = user_fixture()
-      {:ok, token, _plaintext} = ApiTokens.create_for_user(user, %{name: "automation"})
+      {:ok, token, _plaintext} = ApiTokens.create_for_user(user, token_attrs())
       %{token: token}
     end
 
@@ -90,5 +90,18 @@ defmodule Omashiki.ApiTokensTest do
       :ok -> :ok
       :timeout -> flunk("last_used_at writes did not drain")
     end
+  end
+
+  defp token_attrs(extra \\ %{}) do
+    Map.merge(
+      %{
+        name: "automation",
+        scopes: ["read", "submit", "cancel"],
+        allowed_environments: ["*"],
+        max_active_jobs: 100,
+        ttl_days: 30
+      },
+      extra
+    )
   end
 end

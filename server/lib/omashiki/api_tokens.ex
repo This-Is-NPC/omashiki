@@ -8,60 +8,77 @@ defmodule Omashiki.ApiTokens do
   require Logger
 
   alias Omashiki.Repo
-  alias Omashiki.ApiTokens.{Hash, Token}
+  alias Omashiki.ApiTokens.{Audit, Hash, Token}
   alias Omashiki.Accounts.User
   alias Omashiki.Jobs.Webhooks
+
+  @default_max_ttl_days 365
 
   @doc """
   Creates a token for `user`. Returns `{:ok, token, plaintext}`.
 
+  Required attrs: `:scopes`, `:allowed_environments`, `:max_active_jobs`,
+  and either `:ttl_days` or `:expires_at`.
   """
   def create_for_user(%User{} = user, attrs) do
-    plaintext = Hash.generate_plaintext()
-    token_hash = Hash.hmac(plaintext)
+    with {:ok, expires_at} <- resolve_expires_at(attrs) do
+      plaintext = Hash.generate_plaintext()
+      token_hash = Hash.hmac(plaintext)
 
-    expires_at =
-      attrs
-      |> Map.get(:expires_at, Map.get(attrs, "expires_at"))
-      |> normalize_datetime()
+      create_attrs = %{
+        name: Map.get(attrs, :name) || Map.get(attrs, "name"),
+        expires_at: expires_at,
+        token_hash: token_hash,
+        user_id: user.id,
+        scopes: Map.get(attrs, :scopes) || Map.get(attrs, "scopes"),
+        allowed_environments:
+          Map.get(attrs, :allowed_environments) || Map.get(attrs, "allowed_environments"),
+        max_active_jobs: Map.get(attrs, :max_active_jobs) || Map.get(attrs, "max_active_jobs")
+      }
 
-    create_attrs = %{
-      name: Map.get(attrs, :name) || Map.get(attrs, "name"),
-      expires_at: expires_at,
-      token_hash: token_hash,
-      user_id: user.id
-    }
-
-    %Token{}
-    |> Token.create_changeset(create_attrs)
-    |> Repo.insert()
-    |> case do
-      {:ok, token} -> {:ok, token, plaintext}
-      {:error, reason} -> {:error, reason}
+      %Token{}
+      |> Token.create_changeset(create_attrs)
+      |> Repo.insert()
+      |> case do
+        {:ok, token} -> {:ok, token, plaintext}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
-  defp normalize_datetime(nil), do: nil
-  defp normalize_datetime(""), do: nil
+  @doc "Issue a replacement token with the same grants and revoke the presented one."
+  def rotate(%Token{} = token) do
+    token = Repo.preload(token, :user)
 
-  defp normalize_datetime(%DateTime{} = dt),
-    do: DateTime.truncate(dt, :microsecond)
+    Repo.transaction(fn ->
+      locked =
+        from(t in Token, where: t.id == ^token.id, lock: "FOR UPDATE")
+        |> Repo.one()
 
-  defp normalize_datetime(%Date{} = date) do
-    {:ok, dt} = DateTime.new(date, ~T[23:59:59], "Etc/UTC")
-    DateTime.truncate(dt, :microsecond)
-  end
+      if is_nil(locked), do: Repo.rollback(:not_found)
 
-  defp normalize_datetime(s) when is_binary(s) do
-    case DateTime.from_iso8601(s) do
-      {:ok, dt, _} ->
-        DateTime.truncate(dt, :microsecond)
+      remaining = remaining_ttl_days(locked.expires_at)
 
-      _ ->
-        case Date.from_iso8601(s) do
-          {:ok, date} -> normalize_datetime(date)
-          _ -> nil
-        end
+      case create_for_user(token.user, %{
+             name: locked.name,
+             scopes: locked.scopes,
+             allowed_environments: locked.allowed_environments,
+             max_active_jobs: locked.max_active_jobs,
+             ttl_days: remaining
+           }) do
+        {:ok, new_token, plaintext} ->
+          case Repo.update(Token.revoke_changeset(locked)) do
+            {:ok, _} -> {new_token, plaintext}
+            {:error, reason} -> Repo.rollback(reason)
+          end
+
+        {:error, reason} ->
+          Repo.rollback(reason)
+      end
+    end)
+    |> case do
+      {:ok, {new_token, plaintext}} -> {:ok, new_token, plaintext}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -84,31 +101,69 @@ defmodule Omashiki.ApiTokens do
         {:error, :not_found}
 
       token ->
-        Repo.update(Token.revoke_changeset(token))
+        case Repo.update(Token.revoke_changeset(token)) do
+          {:ok, revoked} = ok ->
+            Audit.record(revoked, "revoke")
+            ok
+
+          error ->
+            error
+        end
     end
+  end
+
+  @doc "Tokens that expire within `days` and are still active."
+  def expiring_soon(%User{id: user_id}, days \\ 7) do
+    now = DateTime.utc_now()
+    until = DateTime.add(now, days, :day)
+
+    from(t in Token,
+      where:
+        t.user_id == ^user_id and is_nil(t.revoked_at) and t.expires_at > ^now and
+          t.expires_at <= ^until,
+      order_by: [asc: t.expires_at]
+    )
+    |> Repo.all()
   end
 
   @doc "Configure the token-owned terminal webhook without exposing secret material."
   def configure_webhook(%Token{} = token, attrs) when is_map(attrs),
     do: Webhooks.configure(token, attrs)
 
-  def find_active_by_plaintext(plaintext) when is_binary(plaintext) and plaintext != "" do
-    hash = Hash.hmac(plaintext)
-    now = DateTime.utc_now(:microsecond)
+  @doc """
+  Resolve a presented bearer token.
 
-    Token
-    |> where(token_hash: ^hash)
-    |> where([t], is_nil(t.revoked_at))
-    |> where([t], is_nil(t.expires_at) or t.expires_at > ^now)
-    |> preload(:user)
-    |> Repo.one()
-    |> case do
-      nil -> :error
-      token -> {:ok, token}
+  Distinguishes a never-valid or revoked token (`:invalid_token`) from an
+  expired one (`:token_expired`).
+  """
+  def find_presented_by_plaintext(plaintext) when is_binary(plaintext) and plaintext != "" do
+    hash = Hash.hmac(plaintext)
+
+    case Token |> where(token_hash: ^hash) |> preload(:user) |> Repo.one() do
+      nil ->
+        {:error, :invalid_token}
+
+      %Token{revoked_at: revoked} when not is_nil(revoked) ->
+        {:error, :invalid_token}
+
+      %Token{expires_at: expires_at} = token ->
+        if DateTime.compare(DateTime.utc_now(), expires_at) == :lt do
+          {:ok, token}
+        else
+          {:error, :token_expired}
+        end
     end
   end
 
-  def find_active_by_plaintext(_), do: :error
+  def find_presented_by_plaintext(_), do: {:error, :invalid_token}
+
+  @doc false
+  def find_active_by_plaintext(plaintext) do
+    case find_presented_by_plaintext(plaintext) do
+      {:ok, token} -> {:ok, token}
+      {:error, _} -> :error
+    end
+  end
 
   # Coarse on purpose. Every authenticated request used to issue an
   # unconditional UPDATE on this one row, so N concurrent requests carrying the
@@ -201,4 +256,64 @@ defmodule Omashiki.ApiTokens do
   def can_write_global?(%User{}), do: true
   def can_write_global?(%Token{}), do: true
   def can_write_global?(_), do: false
+
+  defp resolve_expires_at(attrs) do
+    cond do
+      expires = Map.get(attrs, :expires_at) || Map.get(attrs, "expires_at") ->
+        case normalize_datetime(expires) do
+          %DateTime{} = dt -> {:ok, dt}
+          nil -> {:error, :invalid_request}
+        end
+
+      ttl = Map.get(attrs, :ttl_days) || Map.get(attrs, "ttl_days") ->
+        ttl_expires_at(ttl)
+
+      true ->
+        {:error, :invalid_request}
+    end
+  end
+
+  defp ttl_expires_at(ttl) when is_integer(ttl) and ttl >= 1 do
+    max_ttl = max_ttl_days()
+
+    if ttl > max_ttl do
+      {:error, :invalid_request}
+    else
+      {:ok, DateTime.add(DateTime.utc_now(:microsecond), ttl, :day)}
+    end
+  end
+
+  defp ttl_expires_at(_), do: {:error, :invalid_request}
+
+  defp remaining_ttl_days(%DateTime{} = expires_at) do
+    seconds = DateTime.diff(expires_at, DateTime.utc_now(), :second)
+    days = max(div(seconds, 86_400), 1)
+    min(days, max_ttl_days())
+  end
+
+  defp max_ttl_days do
+    Application.get_env(:omashiki, :token_max_ttl_days, @default_max_ttl_days)
+  end
+
+  defp normalize_datetime(%DateTime{} = dt), do: DateTime.truncate(dt, :microsecond)
+
+  defp normalize_datetime(%Date{} = date) do
+    {:ok, dt} = DateTime.new(date, ~T[23:59:59], "Etc/UTC")
+    DateTime.truncate(dt, :microsecond)
+  end
+
+  defp normalize_datetime(s) when is_binary(s) do
+    case DateTime.from_iso8601(s) do
+      {:ok, dt, _} ->
+        DateTime.truncate(dt, :microsecond)
+
+      _ ->
+        case Date.from_iso8601(s) do
+          {:ok, date} -> normalize_datetime(date)
+          _ -> nil
+        end
+    end
+  end
+
+  defp normalize_datetime(_), do: nil
 end

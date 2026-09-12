@@ -113,7 +113,7 @@ defmodule Omashiki.Application do
 
   defp manager_oban_child do
     oban_config = Application.fetch_env!(:omashiki, Oban)
-    {Oban, Keyword.put(oban_config, :queues, webhooks: 5)}
+    {Oban, Keyword.put(oban_config, :queues, webhooks: 5, token_audit: 1)}
   end
 
   defp recovery_children do

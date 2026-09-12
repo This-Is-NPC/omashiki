@@ -178,7 +178,6 @@ defmodule Omashiki.Gateway.BudgetTest do
     %Job{}
     |> Job.changeset(%{
       user_id: user.id,
-      schema_version: 1,
       idempotency_key: "budget-#{n}",
       correlation_id: "budget-corr-#{n}",
       repository: "repo",

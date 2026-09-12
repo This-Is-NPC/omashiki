@@ -14,12 +14,16 @@ defmodule OmashikiWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json", "event-stream"]
+    plug OpenApiSpex.Plug.PutApiSpec, module: OmashikiWeb.ApiSpec
   end
 
   pipeline :authenticated_api do
     plug :accepts, ["json", "event-stream"]
     plug :fetch_session
+    plug OpenApiSpex.Plug.PutApiSpec, module: OmashikiWeb.ApiSpec
     plug OmashikiWeb.Plugs.BearerAuth
+    plug OmashikiWeb.Plugs.TokenExpiryHeader
+    plug OmashikiWeb.Plugs.ApiRateLimit
   end
 
   pipeline :worker_api do
@@ -63,12 +67,12 @@ defmodule OmashikiWeb.Router do
       on_mount: {OmashikiWeb.AuthHooks, :require_operator_console}
   end
 
-  # Health and token issuance are the only unauthenticated control-plane
-  # surfaces. All queue reads and mutations require an authenticated actor.
   scope "/api/v1", OmashikiWeb.Api, as: :api do
     pipe_through :api
 
     get "/health", HealthController, :show
+    get "/openapi.json", OpenApiController, :show
+    get "/agent-skill", AgentSkillController, :show
     post "/sessions/issue_token", SessionsController, :issue_token
     post "/sessions/signup", SessionsController, :signup
   end
@@ -76,38 +80,33 @@ defmodule OmashikiWeb.Router do
   scope "/api/v1", OmashikiWeb.Api, as: :api do
     pipe_through :authenticated_api
 
-    # Registry discovery is read-only and intentionally omits host paths,
-    # credentials, mounts, and other execution internals.
+    post "/sessions/rotate_token", SessionsController, :rotate_token
+
     get "/repositories", DiscoveryController, :repositories
     get "/environments", DiscoveryController, :environments
-
-    # Worker nodes and their containers, as the fleet graph draws them.
     get "/fleet", FleetController, :index
 
-    # Admission and queue lifecycle.
     post "/jobs", JobsController, :create
     post "/jobs/batch", JobsController, :batch
     get "/jobs", JobsController, :index
     get "/jobs/:id/events/history", JobsController, :events
     get "/jobs/:id/events", JobEventsController, :stream
-    get "/jobs/:id/events/stream", JobEventsController, :stream
     get "/jobs/:id/result", JobsController, :result
     post "/jobs/:id/cancel", JobsController, :cancel
     post "/jobs/:id/retry", JobsController, :retry
     get "/jobs/:id/webhook-deliveries", WebhookDeliveriesController, :index
+
+    post "/jobs/:id/webhook-deliveries/:delivery_id/redeliver",
+         WebhookDeliveriesController,
+         :redeliver
+
     get "/jobs/:id", JobsController, :show
   end
 
-  # Runtime containers reach only the signed internal tool proxy.
   scope "/api/v1", OmashikiWeb.Api, as: :api do
     pipe_through :api
 
     post "/tools-proxy/:server", ToolsProxyController, :handle
-
-    # LLM ingress for agent containers. Not `:authenticated_api`: the Bearer
-    # here is a job-bound gateway token minted at provision time, which
-    # GatewayController verifies itself — an operator API token would be the
-    # wrong credential.
     post "/gateway/v1/chat/completions", GatewayController, :chat_completions
   end
 
