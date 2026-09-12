@@ -527,9 +527,10 @@ defmodule OmashikiWeb.Api.Problem do
     end
   end
 
-  # `route_info/4` does not decode list segments. Plug usually already has, but
-  # a leftover `%20` / `%2F` must still match the served operation. Passing the
-  # list (not a joined string) keeps a decoded `/` inside one segment.
+  # `route_info/4` does not decode list segments — Phoenix.Router does that
+  # when it dispatches. A leftover `%20` / `%2F` must still match the served
+  # operation. Passing the list (not a joined string) keeps a decoded `/`
+  # inside one segment.
   defp decoded_path_info(conn) do
     Enum.map(conn.path_info, &URI.decode/1)
   end
