@@ -784,7 +784,11 @@ class Harness:
             )
         changes = result.get("changes") or {}
         files = changes.get("files") or []
-        if changes.get("files_changed") != 1 or "hello.py" not in files:
+        paths = [
+            path if isinstance(path, str) else (path or {}).get("path")
+            for path in files
+        ]
+        if changes.get("files_changed") != 1 or "hello.py" not in paths:
             raise E2EError(f"expected hello.py as the sole change: {changes}")
 
     def cleanup(self) -> None:
