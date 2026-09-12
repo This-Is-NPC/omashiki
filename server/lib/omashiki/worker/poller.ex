@@ -223,11 +223,20 @@ defmodule Omashiki.Worker.Poller do
   end
 
   defp run_complete(client, execution, payload) do
-    complete = materialize_complete(client, payload)
-    {complete, Client.complete(client, execution, complete)}
-  catch
-    kind, reason ->
-      {complete_from_payload(payload), {:error, {kind, reason}}}
+    try do
+      complete = materialize_complete(client, payload)
+      {complete, Client.complete(client, execution, complete)}
+    catch
+      kind, reason ->
+        complete = error_complete(kind, reason)
+
+        try do
+          {complete, Client.complete(client, execution, complete)}
+        catch
+          kind2, reason2 ->
+            {complete, {:error, {kind2, reason2}}}
+        end
+    end
   end
 
   defp materialize_complete(client, {:build, offer, result}),
@@ -235,15 +244,20 @@ defmodule Omashiki.Worker.Poller do
 
   defp materialize_complete(_client, {:ready, complete}), do: complete
 
-  defp complete_from_payload({:ready, complete}), do: complete
-  defp complete_from_payload({:build, _, _}), do: nil
+  defp error_complete(kind, reason) do
+    %Complete{
+      kind: :error,
+      code: "complete_failed",
+      message: Exception.format(kind, reason, [])
+    }
+  end
 
   defp handle_complete_result(state, attempt_id, complete, left, result) do
     cond do
       result == :ok ->
         finish_in_flight(state, attempt_id)
 
-      not is_nil(complete) and left > 1 and retryable_complete?(result) ->
+      left > 1 and retryable_complete?(result) ->
         Process.send_after(
           self(),
           {:complete_retry, attempt_id, complete, left - 1},

@@ -224,7 +224,7 @@ defmodule Omashiki.Worker.PollerTest do
       assert log =~ "dropping complete"
     end
 
-    test "complete encode crash releases the slot and keeps the poller", %{
+    test "complete encode crash posts an error complete", %{
       bypass: bypass,
       parent: parent,
       slots: slots
@@ -235,9 +235,10 @@ defmodule Omashiki.Worker.PollerTest do
       expect_accept(bypass, parent)
       expect_poll_sequence(bypass, [offer], parent)
 
-      Bypass.stub(bypass, "POST", "/internal/work/complete", fn conn ->
-        send(parent, :complete_called)
-        Plug.Conn.resp(conn, 200, ~s({"ok":true}))
+      expect_complete(bypass, parent, fn body ->
+        assert body["complete"]["kind"] == "error"
+        assert body["complete"]["code"] == "complete_failed"
+        assert is_binary(body["complete"]["message"])
       end)
 
       put_env(
@@ -253,18 +254,12 @@ defmodule Omashiki.Worker.PollerTest do
          }}
       )
 
-      log =
-        ExUnit.CaptureLog.capture_log(fn ->
-          assert {:ok, pid} = start_poller(slots)
-          assert_receive {:accept, _}, 2_000
-          until(fn -> map_size(:sys.get_state(pid).in_flight) == 0 end)
-          assert Process.alive?(pid)
-          assert Slots.available(slots) == 2
-          Logger.flush()
-        end)
-
-      refute_receive :complete_called, 200
-      assert log =~ "dropping complete"
+      assert {:ok, pid} = start_poller(slots)
+      assert_receive {:accept, _}, 2_000
+      assert_receive {:complete, _}, 2_000
+      until(fn -> map_size(:sys.get_state(pid).in_flight) == 0 end)
+      assert Process.alive?(pid)
+      assert Slots.available(slots) == 2
     end
 
     test "uploads a blob then completes a files sink offer", %{
