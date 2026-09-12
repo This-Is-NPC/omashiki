@@ -71,7 +71,7 @@ defmodule Omashiki.FleetTest do
       assert_receive {:fleet_updated, ^machine_id}, 1_000
 
       :ok = Presence.report(machine_id, report)
-      refute_receive {:fleet_updated, ^machine_id}, 200
+      refute_received {:fleet_updated, ^machine_id}
 
       :ok = Presence.report(machine_id, %{report | free_slots: 1})
       assert_receive {:fleet_updated, ^machine_id}, 1_000
