@@ -114,7 +114,9 @@ defmodule Omashiki.Runtime.LeaseRenewerTest do
 
     assert_receive :registered, 1_000
     _ = :sys.get_state(renewer)
+    ref = Process.monitor(owner)
     Process.exit(owner, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^owner, _}, 1_000
     _ = :sys.get_state(renewer)
 
     send(renewer, :renew)
@@ -140,7 +142,7 @@ defmodule Omashiki.Runtime.LeaseRenewerTest do
   end
 
   defp claim!(token, key) do
-    {:ok, job} = admit(token, request(key))
+    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request(key))
     {:ok, attempt} = Jobs.claim(job, "lease-runner-#{key}")
     attempt
   end
