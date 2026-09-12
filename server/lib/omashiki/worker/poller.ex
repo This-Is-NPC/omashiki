@@ -74,9 +74,8 @@ defmodule Omashiki.Worker.Poller do
     attempt_id = offer.attempt_id
 
     case Map.fetch(state.in_flight, attempt_id) do
-      {:ok, job} ->
-        complete = complete_from_result(job.client, offer, result)
-        start_complete(state, attempt_id, complete, @complete_attempts)
+      {:ok, _} ->
+        start_complete(state, attempt_id, {:build, offer, result}, @complete_attempts)
 
       :error ->
         {:noreply, state}
@@ -84,7 +83,7 @@ defmodule Omashiki.Worker.Poller do
   end
 
   def handle_info({:complete_retry, attempt_id, complete, left}, state) do
-    start_complete(state, attempt_id, complete, left)
+    start_complete(state, attempt_id, {:ready, complete}, left)
   end
 
   def handle_info({:complete_result, attempt_id, complete, left, result}, state) do
@@ -205,14 +204,14 @@ defmodule Omashiki.Worker.Poller do
     end
   end
 
-  defp start_complete(state, attempt_id, complete, left) do
+  defp start_complete(state, attempt_id, payload, left) do
     case Map.fetch(state.in_flight, attempt_id) do
       {:ok, %{client: client, execution: execution}} ->
         poller = self()
 
         _ =
           Task.start(fn ->
-            result = Client.complete(client, execution, complete)
+            {complete, result} = run_complete(client, execution, payload)
             send(poller, {:complete_result, attempt_id, complete, left, result})
           end)
 
@@ -223,12 +222,28 @@ defmodule Omashiki.Worker.Poller do
     end
   end
 
+  defp run_complete(client, execution, payload) do
+    complete = materialize_complete(client, payload)
+    {complete, Client.complete(client, execution, complete)}
+  catch
+    kind, reason ->
+      {complete_from_payload(payload), {:error, {kind, reason}}}
+  end
+
+  defp materialize_complete(client, {:build, offer, result}),
+    do: complete_from_result(client, offer, result)
+
+  defp materialize_complete(_client, {:ready, complete}), do: complete
+
+  defp complete_from_payload({:ready, complete}), do: complete
+  defp complete_from_payload({:build, _, _}), do: nil
+
   defp handle_complete_result(state, attempt_id, complete, left, result) do
     cond do
       result == :ok ->
         finish_in_flight(state, attempt_id)
 
-      left > 1 and retryable_complete?(result) ->
+      not is_nil(complete) and left > 1 and retryable_complete?(result) ->
         Process.send_after(
           self(),
           {:complete_retry, attempt_id, complete, left - 1},
@@ -245,6 +260,7 @@ defmodule Omashiki.Worker.Poller do
 
   defp retryable_complete?({:error, :unauthorized}), do: false
   defp retryable_complete?({:error, {:http, status, _}}) when status in 400..499, do: false
+  defp retryable_complete?({:error, {kind, _}}) when kind in [:error, :exit, :throw], do: false
   defp retryable_complete?({:error, _reason}), do: true
   defp retryable_complete?(_), do: false
 
@@ -281,8 +297,7 @@ defmodule Omashiki.Worker.Poller do
 
   defp maybe_upload_blob(%Complete{kind: :files} = complete, client, %Offer{job_id: job_id}) do
     with path when is_binary(path) <- complete.blob_path,
-         true <- File.exists?(path),
-         binary <- File.read!(path),
+         {:ok, binary} <- File.read(path),
          digest when is_binary(digest) <- complete.blob_digest || sha256_hex(binary),
          :ok <- Client.put_blob(client, job_id, digest, binary) do
       %{complete | blob_digest: digest, blob_path: nil}
