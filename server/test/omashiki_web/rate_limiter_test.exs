@@ -10,7 +10,7 @@ defmodule OmashikiWeb.RateLimiterTest do
 
   test "allows up to max hits inside a window" do
     for n <- 1..3 do
-      assert {:ok, ^n} = RateLimiter.hit("scope", "1.2.3.4", max: 3, per_ms: 60_000)
+      assert {:ok, ^n, _key} = RateLimiter.hit("scope", "1.2.3.4", max: 3, per_ms: 60_000)
     end
   end
 
@@ -23,23 +23,12 @@ defmodule OmashikiWeb.RateLimiterTest do
              RateLimiter.hit("scope", "1.2.3.4", max: 3, per_ms: 60_000)
   end
 
-  test "limited? is true at max without incrementing" do
-    opts = [max: 2, per_ms: 60_000]
-    refute RateLimiter.limited?("scope", "1.2.3.4", opts)
-    assert {:ok, 1} = RateLimiter.hit("scope", "1.2.3.4", opts)
-    refute RateLimiter.limited?("scope", "1.2.3.4", opts)
-    assert {:ok, 2} = RateLimiter.hit("scope", "1.2.3.4", opts)
-    assert RateLimiter.limited?("scope", "1.2.3.4", opts)
-    assert RateLimiter.limited?("scope", "1.2.3.4", opts)
-    assert {:error, :rate_limited} = RateLimiter.hit("scope", "1.2.3.4", opts)
-  end
-
   test "different identifiers do not share buckets" do
     Enum.each(1..3, fn _ ->
       RateLimiter.hit("scope", "1.2.3.4", max: 3, per_ms: 60_000)
     end)
 
-    assert {:ok, 1} = RateLimiter.hit("scope", "5.6.7.8", max: 3, per_ms: 60_000)
+    assert {:ok, 1, _key} = RateLimiter.hit("scope", "5.6.7.8", max: 3, per_ms: 60_000)
   end
 
   test "different scopes do not share buckets" do
@@ -47,28 +36,28 @@ defmodule OmashikiWeb.RateLimiterTest do
       RateLimiter.hit("scope_a", "x", max: 3, per_ms: 60_000)
     end)
 
-    assert {:ok, 1} = RateLimiter.hit("scope_b", "x", max: 3, per_ms: 60_000)
+    assert {:ok, 1, _key} = RateLimiter.hit("scope_b", "x", max: 3, per_ms: 60_000)
   end
 
   test "windows expire" do
-    assert {:ok, 1} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
+    assert {:ok, 1, _key} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
     Process.sleep(5)
-    assert {:ok, 1} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
+    assert {:ok, 1, _key} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
   end
 
   test "skipped windows do not accumulate keys" do
-    assert {:ok, 1} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
+    assert {:ok, 1, _key} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
     Process.sleep(5)
-    assert {:ok, 1} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
+    assert {:ok, 1, _key} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
     Process.sleep(5)
-    assert {:ok, 1} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
+    assert {:ok, 1, _key} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
     assert bucket_count("scope") == 1
   end
 
   test "expired windows for other identifiers are collected" do
-    assert {:ok, 1} = RateLimiter.hit("scope", "old", max: 1, per_ms: 1)
+    assert {:ok, 1, _key} = RateLimiter.hit("scope", "old", max: 1, per_ms: 1)
     Process.sleep(5)
-    assert {:ok, 1} = RateLimiter.hit("scope", "new", max: 1, per_ms: 1)
+    assert {:ok, 1, _key} = RateLimiter.hit("scope", "new", max: 1, per_ms: 1)
     assert bucket_count("scope") == 1
   end
 
@@ -81,20 +70,47 @@ defmodule OmashikiWeb.RateLimiterTest do
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
-    assert Enum.count(results, &match?({:ok, _}, &1)) == 10
+    assert Enum.count(results, &match?({:ok, _, _}, &1)) == 10
     assert Enum.count(results, &match?({:error, :rate_limited}, &1)) == 30
   end
 
   test "refund restores a reservation in the same window" do
     opts = [max: 1, per_ms: 60_000]
-    assert {:ok, 1} = RateLimiter.hit("scope", "x", opts)
+    assert {:ok, 1, key} = RateLimiter.hit("scope", "x", opts)
     assert {:error, :rate_limited} = RateLimiter.hit("scope", "x", opts)
-    assert :ok = RateLimiter.refund("scope", "x", opts)
-    assert {:ok, 1} = RateLimiter.hit("scope", "x", opts)
+    assert :ok = RateLimiter.refund(key)
+    assert {:ok, 1, _key} = RateLimiter.hit("scope", "x", opts)
   end
 
-  test "refund is a no-op when the window has no bucket" do
-    assert :ok = RateLimiter.refund("scope", "missing", per_ms: 60_000)
+  test "refund is a no-op when the key is missing" do
+    assert :ok = RateLimiter.refund({"scope", "missing", 0})
+  end
+
+  test "refund credits the reserved window after rollover" do
+    opts = [max: 1, per_ms: 1]
+    assert {:ok, 1, key} = RateLimiter.hit("scope", "x", opts)
+    Process.sleep(5)
+    assert {:ok, 1, _fresh} = RateLimiter.hit("scope", "x", opts)
+    assert :ok = RateLimiter.refund(key)
+    assert {:error, :rate_limited} = RateLimiter.hit("scope", "x", opts)
+  end
+
+  test "over-limit rollback does not raise when the key vanishes" do
+    opts = [max: 1, per_ms: 60_000]
+    assert {:ok, 1, key} = RateLimiter.hit("scope", "x", opts)
+
+    results =
+      1..20
+      |> Task.async_stream(
+        fn _ ->
+          :ets.delete(RateLimiter, key)
+          RateLimiter.hit("scope", "x", opts)
+        end,
+        timeout: 5_000
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    assert Enum.all?(results, &(match?({:ok, _, _}, &1) or match?({:error, :rate_limited}, &1)))
   end
 
   test "checkin removes a zeroed counter" do

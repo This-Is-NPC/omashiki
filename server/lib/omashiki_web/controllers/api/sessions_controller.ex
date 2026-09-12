@@ -32,10 +32,10 @@ defmodule OmashikiWeb.Api.SessionsController do
       {:error, :rate_limited} ->
         {:error, :rate_limited}
 
-      {:ok, _} ->
+      {:ok, key} ->
         with {:ok, user} <- authenticate(attrs),
              {:ok, token, plaintext} <- ApiTokens.create_for_user(user, token_attrs(attrs, "CLI")) do
-          refund_issue(conn)
+          RateLimiter.refund(key)
           ApiConn.audit(conn, token, "issue")
           json(conn, %{data: token_json(token, plaintext)})
         else
@@ -43,7 +43,7 @@ defmodule OmashikiWeb.Api.SessionsController do
             error
 
           other ->
-            refund_issue(conn)
+            RateLimiter.refund(key)
             other
         end
     end
@@ -152,10 +152,9 @@ defmodule OmashikiWeb.Api.SessionsController do
   end
 
   defp reserve_issue(conn) do
-    RateLimiter.hit("issue_token", ApiConn.client_ip_or_unknown(conn), issue_opts())
-  end
-
-  defp refund_issue(conn) do
-    RateLimiter.refund("issue_token", ApiConn.client_ip_or_unknown(conn), issue_opts())
+    case RateLimiter.hit("issue_token", ApiConn.client_ip_or_unknown(conn), issue_opts()) do
+      {:ok, _count, key} -> {:ok, key}
+      other -> other
+    end
   end
 end

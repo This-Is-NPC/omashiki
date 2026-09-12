@@ -6,10 +6,11 @@ defmodule OmashikiWeb.RateLimiter do
 
   Reservations are taken atomically before password hashing, so a
   burst of connections cannot exceed `max`. A successful exchange
-  refunds its reservation and does not consume the window. Failures
-  keep the count. Once the budget is spent, further attempts — including
-  a correct password — are refused without hashing. Callers that share
-  an IP therefore share the budget.
+  refunds the reservation taken by that `hit/3` — even if the window
+  rolled over during hashing — and does not consume the budget.
+  Failures keep the count. Once the budget is spent, further attempts
+  — including a correct password — are refused without hashing.
+  Callers that share an IP therefore share the budget.
 
   Not a replacement for Hammer in production deploys that need
   cluster-wide coordination — this is intentionally local + dependency-free.
@@ -18,10 +19,11 @@ defmodule OmashikiWeb.RateLimiter do
 
   Usage:
 
-      RateLimiter.hit("issue_token", remote_ip, max: 10, per_ms: 60_000)
-      # => {:ok, count} | {:error, :rate_limited}
+      {:ok, _count, key} =
+        RateLimiter.hit("issue_token", remote_ip, max: 10, per_ms: 60_000)
 
-      RateLimiter.refund("issue_token", remote_ip, per_ms: 60_000)
+      RateLimiter.refund(key)
+      # => :ok
   """
 
   @table __MODULE__
@@ -39,9 +41,12 @@ defmodule OmashikiWeb.RateLimiter do
 
   @doc """
   Records a hit for the given `(scope, identifier)` pair. Returns
-  `{:ok, count}` when the bucket is still under `max`, or
+  `{:ok, count, key}` when the bucket is still under `max`, or
   `{:error, :rate_limited}` when the limit has been reached for the
   current window.
+
+  `key` identifies the window that was reserved so `refund/1` can
+  return that slot even after the clock crosses into the next window.
   """
   def hit(scope, identifier, opts) when is_binary(scope) do
     ensure_table()
@@ -56,55 +61,24 @@ defmodule OmashikiWeb.RateLimiter do
     maybe_gc(scope, window)
 
     if n > max do
-      :ets.update_counter(@table, key, {2, -1})
+      rollback(key)
       {:error, :rate_limited}
     else
-      {:ok, n}
+      {:ok, n, key}
     end
   end
 
   @doc """
-  Give back a reservation taken by `hit/3` in the same window.
+  Give back the reservation identified by `key` from `hit/3`.
 
   Used when the work that reserved a slot succeeded and must not consume
-  the failure budget. Missing or rolled-over windows are a no-op.
+  the failure budget. A missing key (GC after rollover, or a double
+  refund) is a no-op.
   """
-  def refund(scope, identifier, opts) when is_binary(scope) do
+  def refund(key) when is_tuple(key) do
     ensure_table()
-
-    per_ms = Keyword.fetch!(opts, :per_ms)
-    now = System.system_time(:millisecond)
-    window = div(now, per_ms)
-    key = {scope, identifier, window}
-
-    try do
-      n = :ets.update_counter(@table, key, {2, -1, 0, 0})
-      if n == 0, do: :ets.select_delete(@table, [{{key, 0}, [], [true]}])
-      :ok
-    rescue
-      ArgumentError -> :ok
-    end
-  end
-
-  @doc """
-  True when the bucket is already at `max` for the current window.
-
-  Unlike `hit/3`, this does not increment. Call it before work that must not
-  run once the budget is spent (password hashing on `issue_token`).
-  """
-  def limited?(scope, identifier, opts) when is_binary(scope) do
-    ensure_table()
-
-    max = Keyword.fetch!(opts, :max)
-    per_ms = Keyword.fetch!(opts, :per_ms)
-    now = System.system_time(:millisecond)
-    window = div(now, per_ms)
-    key = {scope, identifier, window}
-
-    case :ets.lookup(@table, key) do
-      [{^key, n}] when is_integer(n) -> n >= max
-      _ -> false
-    end
+    rollback(key)
+    :ok
   end
 
   @doc """
@@ -117,7 +91,7 @@ defmodule OmashikiWeb.RateLimiter do
 
     case :ets.update_counter(@table, key, {2, 1}, {key, 0}) do
       n when n > max ->
-        :ets.update_counter(@table, key, {2, -1})
+        rollback(key)
         {:error, :rate_limited}
 
       n ->
@@ -128,16 +102,8 @@ defmodule OmashikiWeb.RateLimiter do
   @doc "Decrement a concurrent-use counter opened by `checkout/3`."
   def checkin(scope, identifier) when is_binary(scope) do
     ensure_table()
-    key = {:conc, scope, identifier}
-
-    try do
-      n = :ets.update_counter(@table, key, {2, -1, 0, 0})
-      # Delete only if the row is still zero so a concurrent checkout is kept.
-      if n == 0, do: :ets.select_delete(@table, [{{key, 0}, [], [true]}])
-      :ok
-    rescue
-      ArgumentError -> :ok
-    end
+    rollback({:conc, scope, identifier})
+    :ok
   end
 
   @doc "Test helper — clears every bucket."
@@ -145,6 +111,18 @@ defmodule OmashikiWeb.RateLimiter do
     ensure_table()
     :ets.delete_all_objects(@table)
     :ok
+  end
+
+  # Decrement without inserting a missing row. `maybe_gc` on a newer window
+  # can delete this key between increment and rollback; that must not 500.
+  defp rollback(key) do
+    try do
+      n = :ets.update_counter(@table, key, {2, -1, 0, 0})
+      if n == 0, do: :ets.select_delete(@table, [{{key, 0}, [], [true]}])
+      n
+    rescue
+      ArgumentError -> 0
+    end
   end
 
   # One table scan per (scope, window), not per hit. The sentinel is itself
