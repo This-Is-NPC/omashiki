@@ -45,6 +45,7 @@ end
 
 config :omashiki, :worker_token, System.get_env("OMASHIKI_WORKER_TOKEN")
 config :omashiki, :manager_url, System.get_env("OMASHIKI_MANAGER_URL")
+config :omashiki, :http_forwarded, System.get_env("OMASHIKI_TRUST_FORWARDED") in ~w(1 true)
 
 case System.get_env("OMASHIKI_MANAGERS") do
   nil ->
@@ -151,7 +152,7 @@ if config_env() == :prod do
         You can generate one by calling: mix phx.gen.secret
         """
 
-    idle_ms = Application.get_env(:omashiki, :http_idle_timeout_ms, 90_000)
+    idle_ms = Application.get_env(:omashiki, :http_idle_timeout_ms)
 
     config :omashiki, OmashikiWeb.Endpoint,
       http: [
@@ -243,7 +244,7 @@ if File.exists?(omashiki_toml) and config_env() != :test do
         end
     end
 
-  idle_ms = Application.get_env(:omashiki, :http_idle_timeout_ms, 90_000)
+  idle_ms = Application.get_env(:omashiki, :http_idle_timeout_ms)
 
   http_opts =
     []

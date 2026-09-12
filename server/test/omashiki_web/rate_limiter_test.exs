@@ -53,4 +53,30 @@ defmodule OmashikiWeb.RateLimiterTest do
     assert {:ok, 1} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
     assert RateLimiter.size() == 1
   end
+
+  test "concurrent hits share one atomic counter" do
+    results =
+      1..40
+      |> Task.async_stream(
+        fn _ -> RateLimiter.hit("conc", "same", max: 10, per_ms: 60_000) end,
+        timeout: 5_000
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    assert Enum.count(results, &match?({:ok, _}, &1)) == 10
+    assert Enum.count(results, &match?({:error, :rate_limited}, &1)) == 30
+  end
+
+  test "checkin removes a zeroed counter" do
+    assert {:ok, 1} = RateLimiter.checkout("conc", "id", 2)
+    RateLimiter.checkin("conc", "id")
+    assert RateLimiter.size() == 0
+  end
+
+  test "checkin does not drop a remaining checkout" do
+    assert {:ok, 1} = RateLimiter.checkout("conc", "id", 2)
+    assert {:ok, 2} = RateLimiter.checkout("conc", "id", 2)
+    RateLimiter.checkin("conc", "id")
+    assert {:ok, 2} = RateLimiter.checkout("conc", "id", 2)
+  end
 end

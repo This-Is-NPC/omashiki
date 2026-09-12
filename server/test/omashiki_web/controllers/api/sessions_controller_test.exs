@@ -104,7 +104,7 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
     end
 
     @tag :unauthenticated
-    test "issue_token budget is per client address, not username", %{conn: conn} do
+    test "issue_token budget is per address and username", %{conn: conn} do
       _ = user_fixture(%{username: "bob", password: "right-password-1"})
       _ = user_fixture(%{username: "ann", password: "right-password-2"})
 
@@ -123,8 +123,59 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
           token_grants(%{"username" => "ann", "password" => "wrong"})
         )
 
-      assert response.status == 429
-      assert Jason.decode!(response.resp_body)["code"] == "rate_limited"
+      assert response.status == 401
+      assert Jason.decode!(response.resp_body)["code"] == "invalid_credentials"
+    end
+
+    @tag :unauthenticated
+    test "ignores X-Forwarded-For unless forwarded headers are trusted", %{conn: conn} do
+      _ = user_fixture(%{username: "bob", password: "right-password-1"})
+
+      for _ <- 1..10 do
+        post(
+          conn,
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+      end
+
+      forwarded =
+        conn
+        |> Plug.Conn.put_req_header("x-forwarded-for", "9.9.9.9")
+        |> post(
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+
+      assert forwarded.status == 429
+    end
+
+    @tag :unauthenticated
+    test "uses X-Forwarded-For when forwarded headers are trusted", %{conn: conn} do
+      previous = Application.get_env(:omashiki, :http_forwarded)
+      Application.put_env(:omashiki, :http_forwarded, true)
+      on_exit(fn -> Application.put_env(:omashiki, :http_forwarded, previous) end)
+
+      _ = user_fixture(%{username: "bob", password: "right-password-1"})
+
+      for _ <- 1..10 do
+        post(
+          conn,
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+      end
+
+      forwarded =
+        conn
+        |> Plug.Conn.put_req_header("x-forwarded-for", "9.9.9.9")
+        |> post(
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+
+      assert forwarded.status == 401
+      assert Jason.decode!(forwarded.resp_body)["code"] == "invalid_credentials"
     end
   end
 end

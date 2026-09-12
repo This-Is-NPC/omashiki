@@ -85,6 +85,9 @@ config :omashiki, :token_audit_retention_days, 90
 # GET /jobs/{id}/result?wait= can hold the connection for up to 60s.
 config :omashiki, :http_idle_timeout_ms, 90_000
 
+# Trust X-Forwarded-For only when the house sits behind a known proxy.
+config :omashiki, :http_forwarded, false
+
 # Outbound provider HTTP must not block a DispatchWorker forever. The receive
 # loop enforces this as a total request deadline (connect timeout is separate).
 config :omashiki, :gateway_provider_request_timeout_ms, 120_000

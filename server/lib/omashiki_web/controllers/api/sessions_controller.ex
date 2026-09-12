@@ -131,7 +131,9 @@ defmodule OmashikiWeb.Api.SessionsController do
   end
 
   defp check_rate(conn) do
-    bucket = ApiConn.client_ip_or_unknown(conn)
+    attrs = Maps.stringify_keys(conn.body_params)
+    identifier = attrs["username"] || attrs["email"] || ""
+    bucket = ApiConn.client_ip_or_unknown(conn) <> "|" <> identifier
 
     case RateLimiter.hit("issue_token", bucket,
            max: @rate_limit_max,

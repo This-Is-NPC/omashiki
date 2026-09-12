@@ -41,9 +41,10 @@ defmodule OmashikiWeb.RateLimiter do
     per_ms = Keyword.fetch!(opts, :per_ms)
     now = System.system_time(:millisecond)
     window = div(now, per_ms)
-    key = {scope, identifier}
+    key = {scope, identifier, window}
 
-    n = bump(key, window)
+    n = :ets.update_counter(@table, key, {2, 1}, {key, 0})
+    gc_expired_windows(scope, identifier, window)
 
     if n > max do
       {:error, :rate_limited}
@@ -52,7 +53,7 @@ defmodule OmashikiWeb.RateLimiter do
     end
   end
 
-  @doc "Test helper — number of live ETS rows."
+  @doc false
   def size do
     ensure_table()
     :ets.info(@table, :size)
@@ -83,7 +84,8 @@ defmodule OmashikiWeb.RateLimiter do
 
     try do
       n = :ets.update_counter(@table, key, {2, -1, 0, 0})
-      if n == 0, do: :ets.delete(@table, key)
+      # Delete only if the row is still zero so a concurrent checkout is kept.
+      if n == 0, do: :ets.select_delete(@table, [{{key, 0}, [], [true]}])
       :ok
     rescue
       ArgumentError -> :ok
@@ -97,17 +99,9 @@ defmodule OmashikiWeb.RateLimiter do
     :ok
   end
 
-  # One row per `(scope, identifier)`. The window lives in the tuple so a
-  # skipped window cannot leave an extra key behind, and an attacker cannot
-  # grow the table by waiting between windows.
-  defp bump(key, window) do
-    case :ets.lookup(@table, key) do
-      [{^key, _count, ^window}] ->
-        :ets.update_counter(@table, key, {2, 1})
-
-      _ ->
-        :ets.insert(@table, {key, 1, window})
-        1
-    end
+  defp gc_expired_windows(scope, identifier, window) do
+    :ets.select_delete(@table, [
+      {{{scope, identifier, :"$1"}, :_}, [{:<, :"$1", window}], [true]}
+    ])
   end
 end
