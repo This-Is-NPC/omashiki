@@ -150,8 +150,6 @@ class Sampler(threading.Thread):
         for the authoritative count.
     """
 
-    PAGE_SIZE = 50
-
     def __init__(self, client: Client, interval: float):
         super().__init__(daemon=True)
         self.client = client
@@ -159,7 +157,6 @@ class Sampler(threading.Thread):
         self._halt = threading.Event()
         self.peak_active = 0
         self.peak_at = None
-        self.saturated = False
         self.samples: list[dict] = []
         self.errors = 0
 
@@ -182,8 +179,6 @@ class Sampler(threading.Thread):
                 self.errors += 1
                 return
             counts[status] = len(rows)
-            if len(rows) >= self.PAGE_SIZE:
-                self.saturated = True
 
         active = sum(counts.values())
         self.samples.append({"t": round(time.time(), 3), "active": active, **counts})
@@ -425,10 +420,9 @@ def report(outcomes: list[Outcome], sampler: Sampler, args, elapsed: float) -> d
     print("  execution (started_at -> finished_at, server clock)")
     print("    p50 %s   p95 %s   max %s" % (fmt_ms(run.get("p50")), fmt_ms(run.get("p95")), fmt_ms(run.get("max"))))
     print()
-    saturation = " (>= one page; counts paginated)" if sampler.saturated else ""
     print(
-        "  peak concurrent attempts  %d%s  (server snapshot every %.2fs; lower bound)"
-        % (sampler.peak_active, saturation, args.sample_interval)
+        "  peak concurrent attempts  %d  (server snapshot every %.2fs; lower bound)"
+        % (sampler.peak_active, args.sample_interval)
     )
     print()
 
@@ -451,7 +445,6 @@ def report(outcomes: list[Outcome], sampler: Sampler, args, elapsed: float) -> d
         "counts": dict(by_status),
         "capacity_exhausted": len(capacity_rejections),
         "peak_concurrent_attempts": sampler.peak_active,
-        "peak_concurrent_saturated_list_limit": sampler.saturated,
         "concurrency_samples": sampler.samples,
         "wall_ms": wall,
         "queue_wait_ms": queued,
