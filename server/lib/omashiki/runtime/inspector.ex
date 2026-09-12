@@ -127,8 +127,7 @@ defmodule Omashiki.Runtime.Inspector do
        waiters: [],
        task: nil,
        interval_ms: interval,
-       census: Keyword.get(opts, :census, :configured),
-       live_digest: Keyword.get(opts, :live_digest)
+       census: Keyword.get(opts, :census, :configured)
      }}
   end
 
@@ -188,15 +187,9 @@ defmodule Omashiki.Runtime.Inspector do
 
   defp ensure_polling(%{task: nil} = state) do
     census = state.census
-    live_digest = state.live_digest
 
     task =
-      Task.Supervisor.async_nolink(Omashiki.Runtime.TaskSupervisor, fn ->
-        case live_digest do
-          digest when is_binary(digest) -> build(census, live_digest: digest)
-          _ -> build(census)
-        end
-      end)
+      Task.Supervisor.async_nolink(Omashiki.Runtime.TaskSupervisor, fn -> build(census) end)
 
     %{state | task: task}
   end
