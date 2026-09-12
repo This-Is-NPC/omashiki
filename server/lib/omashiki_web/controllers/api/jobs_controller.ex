@@ -1,11 +1,10 @@
 defmodule OmashikiWeb.Api.JobsController do
   use OmashikiWeb.Api.Controller
 
-  alias Omashiki.ApiTokens
   alias Omashiki.Jobs
   alias Omashiki.Jobs.{Admission, Api, EventStream, Job, Statuses}
   alias Omashiki.Maps
-  alias OmashikiWeb.Api.Problem
+  alias OmashikiWeb.Api.Conn, as: ApiConn
   alias OmashikiWeb.ApiSpec.Schemas
   alias OmashikiWeb.RateLimiter
 
@@ -13,9 +12,9 @@ defmodule OmashikiWeb.Api.JobsController do
   @max_wait 60
   @wait_limit 2
 
-  tags ["jobs"]
+  tags(["jobs"])
 
-  operation :index,
+  operation(:index,
     summary: "List jobs",
     security: [%{"bearer" => ["read"]}],
     parameters: [
@@ -31,18 +30,19 @@ defmodule OmashikiWeb.Api.JobsController do
       200 => {"Job list", "application/json", Schemas.JobListResponse},
       400 => {"Bad request", "application/problem+json", Schemas.Problem}
     }
+  )
 
   def index(conn, params) do
-    filter = list_filter(params)
     cursor = param(params, :cursor)
 
-    with {:ok, %{entries: jobs, next_cursor: next}} <-
-           Api.list(actor(conn), filter: filter, cursor: cursor, page_size: @page_size) do
+    with {:ok, filter} <- list_filter(params),
+         {:ok, %{entries: jobs, next_cursor: next}} <-
+           Api.list(ApiConn.actor(conn), filter: filter, cursor: cursor, page_size: @page_size) do
       json(conn, %{data: Enum.map(jobs, &job_json/1), next_cursor: next})
     end
   end
 
-  operation :create,
+  operation(:create,
     summary: "Admit one job",
     security: [%{"bearer" => ["submit"]}],
     request_body: {"Job", "application/json", Schemas.JobAdmissionRequest},
@@ -50,13 +50,15 @@ defmodule OmashikiWeb.Api.JobsController do
       202 => {"Admitted", "application/json", Schemas.JobResponse},
       422 => {"Invalid", "application/problem+json", Schemas.Problem}
     }
+  )
 
   def create(conn, _params) do
     attrs = body(conn) |> with_idempotency_header(conn)
+    started = DateTime.utc_now()
 
     with {:ok, token} <- submission_token(conn),
          {:ok, job} <- Admission.admit(token, attrs) do
-      audit(conn, token, "submit", job.id)
+      if newly_persisted?(job, started), do: ApiConn.audit(conn, token, "submit", job_id: job.id)
 
       conn
       |> put_status(:accepted)
@@ -64,7 +66,7 @@ defmodule OmashikiWeb.Api.JobsController do
     end
   end
 
-  operation :batch,
+  operation(:batch,
     summary: "Admit a batch of jobs",
     security: [%{"bearer" => ["submit"]}],
     request_body: {"Batch", "application/json", Schemas.JobBatchRequest},
@@ -72,13 +74,18 @@ defmodule OmashikiWeb.Api.JobsController do
       202 => {"Admitted", "application/json", Schemas.JobListResponse},
       413 => {"Too large", "application/problem+json", Schemas.Problem}
     }
+  )
 
   def batch(conn, _params) do
     attrs = body(conn)
+    started = DateTime.utc_now()
 
     with {:ok, token} <- submission_token(conn),
          {:ok, admitted} <- Admission.admit_batch(token, attrs) do
-      Enum.each(admitted, &audit(conn, token, "submit", &1.id))
+      Enum.each(admitted, fn job ->
+        if newly_persisted?(job, started),
+          do: ApiConn.audit(conn, token, "submit", job_id: job.id)
+      end)
 
       conn
       |> put_status(:accepted)
@@ -86,7 +93,7 @@ defmodule OmashikiWeb.Api.JobsController do
     end
   end
 
-  operation :show,
+  operation(:show,
     summary: "Read one job",
     security: [%{"bearer" => ["read"]}],
     parameters: [
@@ -96,14 +103,15 @@ defmodule OmashikiWeb.Api.JobsController do
       200 => {"Job", "application/json", Schemas.JobResponse},
       404 => {"Missing", "application/problem+json", Schemas.Problem}
     }
+  )
 
   def show(conn, params) do
-    with {:ok, job} <- Api.get(param(params, :id), actor(conn)) do
+    with {:ok, job} <- Api.get(param(params, :id), ApiConn.actor(conn)) do
       json(conn, %{data: job_json(job)})
     end
   end
 
-  operation :result,
+  operation(:result,
     summary: "Read a terminal job result",
     security: [%{"bearer" => ["read"]}],
     parameters: [
@@ -119,12 +127,13 @@ defmodule OmashikiWeb.Api.JobsController do
       202 => {"Not ready", "application/problem+json", Schemas.Problem},
       409 => {"Not ready", "application/problem+json", Schemas.Problem}
     }
+  )
 
   def result(conn, params) do
     id = param(params, :id)
     wait = param(params, :wait)
 
-    with {:ok, job} <- Api.get(id, actor(conn)) do
+    with {:ok, job} <- Api.get(id, ApiConn.actor(conn)) do
       cond do
         Statuses.terminal?(job.status) -> render_result(conn, job)
         is_integer(wait) and wait > 0 -> wait_for_result(conn, job, min(wait, @max_wait))
@@ -133,7 +142,7 @@ defmodule OmashikiWeb.Api.JobsController do
     end
   end
 
-  operation :cancel,
+  operation(:cancel,
     summary: "Cancel a job",
     security: [%{"bearer" => ["cancel"]}],
     parameters: [
@@ -142,16 +151,17 @@ defmodule OmashikiWeb.Api.JobsController do
     responses: %{
       200 => {"Cancelled", "application/json", Schemas.JobResponse}
     }
+  )
 
   def cancel(conn, params) do
-    with {:ok, job} <- Api.get(param(params, :id), actor(conn)),
+    with {:ok, job} <- Api.get(param(params, :id), ApiConn.actor(conn)),
          {:ok, cancelled} <- Jobs.cancel(job) do
-      audit(conn, conn.assigns[:current_token], "cancel", cancelled.id)
+      ApiConn.audit(conn, conn.assigns[:current_token], "cancel", job_id: cancelled.id)
       json(conn, %{data: job_json(cancelled)})
     end
   end
 
-  operation :retry,
+  operation(:retry,
     summary: "Retry a failed or cancelled job",
     security: [%{"bearer" => ["submit"]}],
     parameters: [
@@ -160,11 +170,12 @@ defmodule OmashikiWeb.Api.JobsController do
     responses: %{
       202 => {"Retried", "application/json", Schemas.JobResponse}
     }
+  )
 
   def retry(conn, params) do
-    with {:ok, job} <- Api.get(param(params, :id), actor(conn)),
+    with {:ok, job} <- Api.get(param(params, :id), ApiConn.actor(conn)),
          {:ok, retried} <- Jobs.retry(job) do
-      audit(conn, conn.assigns[:current_token], "retry", retried.id)
+      ApiConn.audit(conn, conn.assigns[:current_token], "retry", job_id: retried.id)
 
       conn
       |> put_status(:accepted)
@@ -172,7 +183,7 @@ defmodule OmashikiWeb.Api.JobsController do
     end
   end
 
-  operation :events,
+  operation(:events,
     summary: "Read durable job events",
     security: [%{"bearer" => ["read"]}],
     parameters: [
@@ -181,19 +192,21 @@ defmodule OmashikiWeb.Api.JobsController do
     responses: %{
       200 => {"Events", "application/json", Schemas.JobEventListResponse}
     }
+  )
 
   def events(conn, params) do
     id = param(params, :id)
-    actor = actor(conn)
+    actor = ApiConn.actor(conn)
 
     with {:ok, %{after_sequence: after_sequence}} <- EventStream.prepare(id, actor, cursor(conn)),
-         {:ok, events} <- EventStream.fetch_events(id, after_sequence, page_size: event_limit(conn)) do
+         {:ok, events} <-
+           EventStream.fetch_events(id, after_sequence, page_size: event_limit(conn)) do
       json(conn, %{data: Enum.map(events, &EventStream.to_map/1)})
     end
   end
 
   defp wait_for_result(conn, %Job{} = job, wait_s) do
-    token_id = token_id(conn)
+    token_id = actor_token_id(conn)
 
     with :ok <- acquire_wait(token_id) do
       try do
@@ -210,7 +223,7 @@ defmodule OmashikiWeb.Api.JobsController do
   defp wait_loop(conn, job_id, deadline) do
     remaining = deadline - System.monotonic_time(:millisecond)
 
-    case Api.get(job_id, actor(conn)) do
+    case Api.get(job_id, ApiConn.actor(conn)) do
       {:ok, job} ->
         if Statuses.terminal?(job.status) do
           render_result(conn, job)
@@ -257,8 +270,11 @@ defmodule OmashikiWeb.Api.JobsController do
     end
   end
 
-  defp actor(conn), do: conn.assigns[:current_token] || conn.assigns[:current_user]
-  defp token_id(conn), do: conn.assigns[:current_token] && conn.assigns.current_token.id
+  defp actor_token_id(conn), do: conn.assigns[:current_token] && conn.assigns.current_token.id
+
+  defp newly_persisted?(%Job{inserted_at: at}, started) do
+    DateTime.compare(at, started) != :lt
+  end
 
   defp body(conn), do: Maps.stringify_keys(conn.body_params)
 
@@ -274,29 +290,31 @@ defmodule OmashikiWeb.Api.JobsController do
   end
 
   defp list_filter(params) do
-    %{}
-    |> maybe_put_filter(:status, param(params, :status))
-    |> maybe_put_filter(:environment, param(params, :environment))
-    |> maybe_put_filter(:repository, param(params, :repository))
-    |> maybe_put_filter(:worker, param(params, :worker))
-    |> maybe_put_filter(:correlation_id, param(params, :correlation_id))
-    |> maybe_put_since(param(params, :since))
+    filter =
+      %{}
+      |> maybe_put_filter(:status, param(params, :status))
+      |> maybe_put_filter(:environment, param(params, :environment))
+      |> maybe_put_filter(:repository, param(params, :repository))
+      |> maybe_put_filter(:worker, param(params, :worker))
+      |> maybe_put_filter(:correlation_id, param(params, :correlation_id))
+
+    put_since(filter, param(params, :since))
   end
 
   defp maybe_put_filter(filter, _key, nil), do: filter
   defp maybe_put_filter(filter, _key, ""), do: filter
   defp maybe_put_filter(filter, key, value), do: Map.put(filter, key, value)
 
-  defp maybe_put_since(filter, nil), do: filter
+  defp put_since(filter, nil), do: {:ok, filter}
 
-  defp maybe_put_since(filter, value) when is_binary(value) do
+  defp put_since(filter, value) when is_binary(value) do
     case DateTime.from_iso8601(value) do
-      {:ok, dt, _} -> Map.put(filter, :since, dt)
-      _ -> filter
+      {:ok, dt, _} -> {:ok, Map.put(filter, :since, dt)}
+      _ -> {:error, {:validation, [%{field: "since", code: "invalid"}]}}
     end
   end
 
-  defp maybe_put_since(filter, _), do: filter
+  defp put_since(_filter, _), do: {:error, {:validation, [%{field: "since", code: "invalid"}]}}
 
   defp event_limit(conn) do
     case get_req_header(conn, "x-events-limit") do
@@ -311,13 +329,7 @@ defmodule OmashikiWeb.Api.JobsController do
     end
   end
 
-  defp cursor(conn) do
-    case get_req_header(conn, "last-event-id") do
-      [] -> nil
-      [value] -> value
-      _ -> :invalid_cursor
-    end
-  end
+  defp cursor(conn), do: ApiConn.last_event_id(conn)
 
   defp job_json(%Job{} = job) do
     %{
@@ -366,21 +378,4 @@ defmodule OmashikiWeb.Api.JobsController do
 
   defp iso(nil), do: nil
   defp iso(%DateTime{} = value), do: DateTime.to_iso8601(value)
-
-  defp audit(_conn, nil, _action, _job_id), do: :ok
-
-  defp audit(conn, token, action, job_id) do
-    ApiTokens.Audit.record(token, action,
-      job_id: job_id,
-      request_id: Problem.request_id(conn),
-      ip: ip(conn)
-    )
-  end
-
-  defp ip(conn) do
-    case conn.remote_ip do
-      nil -> nil
-      tuple -> tuple |> :inet.ntoa() |> to_string()
-    end
-  end
 end

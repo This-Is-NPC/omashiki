@@ -1,7 +1,7 @@
 defmodule OmashikiWeb.ApiSpec do
   @moduledoc "Generated OpenAPI 3.0 document for `/api/v1`."
 
-  alias OpenApiSpex.{Components, Info, OpenApi, Paths, SecurityScheme, OAuthFlow, OAuthFlows}
+  alias OpenApiSpex.{Components, Info, OpenApi, Paths, SecurityScheme}
 
   @behaviour OpenApi
 
@@ -18,18 +18,10 @@ defmodule OmashikiWeb.ApiSpec do
       components: %Components{
         securitySchemes: %{
           "bearer" => %SecurityScheme{
-            type: :oauth2,
-            description: "API token presented as HTTP Bearer",
-            flows: %OAuthFlows{
-              clientCredentials: %OAuthFlow{
-                tokenUrl: "/api/v1/sessions/issue_token",
-                scopes: %{
-                  "read" => "Read jobs, discovery, fleet, events, and results",
-                  "submit" => "Admit, retry, and redeliver jobs",
-                  "cancel" => "Cancel jobs"
-                }
-              }
-            }
+            type: :http,
+            scheme: "bearer",
+            bearerFormat: "opaque",
+            description: "API token presented as HTTP Bearer"
           }
         }
       }

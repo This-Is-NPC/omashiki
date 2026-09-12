@@ -178,7 +178,9 @@ defmodule OmashikiWeb.OverviewLive do
               class="flex flex-wrap items-baseline justify-between gap-3 py-3"
             >
               <span class="font-mono text-xs uppercase text-on-surface">{event.action}</span>
-              <span class="font-mono text-xs text-on-surface-variant">{Ops.short_id(event.api_token_id)}</span>
+              <span class="font-mono text-xs text-on-surface-variant">{Ops.short_id(
+                event.api_token_id
+              )}</span>
               <time class="font-mono text-xs text-on-surface-variant" datetime={event.occurred_at}>{Ops.age(
                 event.occurred_at
               )} ago</time>

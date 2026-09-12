@@ -3,10 +3,10 @@ defmodule Omashiki.Jobs.Dependencies do
 
   import Ecto.Query
 
-  alias Omashiki.Jobs.{DispatchWorker, Job, JobAttempt, JobDependency, JobEvent}
+  alias Omashiki.Jobs.{DispatchWorker, Job, JobAttempt, JobDependency, JobEvent, Statuses}
   alias Omashiki.Repo
 
-  @terminal ~w(succeeded failed cancelled)
+  @terminal Statuses.terminal()
 
   def notify_dependents!(%Job{} = dependency, unlock_event_id) do
     dependents =

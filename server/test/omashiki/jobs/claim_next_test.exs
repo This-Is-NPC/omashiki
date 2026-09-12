@@ -26,6 +26,7 @@ defmodule Omashiki.Jobs.ClaimNextTest do
 
     base = ~U[2026-01-01 00:00:00.000000Z]
     Repo.update_all(from(j in Job, where: j.id == ^older.id), set: [inserted_at: base])
+
     Repo.update_all(from(j in Job, where: j.id == ^newer.id),
       set: [inserted_at: DateTime.add(base, 60, :second)]
     )

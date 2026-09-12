@@ -40,22 +40,16 @@ defmodule OmashikiWeb.RateLimiter do
     max = Keyword.fetch!(opts, :max)
     per_ms = Keyword.fetch!(opts, :per_ms)
     now = System.system_time(:millisecond)
-    window_start = now - per_ms
+    window = div(now, per_ms)
+    key = {scope, identifier, window}
 
-    key = {scope, identifier}
+    _ = :ets.delete(@table, {scope, identifier, window - 1})
+    n = :ets.update_counter(@table, key, {2, 1}, {key, 0})
 
-    case :ets.lookup(@table, key) do
-      [{^key, started_at, count}] when started_at > window_start ->
-        if count >= max do
-          {:error, :rate_limited}
-        else
-          :ets.insert(@table, {key, started_at, count + 1})
-          {:ok, count + 1}
-        end
-
-      _ ->
-        :ets.insert(@table, {key, now, 1})
-        {:ok, 1}
+    if n > max do
+      {:error, :rate_limited}
+    else
+      {:ok, n}
     end
   end
 

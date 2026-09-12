@@ -11,6 +11,7 @@ defmodule Omashiki.Accounts do
   import Ecto.Query
   alias Omashiki.Repo
   alias Omashiki.Accounts.User
+  alias Omashiki.ApiTokens
 
   @doc """
   Registers a new user. Refuses with `{:error, :registration_closed}` when
@@ -43,6 +44,43 @@ defmodule Omashiki.Accounts do
     # SQLSTATE 40001. Surface that as :registration_closed so the caller
     # sees the same outcome whether they lost the race to count == 0 or to
     # the unique index.
+    Postgrex.Error -> {:error, :registration_closed}
+    DBConnection.ConnectionError -> {:error, :registration_closed}
+  end
+
+  @doc """
+  Register the first operator and issue their token in one transaction.
+
+  A token that fails validation rolls back the user row so signup stays open.
+  """
+  def register_with_token(user_attrs, token_attrs) when is_map(token_attrs) do
+    with {:ok, _} <- ApiTokens.validate_create_attrs(token_attrs) do
+      Repo.transaction(
+        fn ->
+          case Repo.aggregate(User, :count, :id) do
+            0 ->
+              user =
+                %User{}
+                |> User.registration_changeset(user_attrs)
+                |> Repo.insert()
+                |> case do
+                  {:ok, user} -> user
+                  {:error, changeset} -> Repo.rollback(changeset)
+                end
+
+              case ApiTokens.create_for_user(user, token_attrs) do
+                {:ok, token, plaintext} -> {user, token, plaintext}
+                {:error, reason} -> Repo.rollback(reason)
+              end
+
+            _ ->
+              Repo.rollback(:registration_closed)
+          end
+        end,
+        isolation: :serializable
+      )
+    end
+  rescue
     Postgrex.Error -> {:error, :registration_closed}
     DBConnection.ConnectionError -> {:error, :registration_closed}
   end

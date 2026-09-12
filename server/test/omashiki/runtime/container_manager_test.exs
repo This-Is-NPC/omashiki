@@ -304,7 +304,6 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
     end
   end
 
-
   describe "supply_chain_delivery data plane" do
     test "embedded allowlist binds host socket when manager_url is unset" do
       Application.delete_env(:omashiki, :manager_url)
@@ -370,6 +369,7 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
 
       :ok
     end
+
     test "returns [] when boot_role is :worker without querying Repo" do
       Application.put_env(:omashiki, :boot_role, :worker)
 
@@ -426,6 +426,7 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
       assert delivery.binds == []
     end
   end
+
   defp runtime(handler) do
     %Spec{
       name: "docker.#{handler}.debian",
@@ -467,9 +468,13 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
       }
     }
   end
+
   defp supply_chain_delivery_fixture do
     job = job_fixture()
-    policy = Policy.parse!(%{"mode" => "allowlist", "packages" => %{"npm" => %{"left-pad" => "1.0.0"}}})
+
+    policy =
+      Policy.parse!(%{"mode" => "allowlist", "packages" => %{"npm" => %{"left-pad" => "1.0.0"}}})
+
     group = %CacheGroup{name: "deps", policy: policy}
 
     ContainerManager.supply_chain_delivery("scope-1", job, [group], 1000, 1000)

@@ -56,15 +56,16 @@ defmodule Omashiki.ApiTokens do
         |> Repo.one()
 
       if is_nil(locked), do: Repo.rollback(:not_found)
+      if not is_nil(locked.revoked_at), do: Repo.rollback(:invalid_token)
 
-      remaining = remaining_ttl_days(locked.expires_at)
+      expires_at = remaining_expires_at(locked.expires_at)
 
       case create_for_user(token.user, %{
              name: locked.name,
              scopes: locked.scopes,
              allowed_environments: locked.allowed_environments,
              max_active_jobs: locked.max_active_jobs,
-             ttl_days: remaining
+             expires_at: expires_at
            }) do
         {:ok, new_token, plaintext} ->
           case Repo.update(Token.revoke_changeset(locked)) do
@@ -257,6 +258,9 @@ defmodule Omashiki.ApiTokens do
   def can_write_global?(%Token{}), do: true
   def can_write_global?(_), do: false
 
+  @doc false
+  def validate_create_attrs(attrs), do: resolve_expires_at(attrs)
+
   defp resolve_expires_at(attrs) do
     cond do
       expires = Map.get(attrs, :expires_at) || Map.get(attrs, "expires_at") ->
@@ -285,10 +289,12 @@ defmodule Omashiki.ApiTokens do
 
   defp ttl_expires_at(_), do: {:error, :invalid_request}
 
-  defp remaining_ttl_days(%DateTime{} = expires_at) do
-    seconds = DateTime.diff(expires_at, DateTime.utc_now(), :second)
-    days = max(div(seconds, 86_400), 1)
-    min(days, max_ttl_days())
+  defp remaining_expires_at(%DateTime{} = expires_at) do
+    if DateTime.compare(expires_at, DateTime.utc_now()) == :gt do
+      expires_at
+    else
+      Repo.rollback(:token_expired)
+    end
   end
 
   defp max_ttl_days do

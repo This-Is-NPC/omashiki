@@ -14,6 +14,37 @@ defmodule Omashiki.ApiTokensTest do
     assert found.id == token.id
   end
 
+  test "rotate copies the remaining expiry and refuses a revoked token" do
+    user = user_fixture()
+    expires_at = DateTime.add(DateTime.utc_now(:microsecond), 12, :hour)
+
+    {:ok, token, _plaintext} =
+      ApiTokens.create_for_user(user, token_attrs(%{expires_at: expires_at}))
+
+    assert {:ok, rotated, _new} = ApiTokens.rotate(token)
+    assert DateTime.compare(rotated.expires_at, expires_at) == :eq
+    assert {:error, :invalid_token} = ApiTokens.rotate(token)
+  end
+
+  test "concurrent rotate issues one replacement" do
+    user = user_fixture()
+    {:ok, token, _plaintext} = ApiTokens.create_for_user(user, token_attrs())
+
+    results =
+      1..2
+      |> Task.async_stream(fn _ -> ApiTokens.rotate(token) end,
+        max_concurrency: 2,
+        timeout: 10_000
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    oks = Enum.count(results, &match?({:ok, _, _}, &1))
+    denied = Enum.count(results, &match?({:error, :invalid_token}, &1))
+
+    assert oks == 1
+    assert denied == 1
+  end
+
   test "revocation is owner-scoped" do
     owner = user_fixture()
     other = user_fixture()

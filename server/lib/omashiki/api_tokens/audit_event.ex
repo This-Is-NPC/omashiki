@@ -24,7 +24,7 @@ defmodule Omashiki.ApiTokens.AuditEvent do
     event
     |> cast(attrs, [:api_token_id, :action, :job_id, :ip, :request_id, :occurred_at])
     |> validate_required([:api_token_id, :action, :occurred_at])
-    |> validate_inclusion(:action, @actions)
+    |> validate_inclusion(:action, actions())
     |> foreign_key_constraint(:api_token_id)
     |> foreign_key_constraint(:job_id)
   end

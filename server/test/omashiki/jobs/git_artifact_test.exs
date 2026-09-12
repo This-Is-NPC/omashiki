@@ -80,6 +80,11 @@ defmodule Omashiki.Jobs.GitArtifactTest do
              "chore(omashiki): finalize job #{String.slice(job.id, 0, 8)}"
 
     assert git!(repo, ["show", "-s", "--format=%B", artifact.branch]) =~ "job_id: #{job.id}"
+    assert result.changes["files_changed"] >= 1
+
+    assert [%{"path" => "README.md", "insertions" => _, "deletions" => _}] =
+             result.changes["files"]
+
     assert :ok = GitArtifact.cleanup(artifact)
   end
 

@@ -181,6 +181,32 @@ defmodule Omashiki.Jobs.WebhooksTest do
     assert status.event_id
   end
 
+  test "redeliver requeues a failed delivery and refuses a delivered one", %{
+    user: user,
+    token: token
+  } do
+    configure!(token)
+    {job, _attempt, delivery} = terminal_fixture(user, token, "succeeded")
+
+    delivery
+    |> WebhookDelivery.changeset(%{status: "failed"})
+    |> Repo.update!()
+
+    assert {:ok, status} = Webhooks.redeliver(job.id, delivery.id, token)
+    assert status.status == "pending"
+
+    delivered =
+      delivery.id
+      |> then(&Repo.get!(WebhookDelivery, &1))
+      |> WebhookDelivery.changeset(%{
+        status: "delivered",
+        delivered_at: DateTime.utc_now(:microsecond)
+      })
+      |> Repo.update!()
+
+    assert {:error, :already_delivered} = Webhooks.redeliver(job.id, delivered.id, token)
+  end
+
   defp configure!(token) do
     assert {:ok, _} =
              Webhooks.configure(token, %{

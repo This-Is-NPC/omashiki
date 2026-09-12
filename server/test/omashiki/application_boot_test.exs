@@ -45,7 +45,6 @@ defmodule Omashiki.ApplicationBootTest do
     refute Omashiki.Repo in modules
     refute OmashikiWeb.Endpoint in modules
     refute Oban in modules
-
   end
 
   test "children_for(:embedded) and :manager exclude Poller and Slots" do

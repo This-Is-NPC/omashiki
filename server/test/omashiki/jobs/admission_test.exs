@@ -422,6 +422,28 @@ defmodule Omashiki.Jobs.AdmissionTest do
     assert Repo.aggregate(Oban.Job, :count, :id) == 1
   end
 
+  test "concurrent admits cannot exceed max_active_jobs", %{token: token} do
+    token = token |> Ecto.Changeset.change(%{max_active_jobs: 1}) |> Repo.update!()
+
+    results =
+      1..2
+      |> Task.async_stream(
+        fn n ->
+          Admission.admit(token, single_request(%{"idempotency_key" => "limit-#{n}"}))
+        end,
+        max_concurrency: 2,
+        timeout: 10_000
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    oks = Enum.count(results, &match?({:ok, %Job{}}, &1))
+    denied = Enum.count(results, &match?({:error, :max_active_jobs}, &1))
+
+    assert oks == 1
+    assert denied == 1
+    assert Repo.aggregate(Job, :count, :id) == 1
+  end
+
   defp single_request(overrides \\ %{})
 
   defp single_request("next"), do: single_request(%{"idempotency_key" => "request-next"})

@@ -33,7 +33,8 @@ defmodule Omashiki.Jobs.ApiViewTest do
     job_fixture(user, token, %{status: "running", priority: 3})
     job_fixture(user, token, %{status: "failed", priority: 3, environment: "codex"})
 
-    rows = list_rows(user, filter: %{status: ["failed"], priority: [3], environment: ["opencode"]})
+    rows =
+      list_rows(user, filter: %{status: ["failed"], priority: [3], environment: ["opencode"]})
 
     assert Enum.map(rows, & &1.job.id) == [wanted.id]
   end

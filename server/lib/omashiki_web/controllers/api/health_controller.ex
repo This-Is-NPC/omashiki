@@ -3,12 +3,13 @@ defmodule OmashikiWeb.Api.HealthController do
 
   alias OmashikiWeb.ApiSpec.Schemas
 
-  tags ["meta"]
+  tags(["meta"])
 
-  operation :show,
+  operation(:show,
     summary: "Service health",
     security: [],
     responses: %{200 => {"Health", "application/json", Schemas.Health}}
+  )
 
   def show(conn, _params) do
     json(conn, %{status: "ok"})

@@ -72,6 +72,7 @@ defmodule Omashiki.Worker.PollerTest do
       expect_register(bypass)
       expect_accept(bypass, parent)
       expect_poll_sequence(bypass, [offer], parent)
+
       expect_complete(bypass, parent, fn body ->
         assert body["complete"]["kind"] == "git"
         assert body["complete"]["remote"] == "https://example.com/repo.git"
@@ -102,7 +103,10 @@ defmodule Omashiki.Worker.PollerTest do
       slots: slots
     } do
       offer = sample_offer("files")
-      blob_path = Path.join(System.tmp_dir!(), "poller-blob-#{System.unique_integer([:positive])}")
+
+      blob_path =
+        Path.join(System.tmp_dir!(), "poller-blob-#{System.unique_integer([:positive])}")
+
       blob = "artifact-bytes"
       digest = :crypto.hash(:sha256, blob) |> Base.encode16(case: :lower)
       File.write!(blob_path, blob)
@@ -114,7 +118,9 @@ defmodule Omashiki.Worker.PollerTest do
       expect_poll_sequence(bypass, [offer], parent)
 
       Bypass.expect(bypass, "PUT", "/internal/work/blobs/#{offer["job_id"]}", fn conn ->
-        assert {"x-omashiki-digest", ^digest} = List.keyfind(conn.req_headers, "x-omashiki-digest", 0)
+        assert {"x-omashiki-digest", ^digest} =
+                 List.keyfind(conn.req_headers, "x-omashiki-digest", 0)
+
         {:ok, body, conn} = Plug.Conn.read_body(conn)
         send(parent, {:blob, body})
         Plug.Conn.resp(conn, 201, ~s({"path":"/tmp/blob","digest":"#{digest}"}))
@@ -301,11 +307,7 @@ defmodule Omashiki.Worker.PollerTest do
       slots = start_slots!(2)
 
       {:ok,
-       bypass_a: bypass_a,
-       bypass_b: bypass_b,
-       parent: parent,
-       managers: managers,
-       slots: slots}
+       bypass_a: bypass_a, bypass_b: bypass_b, parent: parent, managers: managers, slots: slots}
     end
 
     test "polls two managers and completes to the originating bypass", %{
@@ -357,7 +359,10 @@ defmodule Omashiki.Worker.PollerTest do
       slots: slots
     } do
       offer_a = sample_offer("files")
-      blob_path = Path.join(System.tmp_dir!(), "poller-blob-#{System.unique_integer([:positive])}")
+
+      blob_path =
+        Path.join(System.tmp_dir!(), "poller-blob-#{System.unique_integer([:positive])}")
+
       blob = "artifact-bytes"
       digest = :crypto.hash(:sha256, blob) |> Base.encode16(case: :lower)
       File.write!(blob_path, blob)
@@ -459,7 +464,6 @@ defmodule Omashiki.Worker.PollerTest do
     name
   end
 
-
   defp start_poller(slots, opts \\ []) do
     opts = Keyword.merge([name: unique_poller_name(), slots: slots], opts)
     start_supervised({Poller, opts})
@@ -522,7 +526,6 @@ defmodule Omashiki.Worker.PollerTest do
     end)
   end
 
-
   describe "configure/1" do
     test "activates an idle poller after enrollment credentials appear" do
       bypass = Bypass.open()
@@ -556,7 +559,6 @@ defmodule Omashiki.Worker.PollerTest do
     end
   end
 
-
   defp stub_heartbeat(bypass) do
     Bypass.stub(bypass, "POST", "/internal/work/heartbeat", fn conn ->
       conn
@@ -564,6 +566,7 @@ defmodule Omashiki.Worker.PollerTest do
       |> Plug.Conn.resp(200, ~s({"cancel":false}))
     end)
   end
+
   defp unique_poller_name do
     :"Omashiki.Worker.Poller.Test.#{System.unique_integer([:positive])}"
   end

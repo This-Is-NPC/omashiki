@@ -7,10 +7,21 @@ defmodule Omashiki.Jobs do
 
   alias Omashiki.Config
   alias Omashiki.HostSettings
-  alias Omashiki.Jobs.{DispatchWorker, ExecutionCapacity, Job, JobAttempt, JobEvent, Webhooks}
+
+  alias Omashiki.Jobs.{
+    Admission,
+    DispatchWorker,
+    ExecutionCapacity,
+    Job,
+    JobAttempt,
+    JobEvent,
+    Statuses,
+    Webhooks
+  }
+
   alias Omashiki.Repo
 
-  @terminal ~w(succeeded failed cancelled)
+  @terminal Statuses.terminal()
   @active ~w(provisioning running)
   @transitions %{
     "blocked" => ~w(cancelled),
@@ -709,7 +720,11 @@ defmodule Omashiki.Jobs do
   end
 
   defp apply_transition(%Job{} = job, "queued", %{retry: true}) do
-    if job.status in ~w(failed cancelled) do
+    if Statuses.retry_allowed?(job.status) do
+      if is_binary(job.api_token_id) do
+        Admission.enforce_token_active_limit!(job.api_token_id, 1)
+      end
+
       now = now()
       number = job.current_attempt + 1
 

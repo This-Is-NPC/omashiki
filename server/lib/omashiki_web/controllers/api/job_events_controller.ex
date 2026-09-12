@@ -2,10 +2,11 @@ defmodule OmashikiWeb.Api.JobEventsController do
   use OmashikiWeb.Api.Controller
 
   alias Omashiki.Jobs.EventStream
+  alias OmashikiWeb.Api.Conn, as: ApiConn
 
-  tags ["jobs"]
+  tags(["jobs"])
 
-  operation :stream,
+  operation(:stream,
     summary: "Stream job events as SSE",
     security: [%{"bearer" => ["read"]}],
     parameters: [
@@ -16,12 +17,13 @@ defmodule OmashikiWeb.Api.JobEventsController do
         {"Event stream", "text/event-stream",
          %OpenApiSpex.Schema{type: :string, description: "Server-sent events"}}
     }
+  )
 
   def stream(conn, params) do
     job_id = Map.get(params, :id) || Map.get(params, "id")
-    actor = conn.assigns[:current_token] || conn.assigns[:current_user]
+    actor = ApiConn.actor(conn)
 
-    case EventStream.prepare(job_id, actor, last_event_id(conn)) do
+    case EventStream.prepare(job_id, actor, ApiConn.last_event_id(conn)) do
       {:ok, %{job: job, after_sequence: after_sequence}} ->
         conn
         |> put_resp_header("cache-control", "no-cache, no-store")
@@ -33,14 +35,6 @@ defmodule OmashikiWeb.Api.JobEventsController do
 
       {:error, reason} ->
         {:error, reason}
-    end
-  end
-
-  defp last_event_id(conn) do
-    case get_req_header(conn, "last-event-id") do
-      [] -> nil
-      [value] -> value
-      _ -> :invalid_cursor
     end
   end
 end

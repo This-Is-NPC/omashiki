@@ -496,7 +496,7 @@ defmodule Omashiki.Jobs.GitArtifact do
       "files_changed" => length(files),
       "insertions" => Enum.reduce(files, 0, &(&1["insertions"] + &2)),
       "deletions" => Enum.reduce(files, 0, &(&1["deletions"] + &2)),
-      "files" => Enum.map(files, & &1["path"])
+      "files" => files
     }
   end
 

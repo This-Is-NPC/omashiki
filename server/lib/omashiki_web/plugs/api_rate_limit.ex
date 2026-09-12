@@ -18,8 +18,11 @@ defmodule OmashikiWeb.Plugs.ApiRateLimit do
     case conn.assigns[:current_token] do
       %Token{id: id} ->
         case RateLimiter.hit("api", id, max: @max, per_ms: @per_ms) do
-          {:ok, _} -> conn
-          {:error, :rate_limited} -> Problem.halt(conn, "rate_limited", retry_after: div(@per_ms, 1000))
+          {:ok, _} ->
+            conn
+
+          {:error, :rate_limited} ->
+            Problem.halt(conn, "rate_limited", retry_after: div(@per_ms, 1000))
         end
 
       _ ->

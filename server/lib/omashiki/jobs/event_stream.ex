@@ -12,10 +12,10 @@ defmodule Omashiki.Jobs.EventStream do
 
   alias Omashiki.Accounts.User
   alias Omashiki.ApiTokens.Token
-  alias Omashiki.Jobs.{Job, JobEvent}
+  alias Omashiki.Jobs.{Job, JobEvent, Statuses}
   alias Omashiki.Repo
 
-  @terminal ~w(succeeded failed cancelled)
+  @terminal Statuses.terminal()
   @default_page_size 100
   @max_page_size 100
   @default_poll_interval_ms 1_000

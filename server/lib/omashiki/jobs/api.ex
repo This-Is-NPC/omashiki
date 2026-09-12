@@ -31,7 +31,9 @@ defmodule Omashiki.Jobs.Api do
     * `:as` — `:jobs` (default) or `:rows` (job + current attempt + steps)
   """
   def list(actor, opts \\ []) do
-    page_size = opts |> Keyword.get(:page_size, @default_page_size) |> max(1) |> min(@max_page_size)
+    page_size =
+      opts |> Keyword.get(:page_size, @default_page_size) |> max(1) |> min(@max_page_size)
+
     as = Keyword.get(opts, :as, :jobs)
     filter = opts |> Keyword.get(:filter, %{}) |> normalize_filter()
     {sort_field, direction} = Keyword.get(opts, :sort, {:inserted_at, :desc})
@@ -45,7 +47,7 @@ defmodule Omashiki.Jobs.Api do
           as: :attempt,
           on: a.job_id == j.id and a.number == j.current_attempt
         )
-        |> apply_named_actor_scope(actor)
+        |> apply_actor_scope(actor)
         |> filter_view(filter)
         |> apply_cursor(cursor, direction)
         |> order_view(sort_field, direction)
@@ -59,7 +61,7 @@ defmodule Omashiki.Jobs.Api do
           {:ok,
            %{
              entries: with_steps(page),
-             next_cursor: next_cursor_from_rows(rest, page)
+             next_cursor: next_cursor(rest, page)
            }}
 
         _ ->
@@ -101,6 +103,7 @@ defmodule Omashiki.Jobs.Api do
       %{}
     else
       from(j in Job,
+        as: :job,
         join: a in JobAttempt,
         on: a.job_id == j.id,
         where: a.id in ^ids,
@@ -220,20 +223,13 @@ defmodule Omashiki.Jobs.Api do
   def authorize(_, _), do: {:error, :forbidden}
 
   defp apply_actor_scope(query, %Token{id: token_id, user_id: user_id}) do
-    where(query, [j], j.user_id == ^user_id and j.api_token_id == ^token_id)
-  end
-
-  defp apply_actor_scope(query, %User{id: user_id}), do: where(query, [j], j.user_id == ^user_id)
-  defp apply_actor_scope(query, _), do: where(query, [j], false)
-
-  defp apply_named_actor_scope(query, %Token{id: token_id, user_id: user_id}) do
     where(query, [job: j], j.user_id == ^user_id and j.api_token_id == ^token_id)
   end
 
-  defp apply_named_actor_scope(query, %User{id: user_id}),
+  defp apply_actor_scope(query, %User{id: user_id}),
     do: where(query, [job: j], j.user_id == ^user_id)
 
-  defp apply_named_actor_scope(query, _), do: where(query, [job: j], false)
+  defp apply_actor_scope(query, _), do: where(query, [job: j], false)
 
   defp normalize_filter(filter) when is_map(filter) do
     Enum.reduce(filter, %{}, fn
@@ -325,16 +321,18 @@ defmodule Omashiki.Jobs.Api do
   end
 
   defp next_cursor([], _page), do: nil
-  defp next_cursor(_rest, page), do: page |> List.last() |> encode_cursor()
 
-  defp next_cursor_from_rows([], _page), do: nil
-
-  defp next_cursor_from_rows(_rest, page) do
-    case List.last(page) do
-      {job, _} -> encode_cursor(job)
-      %{job: job} -> encode_cursor(job)
-    end
+  defp next_cursor(_rest, page) do
+    page
+    |> List.last()
+    |> job_from_page()
+    |> encode_cursor()
   end
+
+  defp job_from_page(%Job{} = job), do: job
+  defp job_from_page({job, _}), do: job
+  defp job_from_page(%{job: job}), do: job
+  defp job_from_page(_), do: nil
 
   defp encode_cursor(nil), do: nil
 

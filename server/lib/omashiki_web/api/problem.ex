@@ -217,79 +217,195 @@ defmodule OmashikiWeb.Api.Problem do
 
   def code_for(reason) do
     case reason do
-      :missing_token -> "missing_token"
-      :token_required -> "token_required"
-      :unauthorized -> "unauthorized"
-      :invalid_credentials -> "invalid_credentials"
-      :invalid_token -> "invalid_token"
-      :token_expired -> "token_expired"
-      :insufficient_scope -> "insufficient_scope"
-      :forbidden -> "forbidden"
-      :not_found -> "not_found"
-      :invalid_status -> "invalid_status"
-      :invalid_cursor -> "invalid_cursor"
-      :cursor_mismatch -> "invalid_cursor"
-      :cursor_expired -> "invalid_cursor"
-      :result_not_ready -> "result_not_ready"
-      :capacity_exhausted -> "capacity_exhausted"
-      :rate_limited -> "rate_limited"
-      :max_active_jobs -> "max_active_jobs"
-      :wait_limit -> "wait_limit"
-      :idempotency_conflict -> "idempotency_conflict"
-      :event_gap -> "event_gap"
-      :admission_paused -> "admission_paused"
-      :unknown_repository -> "unknown_repository"
-      :unknown_environment -> "unknown_environment"
-      :invalid_reference -> "invalid_reference"
-      :idempotency_race -> "idempotency_race"
-      :environment_not_allowed -> "environment_not_allowed"
-      :already_delivered -> "already_delivered"
-      :signup_closed -> "signup_closed"
-      :lease_required -> "lease_required"
-      :batch_parent_resolution -> "invalid_parent_reference"
-      :invalid_capacity -> "invalid_capacity"
-      :invalid_containers -> "invalid_containers"
-      :missing_digest -> "missing_digest"
-      :digest_mismatch -> "digest_mismatch"
-      :invalid_complete -> "invalid_complete"
-      :invalid_free_slots -> "invalid_free_slots"
-      :blob_missing -> "blob_missing"
-      :stale_lease -> "stale_lease"
-      :lease_expired -> "lease_expired"
-      :attempt_not_active -> "attempt_not_active"
-      :already_running -> "already_running"
-      :invalid_success_result -> "invalid_success_result"
-      :task_branch_required -> "task_branch_required"
-      {:limit, "batch_too_large", _, _} -> "batch_too_large"
-      {:limit, code, _, _} when is_binary(code) -> code
+      :missing_token ->
+        "missing_token"
+
+      :token_required ->
+        "token_required"
+
+      :unauthorized ->
+        "unauthorized"
+
+      :invalid_credentials ->
+        "invalid_credentials"
+
+      :invalid_token ->
+        "invalid_token"
+
+      :token_expired ->
+        "token_expired"
+
+      :insufficient_scope ->
+        "insufficient_scope"
+
+      :forbidden ->
+        "forbidden"
+
+      :not_found ->
+        "not_found"
+
+      :invalid_status ->
+        "invalid_status"
+
+      :invalid_cursor ->
+        "invalid_cursor"
+
+      :cursor_mismatch ->
+        "invalid_cursor"
+
+      :cursor_expired ->
+        "invalid_cursor"
+
+      :result_not_ready ->
+        "result_not_ready"
+
+      :capacity_exhausted ->
+        "capacity_exhausted"
+
+      :rate_limited ->
+        "rate_limited"
+
+      :max_active_jobs ->
+        "max_active_jobs"
+
+      :wait_limit ->
+        "wait_limit"
+
+      :idempotency_conflict ->
+        "idempotency_conflict"
+
+      :event_gap ->
+        "event_gap"
+
+      :invalid_request ->
+        "invalid_request"
+
+      :admission_paused ->
+        "admission_paused"
+
+      :unknown_repository ->
+        "unknown_repository"
+
+      :unknown_environment ->
+        "unknown_environment"
+
+      :invalid_reference ->
+        "invalid_reference"
+
+      :idempotency_race ->
+        "idempotency_race"
+
+      :environment_not_allowed ->
+        "environment_not_allowed"
+
+      :already_delivered ->
+        "already_delivered"
+
+      :signup_closed ->
+        "signup_closed"
+
+      :lease_required ->
+        "lease_required"
+
+      :batch_parent_resolution ->
+        "invalid_parent_reference"
+
+      :invalid_capacity ->
+        "invalid_capacity"
+
+      :invalid_containers ->
+        "invalid_containers"
+
+      :missing_digest ->
+        "missing_digest"
+
+      :digest_mismatch ->
+        "digest_mismatch"
+
+      :invalid_complete ->
+        "invalid_complete"
+
+      :invalid_free_slots ->
+        "invalid_free_slots"
+
+      :blob_missing ->
+        "blob_missing"
+
+      :stale_lease ->
+        "stale_lease"
+
+      :lease_expired ->
+        "lease_expired"
+
+      :attempt_not_active ->
+        "attempt_not_active"
+
+      :already_running ->
+        "already_running"
+
+      :invalid_success_result ->
+        "invalid_success_result"
+
+      :task_branch_required ->
+        "task_branch_required"
+
+      {:limit, "batch_too_large", _, _} ->
+        "batch_too_large"
+
+      {:limit, code, _, _} when is_binary(code) ->
+        code
+
       {:validation, details} ->
         if oversized?(details), do: "payload_too_large", else: "invalid_request"
 
-      {:invalid_transition, _, _} -> "invalid_transition"
-      %Ecto.Changeset{} -> "invalid_request"
-      {:persistence, _} -> "internal_error"
-      _ -> "internal_error"
+      {:invalid_transition, _, _} ->
+        "invalid_transition"
+
+      %Ecto.Changeset{} ->
+        "invalid_request"
+
+      {:persistence, _} ->
+        "internal_error"
+
+      _ ->
+        "internal_error"
     end
   end
 
   def opts_for(reason) do
     case reason do
-      {:limit, _code, count, max} -> [errors_extra: %{count: count, max: max}]
-      {:validation, details} when is_list(details) -> [errors: details]
+      {:limit, _code, count, max} ->
+        [errors_extra: %{count: count, max: max}]
+
+      {:validation, details} when is_list(details) ->
+        [errors: details]
+
       {:validation, field} when is_binary(field) ->
         [errors: [%{field: field, code: "required"}]]
 
-      {:invalid_transition, from, to} -> [errors_extra: %{from: from, to: to}]
+      {:invalid_transition, from, to} ->
+        [errors_extra: %{from: from, to: to}]
 
       %Ecto.Changeset{} = changeset ->
         [errors: changeset_errors(changeset)]
 
-      :rate_limited -> [retry_after: 60]
-      :max_active_jobs -> [retry_after: 30]
-      :wait_limit -> [retry_after: 5]
-      :capacity_exhausted -> [retry_after: 5]
-      :admission_paused -> [retry_after: 5]
-      _ -> []
+      :rate_limited ->
+        [retry_after: 60]
+
+      :max_active_jobs ->
+        [retry_after: 30]
+
+      :wait_limit ->
+        [retry_after: 5]
+
+      :capacity_exhausted ->
+        [retry_after: 5]
+
+      :admission_paused ->
+        [retry_after: 5]
+
+      _ ->
+        []
     end
   end
 
@@ -305,6 +421,7 @@ defmodule OmashikiWeb.Api.Problem do
 
   defp normalize_errors(nil, nil), do: []
   defp normalize_errors(nil, extra) when is_map(extra), do: [extra]
+
   defp normalize_errors(errors, extra) when is_list(errors) do
     errors = Enum.map(errors, &error_item/1)
     if is_map(extra), do: errors ++ [extra], else: errors
@@ -314,7 +431,9 @@ defmodule OmashikiWeb.Api.Problem do
     normalize_errors([errors], extra)
   end
 
-  defp error_item(%{field: field, code: code}), do: %{field: to_string(field), code: to_string(code)}
+  defp error_item(%{field: field, code: code}),
+    do: %{field: to_string(field), code: to_string(code)}
+
   defp error_item(%{"field" => field, "code" => code}), do: %{field: field, code: code}
   defp error_item(other) when is_map(other), do: other
 

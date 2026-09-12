@@ -24,11 +24,11 @@ defmodule Omashiki.Jobs.DispatchWorker do
     ]
 
   alias Omashiki.Jobs
-  alias Omashiki.Jobs.Job
+  alias Omashiki.Jobs.{Job, Statuses}
   alias Omashiki.Repo
   alias Omashiki.Worker.Offer
 
-  @terminal ~w(succeeded failed cancelled)
+  @terminal Statuses.terminal()
   @active ~w(provisioning running)
 
   @impl Oban.Worker

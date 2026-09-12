@@ -222,7 +222,7 @@ defmodule Omashiki.Jobs.EventStreamTest do
       correlation_id: job.correlation_id,
       occurred_at: now,
       recorded_at: now,
-      data: %{},
+      data: %{}
     })
     |> Repo.insert!()
   end

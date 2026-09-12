@@ -36,9 +36,7 @@ defmodule Omashiki.Runtime.Claims do
   @doc "Verify a token's signature, kind, shape, and short lifetime."
   def verify(kind, token) when kind in @kinds and is_binary(token) do
     with {:ok, claims} <-
-           Phoenix.Token.verify(signing_context(), salt(kind), token,
-             max_age: @max_age_seconds
-           ),
+           Phoenix.Token.verify(signing_context(), salt(kind), token, max_age: @max_age_seconds),
          :ok <- validate_claims(kind, claims) do
       {:ok, claims}
     else

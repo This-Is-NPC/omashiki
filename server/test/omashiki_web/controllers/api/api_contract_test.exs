@@ -19,7 +19,9 @@ defmodule OmashikiWeb.Api.ApiContractTest do
     missing =
       Router.__routes__()
       |> Enum.filter(&String.starts_with?(&1.path, "/api/v1"))
-      |> Enum.reject(fn route -> {route.verb |> to_string() |> String.upcase(), route.path} in @excluded end)
+      |> Enum.reject(fn route ->
+        {route.verb |> to_string() |> String.upcase(), route.path} in @excluded
+      end)
       |> Enum.reject(fn route ->
         path = openapi_path(route.path)
         method = route.verb |> to_string() |> String.downcase() |> String.to_atom()
@@ -44,8 +46,30 @@ defmodule OmashikiWeb.Api.ApiContractTest do
     assert conn.status == 200
     decoded = Jason.decode!(conn.resp_body)
     spec = OmashikiWeb.ApiSpec.spec() |> Jason.encode!() |> Jason.decode!()
-    assert decoded["info"]["title"] == spec["info"]["title"]
-    assert Map.keys(decoded["paths"]) == Map.keys(spec["paths"])
+    assert decoded == spec
+  end
+
+  test "bearer security is HTTP Bearer, not OAuth" do
+    spec = OmashikiWeb.ApiSpec.spec() |> Jason.encode!() |> Jason.decode!()
+    bearer = spec["components"]["securitySchemes"]["bearer"]
+    assert bearer["type"] == "http"
+    assert bearer["scheme"] == "bearer"
+    refute Map.has_key?(bearer, "flows")
+  end
+
+  test "every operation declares responses" do
+    spec = OmashikiWeb.ApiSpec.spec()
+
+    missing =
+      for {path, item} <- spec.paths,
+          method <- [:get, :post, :put, :patch, :delete],
+          operation = Map.get(item, method),
+          is_map(operation),
+          operation.responses in [nil, %{}] do
+        "#{method} #{path}"
+      end
+
+    assert missing == []
   end
 
   test "GET /api/v1/agent-skill fills the installation URL" do
@@ -53,6 +77,7 @@ defmodule OmashikiWeb.Api.ApiContractTest do
     assert conn.status == 200
     assert conn.resp_body =~ "/api/v1/openapi.json"
     refute conn.resp_body =~ "{{OMASHIKI_URL}}"
+
     assert conn.resp_body =~ "http://www.example.com/api/v1/openapi.json" or
              conn.resp_body =~ "http://localhost"
   end

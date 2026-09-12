@@ -9,7 +9,17 @@ defmodule Omashiki.Jobs.Admission do
   alias Omashiki.ApiTokens.Token
   alias Omashiki.Config
   alias Omashiki.Config.Rollout
-  alias Omashiki.Jobs.{Dependencies, DispatchWorker, Job, JobAttempt, JobDependency, JobEvent, Statuses}
+
+  alias Omashiki.Jobs.{
+    Dependencies,
+    DispatchWorker,
+    Job,
+    JobAttempt,
+    JobDependency,
+    JobEvent,
+    Statuses
+  }
+
   alias Omashiki.Repo
 
   @default_queue "default"
@@ -148,10 +158,17 @@ defmodule Omashiki.Jobs.Admission do
       |> Enum.flat_map(fn
         %{"ref" => dep_ref} = dep ->
           cond do
-            dep_ref == ref -> [%{field: "jobs.depends_on", code: "self_dependency"}]
-            not MapSet.member?(ref_set, dep_ref) -> [%{field: "jobs.depends_on", code: "unknown_ref"}]
-            is_binary(Map.get(dep, "id")) -> [%{field: "jobs.depends_on", code: "id_or_ref_required"}]
-            true -> []
+            dep_ref == ref ->
+              [%{field: "jobs.depends_on", code: "self_dependency"}]
+
+            not MapSet.member?(ref_set, dep_ref) ->
+              [%{field: "jobs.depends_on", code: "unknown_ref"}]
+
+            is_binary(Map.get(dep, "id")) ->
+              [%{field: "jobs.depends_on", code: "id_or_ref_required"}]
+
+            true ->
+              []
           end
 
         %{"id" => _} ->
@@ -207,7 +224,15 @@ defmodule Omashiki.Jobs.Admission do
     end)
   end
 
-  defp enforce_active_limit!(%Token{id: token_id, max_active_jobs: max}, incoming) do
+  @doc false
+  def enforce_token_active_limit!(token_id, incoming)
+      when is_binary(token_id) and is_integer(incoming) and incoming >= 0 do
+    locked =
+      from(t in Token, where: t.id == ^token_id, lock: "FOR UPDATE")
+      |> Repo.one()
+
+    if is_nil(locked), do: Repo.rollback(:unauthorized)
+
     terminal = Statuses.terminal()
 
     active =
@@ -217,11 +242,15 @@ defmodule Omashiki.Jobs.Admission do
       )
       |> Repo.one()
 
-    if active + incoming > max do
+    if active + incoming > locked.max_active_jobs do
       Repo.rollback(:max_active_jobs)
     else
       :ok
     end
+  end
+
+  defp enforce_active_limit!(%Token{id: token_id}, incoming) do
+    enforce_token_active_limit!(token_id, incoming)
   end
 
   defp authorize(%Token{id: id}) when is_binary(id) do

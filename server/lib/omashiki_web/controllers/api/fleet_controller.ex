@@ -3,14 +3,16 @@ defmodule OmashikiWeb.Api.FleetController do
 
   alias Omashiki.Fleet
   alias Omashiki.Jobs.Api
+  alias OmashikiWeb.Api.Conn, as: ApiConn
   alias OmashikiWeb.ApiSpec.Schemas
 
-  tags ["fleet"]
+  tags(["fleet"])
 
-  operation :index,
+  operation(:index,
     summary: "List worker nodes and containers",
     security: [%{"bearer" => ["read"]}],
     responses: %{200 => {"Fleet", "application/json", Schemas.FleetResponse}}
+  )
 
   def index(conn, _params) do
     nodes = Fleet.nodes()
@@ -22,12 +24,10 @@ defmodule OmashikiWeb.Api.FleetController do
       |> Enum.reject(&is_nil/1)
       |> Enum.uniq()
 
-    jobs = Api.job_ids_for_attempts(actor(conn), attempt_ids)
+    jobs = Api.job_ids_for_attempts(ApiConn.actor(conn), attempt_ids)
 
     json(conn, %{data: Enum.map(nodes, &node_json(&1, jobs))})
   end
-
-  defp actor(conn), do: conn.assigns[:current_token] || conn.assigns[:current_user]
 
   defp node_json(node, jobs) do
     %{

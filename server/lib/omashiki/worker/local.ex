@@ -8,12 +8,12 @@ defmodule Omashiki.Worker.Local do
 
   @behaviour Omashiki.Worker.Transport
 
-  alias Omashiki.Jobs.{Job, JobAttempt}
+  alias Omashiki.Jobs.{Job, JobAttempt, Statuses}
   alias Omashiki.Repo
   alias Omashiki.Runtime.AttemptSupervisor
   alias Omashiki.Worker.{Complete, Execution, Offer}
 
-  @terminal ~w(succeeded failed cancelled)
+  @terminal Statuses.terminal()
   @sinks ~w(git files none)
 
   @impl Omashiki.Worker.Transport

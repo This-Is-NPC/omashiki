@@ -5,40 +5,23 @@ defmodule OmashikiWeb.ErrorJSON do
   Authenticated API errors use `OmashikiWeb.Api.Problem` instead.
   """
 
-  def render("404.json", _assigns) do
-    %{
-      type: "about:blank",
-      title: "Resource not found",
-      status: 404,
-      code: "not_found",
-      detail: "Resource not found",
-      errors: [],
-      request_id: nil
-    }
-  end
+  alias OmashikiWeb.Api.Problem
+
+  def render("404.json", _assigns), do: Problem.body(%Plug.Conn{}, "not_found")
 
   def render(template, _assigns) do
-    status = String.replace_suffix(template, ".json", "")
+    status =
+      template
+      |> String.replace_suffix(".json", "")
+      |> String.to_integer()
 
-    %{
-      type: "about:blank",
+    Problem.body(%Plug.Conn{}, "internal_error",
+      status: status,
       title: Phoenix.Controller.status_message_from_template(template),
-      status: String.to_integer(status),
-      code: "internal_error",
-      detail: Phoenix.Controller.status_message_from_template(template),
-      errors: [],
-      request_id: nil
-    }
+      detail: Phoenix.Controller.status_message_from_template(template)
+    )
   rescue
     _ ->
-      %{
-        type: "about:blank",
-        title: "Request could not be completed",
-        status: 500,
-        code: "internal_error",
-        detail: "Request could not be completed",
-        errors: [],
-        request_id: nil
-      }
+      Problem.body(%Plug.Conn{}, "internal_error")
   end
 end

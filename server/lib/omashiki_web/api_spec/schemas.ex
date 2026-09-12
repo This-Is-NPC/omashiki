@@ -255,7 +255,7 @@ defmodule OmashikiWeb.ApiSpec.Schemas.JobResult do
       head_sha: %Schema{type: :string, nullable: true},
       worktree_clean: %Schema{type: :boolean, nullable: true},
       summary: %Schema{type: :string, nullable: true},
-      changes: JobChanges,
+      changes: %Schema{allOf: [JobChanges], nullable: true},
       compare_url: %Schema{type: :string, nullable: true},
       result: %Schema{type: :object, nullable: true},
       error: %Schema{type: :object, nullable: true},
@@ -598,7 +598,10 @@ defmodule OmashikiWeb.ApiSpec.Schemas.WebhookDelivery do
       id: %Schema{type: :string, format: :uuid},
       event_id: %Schema{type: :string, format: :uuid},
       destination: %Schema{type: :string},
-      status: %Schema{type: :string, enum: ["pending", "delivering", "delivered", "failed", "dead"]},
+      status: %Schema{
+        type: :string,
+        enum: ["pending", "delivering", "delivered", "failed", "dead"]
+      },
       attempts: %Schema{type: :integer},
       next_attempt_at: %Schema{type: :string, format: :"date-time", nullable: true},
       delivered_at: %Schema{type: :string, format: :"date-time", nullable: true},

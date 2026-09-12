@@ -144,15 +144,13 @@ class Sampler(threading.Thread):
 
     Two honest limitations:
 
-      * `Omashiki.Jobs.Api` caps `limit` at 100, so a run of more than 100 jobs
-        can saturate a bucket and the reading becomes ">= 100".
       * an attempt that starts and finishes entirely between two samples is
         invisible, so the peak is a lower bound. Shrink --sample-interval, or
         read `[:omashiki, :runtime, :attempt, :complete]` telemetry server-side
         for the authoritative count.
     """
 
-    LIST_LIMIT = 100
+    PAGE_SIZE = 50
 
     def __init__(self, client: Client, interval: float):
         super().__init__(daemon=True)
@@ -179,17 +177,12 @@ class Sampler(threading.Thread):
         counts = {}
         for status in ACTIVE:
             try:
-                data = (
-                    self.client.request(
-                        "GET", f"/api/v1/jobs?status={status}&limit={self.LIST_LIMIT}"
-                    )
-                    or {}
-                ).get("data") or []
+                rows = self._list_status(status)
             except ApiError:
                 self.errors += 1
                 return
-            counts[status] = len(data)
-            if len(data) >= self.LIST_LIMIT:
+            counts[status] = len(rows)
+            if len(rows) >= self.PAGE_SIZE:
                 self.saturated = True
 
         active = sum(counts.values())
@@ -197,6 +190,20 @@ class Sampler(threading.Thread):
         if active > self.peak_active:
             self.peak_active = active
             self.peak_at = time.time()
+
+    def _list_status(self, status: str) -> list:
+        rows: list = []
+        cursor = None
+        while True:
+            path = f"/api/v1/jobs?status={status}"
+            if cursor:
+                path = f"{path}&cursor={cursor}"
+            body = self.client.request("GET", path) or {}
+            page = body.get("data") or []
+            rows.extend(page)
+            cursor = body.get("next_cursor")
+            if not cursor:
+                return rows
 
 
 # ---------------------------------------------------------------------------
@@ -418,7 +425,7 @@ def report(outcomes: list[Outcome], sampler: Sampler, args, elapsed: float) -> d
     print("  execution (started_at -> finished_at, server clock)")
     print("    p50 %s   p95 %s   max %s" % (fmt_ms(run.get("p50")), fmt_ms(run.get("p95")), fmt_ms(run.get("max"))))
     print()
-    saturation = " (>= list limit 100; raise --jobs awareness)" if sampler.saturated else ""
+    saturation = " (>= one page; counts paginated)" if sampler.saturated else ""
     print(
         "  peak concurrent attempts  %d%s  (server snapshot every %.2fs; lower bound)"
         % (sampler.peak_active, saturation, args.sample_interval)

@@ -5,16 +5,16 @@ defmodule OmashikiWeb.Api.SessionsController do
 
   alias Omashiki.{Accounts, ApiTokens}
   alias Omashiki.Maps
-  alias OmashikiWeb.Api.Problem
+  alias OmashikiWeb.Api.Conn, as: ApiConn
   alias OmashikiWeb.ApiSpec.Schemas
   alias OmashikiWeb.RateLimiter
 
   @rate_limit_max Application.compile_env(:omashiki, [__MODULE__, :rate_limit_max], 10)
   @rate_limit_per_ms Application.compile_env(:omashiki, [__MODULE__, :rate_limit_per_ms], 60_000)
 
-  tags ["sessions"]
+  tags(["sessions"])
 
-  operation :issue_token,
+  operation(:issue_token,
     summary: "Exchange credentials for an API token",
     security: [],
     request_body: {"Credentials", "application/json", Schemas.IssueTokenRequest},
@@ -22,6 +22,7 @@ defmodule OmashikiWeb.Api.SessionsController do
       200 => {"Token", "application/json", Schemas.TokenResponse},
       401 => {"Unauthorized", "application/problem+json", Schemas.Problem}
     }
+  )
 
   def issue_token(conn, _params) do
     attrs = Maps.stringify_keys(conn.body_params)
@@ -29,12 +30,12 @@ defmodule OmashikiWeb.Api.SessionsController do
     with :ok <- check_rate(conn),
          {:ok, user} <- authenticate(attrs),
          {:ok, token, plaintext} <- ApiTokens.create_for_user(user, token_attrs(attrs, "CLI")) do
-      ApiTokens.Audit.record(token, "issue", request_id: Problem.request_id(conn), ip: client_ip(conn))
+      ApiConn.audit(conn, token, "issue")
       json(conn, %{data: token_json(token, plaintext)})
     end
   end
 
-  operation :signup,
+  operation(:signup,
     summary: "Create the first operator and token",
     security: [],
     request_body: {"Signup", "application/json", Schemas.SignupRequest},
@@ -42,50 +43,45 @@ defmodule OmashikiWeb.Api.SessionsController do
       201 => {"Created", "application/json", Schemas.SignupResponse},
       409 => {"Closed", "application/problem+json", Schemas.Problem}
     }
+  )
 
   def signup(conn, _params) do
     attrs = Maps.stringify_keys(conn.body_params)
 
-    case Accounts.register_user(%{
-           "email" => attrs["email"],
-           "username" => attrs["username"],
-           "password" => attrs["password"]
-         }) do
-      {:ok, user} ->
-        case ApiTokens.create_for_user(user, token_attrs(attrs, "CLI")) do
-          {:ok, token, plaintext} ->
-            ApiTokens.Audit.record(token, "issue",
-              request_id: Problem.request_id(conn),
-              ip: client_ip(conn)
-            )
+    user_attrs = %{
+      "email" => attrs["email"],
+      "username" => attrs["username"],
+      "password" => attrs["password"]
+    }
 
-            conn
-            |> put_status(:created)
-            |> json(%{
-              data: %{
-                token: plaintext,
-                user: %{id: user.id, email: user.email, username: user.username}
-              }
-            })
+    case Accounts.register_with_token(user_attrs, token_attrs(attrs, "CLI")) do
+      {:ok, {user, token, plaintext}} ->
+        ApiConn.audit(conn, token, "issue")
 
-          {:error, reason} ->
-            {:error, reason}
-        end
+        conn
+        |> put_status(:created)
+        |> json(%{
+          data: %{
+            token: plaintext,
+            user: %{id: user.id, email: user.email, username: user.username}
+          }
+        })
 
       {:error, :registration_closed} ->
         {:error, :signup_closed}
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        {:error, changeset}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  operation :rotate_token,
+  operation(:rotate_token,
     summary: "Issue a new token and revoke the current one",
-    security: [%{"bearer" => ["read"]}],
+    security: [%{"bearer" => ["submit"]}],
     responses: %{
       200 => {"Token", "application/json", Schemas.TokenResponse}
     }
+  )
 
   def rotate_token(conn, _params) do
     token = conn.assigns[:current_token]
@@ -97,11 +93,7 @@ defmodule OmashikiWeb.Api.SessionsController do
       true ->
         case ApiTokens.rotate(token) do
           {:ok, new_token, plaintext} ->
-            ApiTokens.Audit.record(token, "rotate",
-              request_id: Problem.request_id(conn),
-              ip: client_ip(conn)
-            )
-
+            ApiConn.audit(conn, token, "rotate")
             json(conn, %{data: token_json(new_token, plaintext)})
 
           {:error, reason} ->
@@ -139,7 +131,9 @@ defmodule OmashikiWeb.Api.SessionsController do
   end
 
   defp check_rate(conn) do
-    bucket = client_ip(conn) <> "|" <> (Maps.stringify_keys(conn.body_params)["username"] || "")
+    bucket =
+      ApiConn.client_ip_or_unknown(conn) <>
+        "|" <> (Maps.stringify_keys(conn.body_params)["username"] || "")
 
     case RateLimiter.hit("issue_token", bucket,
            max: @rate_limit_max,
@@ -148,14 +142,5 @@ defmodule OmashikiWeb.Api.SessionsController do
       {:ok, _} -> :ok
       {:error, :rate_limited} -> {:error, :rate_limited}
     end
-  end
-
-  defp client_ip(conn) do
-    case conn.remote_ip do
-      nil -> "unknown"
-      ip -> ip |> :inet.ntoa() |> to_string()
-    end
-  rescue
-    _ -> "unknown"
   end
 end

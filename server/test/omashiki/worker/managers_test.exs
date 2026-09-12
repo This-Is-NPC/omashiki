@@ -88,5 +88,4 @@ defmodule Omashiki.Worker.ManagersTest do
              }
            ] = Managers.configured()
   end
-
 end

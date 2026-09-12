@@ -91,11 +91,11 @@ MIX_ENV=test mix test
 """
 
 [tasks."ci:api:contract"]
-description = "OpenAPI route coverage and problem-code enum"
+description = "OpenAPI route coverage, security scheme, and document equality"
 run         = """
 mise run db-up
 cd server
-MIX_ENV=test mix test test/omashiki_web/controllers/api/api_contract_test.exs test/omashiki_web/controllers/api/jobs_controller_test.exs test/omashiki_web/controllers/api/sessions_controller_test.exs test/omashiki_web/controllers/api/sessions_controller_signup_test.exs --exclude integration
+MIX_ENV=test mix test test/omashiki_web/controllers/api/api_contract_test.exs --exclude integration
 """
 
 [tasks."ci:server:fast"]

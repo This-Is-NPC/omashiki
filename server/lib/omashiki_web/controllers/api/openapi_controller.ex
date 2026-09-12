@@ -4,12 +4,13 @@ defmodule OmashikiWeb.Api.OpenApiController do
   alias OmashikiWeb.ApiSpec
   alias OmashikiWeb.ApiSpec.Schemas
 
-  tags ["meta"]
+  tags(["meta"])
 
-  operation :show,
+  operation(:show,
     summary: "OpenAPI document",
     security: [],
     responses: %{200 => {"OpenAPI", "application/json", Schemas.OpenApiDocument}}
+  )
 
   def show(conn, _params) do
     json(conn, ApiSpec.spec())
