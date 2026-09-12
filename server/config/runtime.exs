@@ -152,13 +152,10 @@ if config_env() == :prod do
         You can generate one by calling: mix phx.gen.secret
         """
 
-    idle_ms = Application.get_env(:omashiki, :http_idle_timeout_ms)
-
     config :omashiki, OmashikiWeb.Endpoint,
       http: [
         ip: {0, 0, 0, 0, 0, 0, 0, 0},
-        port: String.to_integer(System.get_env("PORT") || "4000"),
-        thousand_island_options: [read_timeout: idle_ms]
+        port: String.to_integer(System.get_env("PORT") || "4000")
       ],
       secret_key_base: secret_key_base,
       server: true
@@ -244,13 +241,10 @@ if File.exists?(omashiki_toml) and config_env() != :test do
         end
     end
 
-  idle_ms = Application.get_env(:omashiki, :http_idle_timeout_ms)
-
   http_opts =
     []
     |> then(&if(http_port, do: [{:port, http_port} | &1], else: &1))
     |> then(&if(http_ip, do: [{:ip, http_ip} | &1], else: &1))
-    |> Keyword.put(:thousand_island_options, read_timeout: idle_ms)
 
   if http_opts != [] do
     existing = Application.get_env(:omashiki, OmashikiWeb.Endpoint, [])[:http] || []
@@ -287,4 +281,17 @@ if File.exists?(omashiki_toml) and config_env() != :test do
     other ->
       raise "omashiki.toml: auth.token_audit_retention_days must be a positive integer, got #{inspect(other)}"
   end
+end
+
+# Mix config files cannot read Application.get_env/2 reliably. Apply the
+# idle timeout here, after config.exs has been loaded into the application env.
+idle_ms = Application.get_env(:omashiki, :http_idle_timeout_ms)
+
+if is_integer(idle_ms) do
+  existing = Application.get_env(:omashiki, OmashikiWeb.Endpoint, [])[:http] || []
+
+  thousand =
+    Keyword.merge(Keyword.get(existing, :thousand_island_options, []), read_timeout: idle_ms)
+
+  config :omashiki, OmashikiWeb.Endpoint, http: Keyword.put(existing, :thousand_island_options, thousand)
 end

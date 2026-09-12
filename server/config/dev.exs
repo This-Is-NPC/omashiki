@@ -31,10 +31,7 @@ config :omashiki, OmashikiWeb.Endpoint,
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
   http: [
     ip: {127, 0, 0, 1},
-    port: String.to_integer(System.get_env("PORT") || "4000"),
-    thousand_island_options: [
-      read_timeout: Application.get_env(:omashiki, :http_idle_timeout_ms)
-    ]
+    port: String.to_integer(System.get_env("PORT") || "4000")
   ],
   check_origin: false,
   code_reloader: true,
