@@ -12,6 +12,7 @@ defmodule Omashiki.Worker.Poller do
   # keepalive report keeps slots current while the worker is too busy to poll.
   @report_debounce_ms 150
   @report_ms 5_000
+  @complete_attempts 8
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -66,20 +67,17 @@ defmodule Omashiki.Worker.Poller do
     attempt_id = offer.attempt_id
 
     case Map.fetch(state.in_flight, attempt_id) do
-      {:ok, %{client: client, execution: execution}} ->
-        try do
-          post_complete(client, execution, offer, result)
-        after
-          Slots.release(state.slots)
-        end
-
-        state = update_in(state.in_flight, &Map.delete(&1, attempt_id))
-        send(self(), :tick)
-        {:noreply, state}
+      {:ok, job} ->
+        complete = complete_from_result(job.client, offer, result)
+        complete_or_schedule(state, attempt_id, complete, @complete_attempts)
 
       :error ->
         {:noreply, state}
     end
+  end
+
+  def handle_info({:complete_retry, attempt_id, complete, left}, state) do
+    complete_or_schedule(state, attempt_id, complete, left)
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -173,39 +171,61 @@ defmodule Omashiki.Worker.Poller do
     end
   end
 
-  defp post_complete(client, execution, offer, result) do
+  defp complete_from_result(client, offer, result) do
     case result do
       {:ok, %Complete{kind: :files} = complete} ->
-        complete
-        |> maybe_upload_blob(client, offer)
-        |> then(&complete_with_retry(client, execution, &1))
+        maybe_upload_blob(complete, client, offer)
 
       {:ok, %Complete{} = complete} ->
-        complete_with_retry(client, execution, complete)
+        complete
 
       {:error, reason} ->
-        error_complete = %Complete{
+        %Complete{
           kind: :error,
           code: "executor_failed",
           message: Exception.format(:error, reason, [])
         }
-
-        complete_with_retry(client, execution, error_complete)
     end
   end
 
-  defp complete_with_retry(client, execution, complete, attempts \\ 8) do
-    case Client.complete(client, execution, complete) do
-      :ok ->
-        :ok
+  defp complete_or_schedule(state, attempt_id, complete, left) do
+    case Map.fetch(state.in_flight, attempt_id) do
+      {:ok, %{client: client, execution: execution}} ->
+        case Client.complete(client, execution, complete) do
+          :ok ->
+            finish_in_flight(state, attempt_id)
 
-      {:error, :busy} when attempts > 1 ->
-        Process.sleep(25)
-        complete_with_retry(client, execution, complete, attempts - 1)
+          {:error, :busy} when left > 1 ->
+            Process.send_after(
+              self(),
+              {:complete_retry, attempt_id, complete, left - 1},
+              complete_retry_ms()
+            )
 
-      other ->
-        other
+            {:noreply, state}
+
+          reason ->
+            Logger.warning(
+              "Worker.Poller dropping complete for #{attempt_id}: #{inspect(reason)}"
+            )
+
+            finish_in_flight(state, attempt_id)
+        end
+
+      :error ->
+        {:noreply, state}
     end
+  end
+
+  defp finish_in_flight(state, attempt_id) do
+    Slots.release(state.slots)
+    state = update_in(state.in_flight, &Map.delete(&1, attempt_id))
+    send(self(), :tick)
+    {:noreply, state}
+  end
+
+  defp complete_retry_ms do
+    Application.get_env(:omashiki, :worker_complete_retry_ms, 25)
   end
 
   defp maybe_upload_blob(%Complete{kind: :files} = complete, client, %Offer{job_id: job_id}) do

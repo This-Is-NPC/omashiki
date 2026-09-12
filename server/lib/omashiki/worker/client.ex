@@ -141,9 +141,6 @@ defmodule Omashiki.Worker.Client do
     with {:ok, %{status: status}} when status in 200..299 <-
            request(client, "POST", "/internal/work/complete", json_headers(client), body) do
       :ok
-    else
-      {:error, :busy} -> {:error, :busy}
-      other -> other
     end
   end
 
@@ -182,7 +179,9 @@ defmodule Omashiki.Worker.Client do
     end
   end
 
-  defp map_http_response(%{status: 503}), do: {:error, :busy}
+  defp map_http_response(%{status: 503, body: body}) do
+    if busy_problem?(body), do: {:error, :busy}, else: {:error, {:http, 503, body}}
+  end
 
   defp map_http_response(%{status: status, body: _body}) when status in 401..403 do
     {:error, :unauthorized}
@@ -199,6 +198,15 @@ defmodule Omashiki.Worker.Client do
   defp map_http_response(%{status: status, body: body}) do
     {:error, {:http, status, body}}
   end
+
+  defp busy_problem?(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{"code" => "busy"}} -> true
+      _ -> false
+    end
+  end
+
+  defp busy_problem?(_), do: false
 
   defp recv_full(mint, conn, req_ref, timeout_ms, acc \\ %{status: nil, body: ""}) do
     case mint.recv(conn, 0, timeout_ms) do

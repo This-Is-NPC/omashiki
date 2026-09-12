@@ -15,6 +15,7 @@ defmodule Omashiki.Worker.PollerTest do
       restore_env(:fake_executor_owner)
       restore_env(:fake_executor_mode)
       restore_env(:worker_managers)
+      restore_env(:worker_complete_retry_ms)
     end)
 
     :ok
@@ -136,6 +137,87 @@ defmodule Omashiki.Worker.PollerTest do
       assert_receive {:accept, _}, 2_000
       assert_receive {:complete, _}, 2_000
       assert Agent.get(hits, & &1) >= 2
+    end
+
+    test "warns when complete stays busy", %{bypass: bypass, parent: parent, slots: slots} do
+      offer = sample_offer("git")
+      put_env(:worker_complete_retry_ms, 1)
+
+      expect_register(bypass)
+      expect_accept(bypass, parent)
+      expect_poll_sequence(bypass, [offer], parent)
+
+      {:ok, hits} = Agent.start_link(fn -> 0 end)
+
+      Bypass.expect(bypass, "POST", "/internal/work/complete", fn conn ->
+        {:ok, _body, conn} = Plug.Conn.read_body(conn)
+        Agent.update(hits, &(&1 + 1))
+        Plug.Conn.resp(conn, 503, ~s({"code":"busy"}))
+      end)
+
+      put_env(:fake_executor_result, {
+        :ok,
+        %Complete{
+          kind: :git,
+          remote: "https://example.com/repo.git",
+          branch: "main",
+          base_sha: "abc",
+          head_sha: "def"
+        }
+      })
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, _pid} = start_poller(slots)
+          assert_receive {:accept, _}, 2_000
+          wait_until(fn -> Agent.get(hits, & &1) >= 8 end)
+          Process.sleep(20)
+        end)
+
+      assert Agent.get(hits, & &1) == 8
+      assert log =~ "dropping complete"
+    end
+
+    test "does not treat a proxy 503 as manager busy", %{
+      bypass: bypass,
+      parent: parent,
+      slots: slots
+    } do
+      offer = sample_offer("git")
+
+      expect_register(bypass)
+      expect_accept(bypass, parent)
+      expect_poll_sequence(bypass, [offer], parent)
+
+      {:ok, hits} = Agent.start_link(fn -> 0 end)
+
+      Bypass.expect(bypass, "POST", "/internal/work/complete", fn conn ->
+        {:ok, _body, conn} = Plug.Conn.read_body(conn)
+        Agent.update(hits, &(&1 + 1))
+        Plug.Conn.resp(conn, 503, "no healthy upstream")
+      end)
+
+      put_env(:fake_executor_result, {
+        :ok,
+        %Complete{
+          kind: :git,
+          remote: "https://example.com/repo.git",
+          branch: "main",
+          base_sha: "abc",
+          head_sha: "def"
+        }
+      })
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, _pid} = start_poller(slots)
+          assert_receive {:accept, _}, 2_000
+          wait_until(fn -> Agent.get(hits, & &1) >= 1 end)
+          Process.sleep(30)
+        end)
+
+      assert Agent.get(hits, & &1) == 1
+      assert log =~ "dropping complete"
     end
 
     test "uploads a blob then completes a files sink offer", %{
@@ -610,6 +692,20 @@ defmodule Omashiki.Worker.PollerTest do
 
   defp unique_poller_name do
     :"Omashiki.Worker.Poller.Test.#{System.unique_integer([:positive])}"
+  end
+
+  defp wait_until(fun, remaining \\ 2_000) do
+    cond do
+      fun.() ->
+        true
+
+      remaining <= 0 ->
+        flunk("condition not met")
+
+      true ->
+        Process.sleep(10)
+        wait_until(fun, remaining - 10)
+    end
   end
 
   defp put_env(key, value) do
