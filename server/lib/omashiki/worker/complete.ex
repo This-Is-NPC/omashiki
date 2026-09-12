@@ -7,10 +7,10 @@ defmodule Omashiki.Worker.Complete do
 
   import Ecto.Query
 
-  alias Omashiki.Jobs.{Job, JobAttempt}
+  alias Omashiki.Jobs.{Job, JobAttempt, Statuses}
   alias Omashiki.Repo
 
-  @terminal ~w(succeeded failed cancelled)
+  @terminal Statuses.terminal()
 
   @type kind :: :git | :files | :none | :error
 
@@ -25,7 +25,10 @@ defmodule Omashiki.Worker.Complete do
           blob_path: String.t() | nil,
           code: String.t() | nil,
           message: String.t() | nil,
-          details: map() | nil
+          details: map() | nil,
+          summary: String.t() | nil,
+          changes: map() | nil,
+          compare_url: String.t() | nil
         }
 
   defstruct [
@@ -39,7 +42,10 @@ defmodule Omashiki.Worker.Complete do
     :blob_path,
     :code,
     :message,
-    :details
+    :details,
+    :summary,
+    :changes,
+    :compare_url
   ]
 
   @doc "Build a complete value from a terminal job row."
@@ -73,6 +79,9 @@ defmodule Omashiki.Worker.Complete do
       "base_sha" => complete.base_sha,
       "head_sha" => complete.head_sha
     }
+    |> maybe_put("summary", complete.summary)
+    |> maybe_put("changes", complete.changes)
+    |> maybe_put("compare_url", complete.compare_url)
   end
 
   def to_map(%__MODULE__{kind: :files} = complete) do
@@ -113,7 +122,10 @@ defmodule Omashiki.Worker.Complete do
        remote: Map.get(map, "remote"),
        branch: map["branch"],
        base_sha: map["base_sha"],
-       head_sha: map["head_sha"]
+       head_sha: map["head_sha"],
+       summary: Map.get(map, "summary"),
+       changes: Map.get(map, "changes"),
+       compare_url: Map.get(map, "compare_url")
      }}
   end
 
@@ -152,7 +164,10 @@ defmodule Omashiki.Worker.Complete do
             remote: git_remote(job),
             branch: attempt.branch,
             base_sha: attempt.base_sha,
-            head_sha: attempt.head_sha
+            head_sha: attempt.head_sha,
+            summary: attempt.summary,
+            changes: attempt.changes,
+            compare_url: attempt.compare_url
           }
         else
           _ ->
@@ -233,4 +248,7 @@ defmodule Omashiki.Worker.Complete do
   defp error_details(%{"details" => details}) when is_map(details), do: details
   defp error_details(%{details: details}) when is_map(details), do: details
   defp error_details(_), do: nil
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 end

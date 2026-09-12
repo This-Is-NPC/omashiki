@@ -719,9 +719,9 @@ defmodule Omashiki.Jobs.Runner do
   defp output_summary(output) when is_map(output), do: deep_stringify(output)
   defp output_summary(output), do: %{"output" => truncate(output)}
 
-  defp harness_summary(%_{} = result), do: harness_summary(Map.from_struct(result))
+  def harness_summary(%_{} = result), do: harness_summary(Map.from_struct(result))
 
-  defp harness_summary(result) when is_map(result) do
+  def harness_summary(result) when is_map(result) do
     text =
       result["text"] || result["message"] || result["output"] || result["assistant_text"] ||
         result[:text] || result[:message] || result[:output] || result[:assistant_text]
@@ -729,7 +729,7 @@ defmodule Omashiki.Jobs.Runner do
     if is_binary(text) and text != "", do: String.slice(String.trim(text), 0, 4_096)
   end
 
-  defp harness_summary(_), do: nil
+  def harness_summary(_), do: nil
 
   defp error_map(code, reason) when is_binary(code),
     do: %{

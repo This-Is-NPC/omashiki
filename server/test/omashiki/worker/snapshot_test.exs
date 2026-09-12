@@ -27,7 +27,14 @@ defmodule Omashiki.Worker.SnapshotTest do
          remote: @remote,
          branch: "jobs/fake",
          base_sha: String.duplicate("a", 40),
-         head_sha: String.duplicate("b", 40)
+         head_sha: String.duplicate("b", 40),
+         changes: %{
+           "files_changed" => 1,
+           "insertions" => 2,
+           "deletions" => 0,
+           "files" => [%{"path" => "hello.py", "insertions" => 2, "deletions" => 0}]
+         },
+         compare_url: "https://github.com/acme/repo/compare/aaa...bbb"
        }}
     end
 
@@ -119,7 +126,7 @@ defmodule Omashiki.Worker.SnapshotTest do
             "policy" => %{"mode" => "off"},
             "network" => "none",
             "resources" => %{"cpus" => 1, "memory" => "1GB", "pids" => 32}
-          },
+          }
         },
         "limits" => %{}
       },
@@ -151,6 +158,9 @@ defmodule Omashiki.Worker.SnapshotTest do
     assert complete.branch == "jobs/fake"
     assert complete.base_sha == String.duplicate("a", 40)
     assert complete.head_sha == String.duplicate("b", 40)
+    assert complete.summary == "run"
+    assert complete.changes["files_changed"] == 1
+    assert complete.compare_url =~ "/compare/"
 
     mirror = mirror_path(@remote)
 
@@ -191,7 +201,8 @@ defmodule Omashiki.Worker.SnapshotTest do
         repository: nil
       })
 
-    assert {:ok, %Complete{kind: :files, changed_bytes: 1, blob_digest: "abc", blob_path: "/tmp/x"}} =
+    assert {:ok,
+            %Complete{kind: :files, changed_bytes: 1, blob_digest: "abc", blob_path: "/tmp/x"}} =
              Snapshot.run(offer)
   end
 
@@ -214,7 +225,10 @@ defmodule Omashiki.Worker.SnapshotTest do
   end
 
   test "dependency base is refused before provisioning" do
-    Application.put_env(:omashiki, :worker_snapshot_opts, container: SpyContainer, adapter: FakeHarness)
+    Application.put_env(:omashiki, :worker_snapshot_opts,
+      container: SpyContainer,
+      adapter: FakeHarness
+    )
 
     offer =
       base_offer(%{

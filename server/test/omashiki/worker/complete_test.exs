@@ -23,6 +23,34 @@ defmodule Omashiki.Worker.CompleteTest do
       assert Complete.to_map(round) == map
     end
 
+    test "round-trips git completion metadata" do
+      complete = %Complete{
+        kind: :git,
+        remote: "origin",
+        branch: "omashiki/test",
+        base_sha: String.duplicate("a", 40),
+        head_sha: String.duplicate("b", 40),
+        summary: "added hello.py",
+        changes: %{
+          "files_changed" => 1,
+          "insertions" => 3,
+          "deletions" => 0,
+          "files" => [%{"path" => "hello.py", "insertions" => 3, "deletions" => 0}]
+        },
+        compare_url: "https://github.com/acme/repo/compare/a...b"
+      }
+
+      map = Complete.to_map(complete)
+      assert {:ok, round} = Complete.from_map(map)
+      assert round.summary == "added hello.py"
+
+      assert round.changes["files"] == [
+               %{"path" => "hello.py", "insertions" => 3, "deletions" => 0}
+             ]
+
+      assert round.compare_url == complete.compare_url
+    end
+
     test "round-trips and Jason-encodes files" do
       complete = %Complete{
         kind: :files,

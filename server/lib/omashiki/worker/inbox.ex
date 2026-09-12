@@ -2,11 +2,11 @@ defmodule Omashiki.Worker.Inbox do
   @moduledoc false
 
   alias Omashiki.Jobs
-  alias Omashiki.Jobs.{Job, JobAttempt}
+  alias Omashiki.Jobs.{Job, JobAttempt, Statuses}
   alias Omashiki.Repo
   alias Omashiki.Worker.{Complete, Offer, Presence}
 
-  @terminal ~w(succeeded failed cancelled)
+  @terminal Statuses.terminal()
 
   @doc "Register worker capacity and optionally claim the next queued job."
   def poll(machine_id, free_slots) when is_binary(machine_id) do
@@ -119,6 +119,9 @@ defmodule Omashiki.Worker.Inbox do
        base_sha: complete.base_sha,
        head_sha: complete.head_sha,
        worktree_clean: true,
+       summary: complete.summary,
+       changes: complete.changes,
+       compare_url: complete.compare_url,
        result: result
      }}
   end

@@ -50,6 +50,7 @@ defmodule Omashiki.Worker.Snapshot do
       container: nil,
       outcome: :success,
       error: nil,
+      harness_result: nil,
       container_mod: container_mod,
       adapter_mod: adapter_mod,
       opts: opts
@@ -76,7 +77,7 @@ defmodule Omashiki.Worker.Snapshot do
     opts = Keyword.put(state.opts, :update_task_branch, true)
 
     case state.container_mod.finalize(state.container, state.job, opts) do
-      {:ok, final} -> {:ok, complete_from_finalize(state.sink, final)}
+      {:ok, final} -> {:ok, complete_from_finalize(state.sink, final, state)}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -102,7 +103,7 @@ defmodule Omashiki.Worker.Snapshot do
            },
            harness_context(state)
          ) do
-      {:ok, _output} -> state
+      {:ok, output} -> %{state | harness_result: output}
       {:error, reason} -> %{state | outcome: :failure, error: reason}
     end
   end
@@ -299,17 +300,20 @@ defmodule Omashiki.Worker.Snapshot do
 
   defp validate_offer(_), do: {:error, :invalid_offer}
 
-  defp complete_from_finalize("git", final) do
+  defp complete_from_finalize("git", final, state) do
     %Complete{
       kind: :git,
       remote: fetch_key(final, :remote),
       branch: fetch_key(final, :branch),
       base_sha: fetch_key(final, :base_sha),
-      head_sha: fetch_key(final, :head_sha)
+      head_sha: fetch_key(final, :head_sha),
+      summary: Runner.harness_summary(state.harness_result),
+      changes: fetch_key(final, :changes),
+      compare_url: fetch_key(final, :compare_url)
     }
   end
 
-  defp complete_from_finalize("files", final) do
+  defp complete_from_finalize("files", final, _state) do
     result = fetch_key(final, :result) || %{}
 
     %Complete{
@@ -320,7 +324,7 @@ defmodule Omashiki.Worker.Snapshot do
     }
   end
 
-  defp complete_from_finalize("none", final) do
+  defp complete_from_finalize("none", final, _state) do
     result = fetch_key(final, :result) || %{}
 
     %Complete{
