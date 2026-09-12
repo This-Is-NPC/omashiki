@@ -102,5 +102,29 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
       assert response.status == 429
       assert Jason.decode!(response.resp_body)["code"] == "rate_limited"
     end
+
+    @tag :unauthenticated
+    test "issue_token budget is per client address, not username", %{conn: conn} do
+      _ = user_fixture(%{username: "bob", password: "right-password-1"})
+      _ = user_fixture(%{username: "ann", password: "right-password-2"})
+
+      for _ <- 1..10 do
+        post(
+          conn,
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+      end
+
+      response =
+        post(
+          conn,
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "ann", "password" => "wrong"})
+        )
+
+      assert response.status == 429
+      assert Jason.decode!(response.resp_body)["code"] == "rate_limited"
+    end
   end
 end

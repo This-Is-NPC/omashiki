@@ -44,4 +44,13 @@ defmodule OmashikiWeb.RateLimiterTest do
     Process.sleep(5)
     assert {:ok, 1} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
   end
+
+  test "skipped windows do not accumulate keys" do
+    assert {:ok, 1} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
+    Process.sleep(5)
+    assert {:ok, 1} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
+    Process.sleep(5)
+    assert {:ok, 1} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
+    assert RateLimiter.size() == 1
+  end
 end

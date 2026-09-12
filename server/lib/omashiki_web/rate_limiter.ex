@@ -41,16 +41,21 @@ defmodule OmashikiWeb.RateLimiter do
     per_ms = Keyword.fetch!(opts, :per_ms)
     now = System.system_time(:millisecond)
     window = div(now, per_ms)
-    key = {scope, identifier, window}
+    key = {scope, identifier}
 
-    _ = :ets.delete(@table, {scope, identifier, window - 1})
-    n = :ets.update_counter(@table, key, {2, 1}, {key, 0})
+    n = bump(key, window)
 
     if n > max do
       {:error, :rate_limited}
     else
       {:ok, n}
     end
+  end
+
+  @doc "Test helper — number of live ETS rows."
+  def size do
+    ensure_table()
+    :ets.info(@table, :size)
   end
 
   @doc """
@@ -90,5 +95,19 @@ defmodule OmashikiWeb.RateLimiter do
     ensure_table()
     :ets.delete_all_objects(@table)
     :ok
+  end
+
+  # One row per `(scope, identifier)`. The window lives in the tuple so a
+  # skipped window cannot leave an extra key behind, and an attacker cannot
+  # grow the table by waiting between windows.
+  defp bump(key, window) do
+    case :ets.lookup(@table, key) do
+      [{^key, _count, ^window}] ->
+        :ets.update_counter(@table, key, {2, 1})
+
+      _ ->
+        :ets.insert(@table, {key, 1, window})
+        1
+    end
   end
 end
