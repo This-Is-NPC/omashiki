@@ -125,6 +125,8 @@ defmodule Omashiki.Runtime.Attempt do
       _ = cancel_runtime(state, "job-#{state.attempt.id}")
     end
 
+    Omashiki.Runtime.LeaseRenewer.unregister(state.attempt.id)
+
     :ok
   end
 

@@ -51,11 +51,13 @@ defmodule Omashiki.Runtime.LeaseRenewer do
 
   @impl true
   def handle_cast({:register, attempt_id, lease_token, pid}, state) do
-    {:noreply, put_in(state.tracked[attempt_id], {lease_token, pid})}
+    state = drop_tracked(state, attempt_id)
+    ref = Process.monitor(pid)
+    {:noreply, put_in(state.tracked[attempt_id], {lease_token, pid, ref})}
   end
 
   def handle_cast({:unregister, attempt_id}, state) do
-    {:noreply, %{state | tracked: Map.delete(state.tracked, attempt_id)}}
+    {:noreply, drop_tracked(state, attempt_id)}
   end
 
   @impl true
@@ -73,6 +75,16 @@ defmodule Omashiki.Runtime.LeaseRenewer do
 
     schedule(state.interval_ms)
     {:noreply, state}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
+    attempt_id =
+      Enum.find_value(state.tracked, fn
+        {id, {_token, _pid, ^ref}} -> id
+        _ -> nil
+      end)
+
+    {:noreply, drop_tracked(state, attempt_id)}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -105,14 +117,26 @@ defmodule Omashiki.Runtime.LeaseRenewer do
     {kept, lost} =
       Enum.split_with(state.tracked, fn {id, _} -> MapSet.member?(refreshed, id) end)
 
-    Enum.each(lost, fn {id, {_token, pid}} ->
+    Enum.each(lost, fn {id, {_token, pid, ref}} ->
+      Process.demonitor(ref, [:flush])
       send(pid, {:lease_lost, id})
     end)
 
     %{state | tracked: Map.new(kept)}
   end
 
-  defp log_failure(%DBConnection.OwnershipError{}), do: :ok
+  defp drop_tracked(state, nil), do: state
+
+  defp drop_tracked(state, attempt_id) do
+    case Map.pop(state.tracked, attempt_id) do
+      {{_token, _pid, ref}, tracked} ->
+        Process.demonitor(ref, [:flush])
+        %{state | tracked: tracked}
+
+      {nil, _} ->
+        state
+    end
+  end
 
   defp log_failure(reason) do
     Logger.warning("[LeaseRenewer] batch renewal failed: #{inspect(reason)}")

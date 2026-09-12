@@ -99,6 +99,30 @@ defmodule Omashiki.Runtime.LeaseRenewerTest do
     assert Repo.get!(JobAttempt, attempt.id).lease_expires_at == expires_at
   end
 
+  test "stops renewing when the owner process dies", %{token: token} do
+    attempt = claim!(token, "owner-down")
+    expires_at = attempt.lease_expires_at
+    renewer = start_renewer!()
+    parent = self()
+
+    owner =
+      spawn(fn ->
+        LeaseRenewer.register(renewer, attempt.id, attempt.lease_token)
+        send(parent, :registered)
+        Process.sleep(:infinity)
+      end)
+
+    assert_receive :registered, 1_000
+    _ = :sys.get_state(renewer)
+    Process.exit(owner, :kill)
+    _ = :sys.get_state(renewer)
+
+    send(renewer, :renew)
+    _ = :sys.get_state(renewer)
+
+    assert Repo.get!(JobAttempt, attempt.id).lease_expires_at == expires_at
+  end
+
   # The tick is driven by hand: a wall-clock interval would make these tests
   # race the scheduler instead of asserting the batch statement.
   defp start_renewer! do
