@@ -130,11 +130,7 @@ defmodule OmashikiWeb.Api.SessionsController do
   end
 
   defp check_rate(conn) do
-    attrs = Maps.stringify_keys(conn.body_params)
-    identifier = attrs["username"] || attrs["email"] || ""
-    bucket = ApiConn.client_ip_or_unknown(conn) <> "|" <> rate_account(identifier)
-
-    case RateLimiter.hit("issue_token", bucket,
+    case RateLimiter.hit("issue_token", ApiConn.client_ip_or_unknown(conn),
            max: @rate_limit_max,
            per_ms: @rate_limit_per_ms
          ) do
@@ -142,13 +138,4 @@ defmodule OmashikiWeb.Api.SessionsController do
       {:error, :rate_limited} -> {:error, :rate_limited}
     end
   end
-
-  defp rate_account(identifier) when is_binary(identifier) do
-    case Accounts.get_user_by_identifier(identifier) do
-      %{id: id} -> id
-      nil -> identifier |> String.trim() |> String.downcase()
-    end
-  end
-
-  defp rate_account(_), do: ""
 end

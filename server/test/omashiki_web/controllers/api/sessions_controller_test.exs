@@ -107,10 +107,8 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
     end
 
     @tag :unauthenticated
-    test "issue_token budget is per address and account, not typed identifier", %{conn: conn} do
-      user =
-        user_fixture(%{username: "bob", email: "bob@example.com", password: "right-password-1"})
-
+    test "issue_token budget is per address, not typed identifier", %{conn: conn} do
+      _ = user_fixture(%{username: "bob", password: "right-password-1"})
       _ = user_fixture(%{username: "ann", password: "right-password-2"})
 
       for _ <- 1..10 do
@@ -121,15 +119,6 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
         )
       end
 
-      via_email =
-        post(
-          conn,
-          ~p"/api/v1/sessions/issue_token",
-          token_grants(%{"username" => user.email, "password" => "wrong"})
-        )
-
-      assert via_email.status == 429
-
       via_ann =
         post(
           conn,
@@ -137,7 +126,8 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
           token_grants(%{"username" => "ann", "password" => "wrong"})
         )
 
-      assert via_ann.status == 401
+      assert via_ann.status == 429
+      assert_schema(Jason.decode!(via_ann.resp_body), "Problem", OmashikiWeb.ApiSpec.spec())
     end
 
     @tag :unauthenticated
