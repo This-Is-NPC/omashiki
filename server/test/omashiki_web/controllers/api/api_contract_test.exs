@@ -4,6 +4,7 @@ defmodule OmashikiWeb.Api.ApiContractTest do
   @moduletag :api
 
   alias OmashikiWeb.Api.Problem
+  alias OmashikiWeb.Api.ErrorSurface
   alias OmashikiWeb.ApiSpec.Schemas
   alias OmashikiWeb.Router
 
@@ -46,7 +47,7 @@ defmodule OmashikiWeb.Api.ApiContractTest do
     assert spec.openapi == "3.0.3"
   end
 
-  test "operations declare inferred error statuses" do
+  test "operations declare statuses for Problem codes they can return" do
     spec = OmashikiWeb.ApiSpec.spec() |> Jason.encode!() |> Jason.decode!()
     jobs = spec["paths"]["/api/v1/jobs"]
     refute Map.has_key?(jobs["get"]["responses"], "400")
@@ -56,12 +57,18 @@ defmodule OmashikiWeb.Api.ApiContractTest do
           {method, operation} <- item,
           method in ~w(get post put patch delete),
           is_map(operation),
-          status <- inferred_error_statuses(path, method, operation, spec),
+          status <- ErrorSurface.required_statuses(path, method, bearer_operation?(operation)),
+          status = Integer.to_string(status),
           not Map.has_key?(operation["responses"] || %{}, status) do
         "#{method} #{path} #{status}"
       end
 
     assert missing == [], "undeclared error statuses: #{inspect(missing)}"
+
+    assert "429" in Map.keys(spec["paths"]["/api/v1/jobs"]["post"]["responses"])
+    assert "429" in Map.keys(spec["paths"]["/api/v1/jobs/{id}/retry"]["post"]["responses"])
+    assert "429" in Map.keys(spec["paths"]["/api/v1/jobs/{id}/result"]["get"]["responses"])
+    assert "503" in Map.keys(spec["paths"]["/api/v1/jobs"]["post"]["responses"])
   end
 
   test "HTTP read timeout is an integer and does not replace the test bind" do
@@ -244,35 +251,12 @@ defmodule OmashikiWeb.Api.ApiContractTest do
 
   defp resolve_node(node, _spec), do: node
 
-  defp inferred_error_statuses(path, method, operation, spec) do
-    params =
-      for param <- operation["parameters"] || [],
-          resolved = resolve_node(param, spec) do
-        {resolved["in"], resolved["name"]}
-      end
-
-    []
-    |> maybe_status("429", path == "/api/v1/sessions/issue_token" and method == "post")
-    |> maybe_status("422", path == "/api/v1/sessions/signup" and method == "post")
-    |> maybe_status(
-      "422",
-      {"query", "status"} in params or {"query", "cursor"} in params or
-        String.contains?(path, "/events")
-    )
-    |> maybe_status("503", method == "post" and busy_write?(path))
-    |> Enum.uniq()
+  defp bearer_operation?(%{"security" => security}) when is_list(security) do
+    Enum.any?(security, fn
+      %{"bearer" => _} -> true
+      _ -> false
+    end)
   end
 
-  defp maybe_status(list, status, true), do: [status | list]
-  defp maybe_status(list, _status, false), do: list
-
-  defp busy_write?(path) do
-    path in [
-      "/api/v1/jobs",
-      "/api/v1/jobs/batch",
-      "/api/v1/jobs/{id}/retry",
-      "/api/v1/jobs/{id}/cancel",
-      "/api/v1/jobs/{id}/webhook-deliveries/{delivery_id}/redeliver"
-    ]
-  end
+  defp bearer_operation?(_), do: false
 end
