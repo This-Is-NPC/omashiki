@@ -394,7 +394,7 @@ defmodule Omashiki.Worker.Poller do
     else
       managers =
         Enum.map(managers, fn m ->
-          %{id: m.id, url: m.url, client: Client.new(m.url, m.token)}
+          %{id: m.id, url: m.url, client: Client.new(m.url, m.token, mint_opts(opts))}
         end)
 
       for m <- managers do
@@ -428,6 +428,13 @@ defmodule Omashiki.Worker.Poller do
 
   defp default_opts(%{slots: slots}) when is_atom(slots) or is_pid(slots), do: [slots: slots]
   defp default_opts(_), do: []
+
+  defp mint_opts(opts) do
+    case Keyword.get(opts, :mint_mod) do
+      nil -> []
+      mint_mod -> [mint_mod: mint_mod]
+    end
+  end
 
   defp hostname do
     case :inet.gethostname() do

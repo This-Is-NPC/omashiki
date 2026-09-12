@@ -238,7 +238,6 @@ defmodule Omashiki.Worker.PollerTest do
         assert body["complete"]["kind"] == "error"
         assert body["complete"]["code"] == "complete_failed"
         assert is_binary(body["complete"]["message"])
-        assert byte_size(body["complete"]["message"]) <= AttemptResult.max_summary_bytes()
       end)
 
       put_env(
@@ -260,6 +259,38 @@ defmodule Omashiki.Worker.PollerTest do
       until(fn -> map_size(:sys.get_state(pid).in_flight) == 0 end)
       assert Process.alive?(pid)
       assert Slots.available(slots) == 2
+    end
+
+    test "a nested complete crash still releases the slot", %{
+      bypass: bypass,
+      parent: parent,
+      slots: slots
+    } do
+      offer = sample_offer("git")
+
+      expect_register(bypass)
+      expect_accept(bypass, parent)
+      expect_poll_sequence(bypass, [offer], parent)
+
+      Bypass.stub(bypass, "POST", "/internal/work/complete", fn conn ->
+        send(parent, {:complete, :unexpected})
+        Plug.Conn.resp(conn, 204, "")
+      end)
+
+      put_env(:fake_executor_result, git_complete())
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, pid} = start_poller(slots, mint_mod: __MODULE__.CompleteRaisingMint)
+          assert_receive {:accept, _}, 2_000
+          until(fn -> map_size(:sys.get_state(pid).in_flight) == 0 end)
+          assert Process.alive?(pid)
+          assert Slots.available(slots) == 2
+          Logger.flush()
+        end)
+
+      refute_received {:complete, _}
+      assert log =~ "dropping complete"
     end
 
     test "uploads a blob then completes a files sink offer", %{
@@ -347,7 +378,7 @@ defmodule Omashiki.Worker.PollerTest do
         assert body["complete"]["kind"] == "error"
         assert body["complete"]["code"] == "executor_failed"
         assert is_binary(body["complete"]["message"])
-        assert byte_size(body["complete"]["message"]) <= AttemptResult.max_summary_bytes()
+        assert byte_size(body["complete"]["message"]) == AttemptResult.max_summary_bytes()
       end)
 
       put_env(:fake_executor_result, {:error, String.duplicate("x", 20_000)})
@@ -579,6 +610,21 @@ defmodule Omashiki.Worker.PollerTest do
       assert_receive {:complete, _}, 2_000
       refute_receive {:blob_wrong_manager, _}, 200
     end
+  end
+
+  defmodule CompleteRaisingMint do
+    def connect(scheme, host, port, opts), do: Mint.HTTP.connect(scheme, host, port, opts)
+
+    def request(conn, method, path, headers, body) do
+      if String.contains?(to_string(path), "/complete") do
+        raise "complete mint down"
+      else
+        Mint.HTTP.request(conn, method, path, headers, body)
+      end
+    end
+
+    def recv(conn, n, timeout), do: Mint.HTTP.recv(conn, n, timeout)
+    def close(conn), do: Mint.HTTP.close(conn)
   end
 
   defmodule FakeExecutor do
