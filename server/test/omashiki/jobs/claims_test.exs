@@ -378,9 +378,14 @@ defmodule Omashiki.Jobs.ClaimsTest do
 
   test "claiming never reclaims an expired attempt inline", %{token: token} do
     {:ok, stale_job} = Jobs.Admission.admit(token, request("stale-holder"))
-    {:ok, stale_attempt} = Jobs.claim(stale_job, "stale-runner", lease_ms: 1)
-    Process.sleep(5)
-    assert DateTime.compare(DateTime.utc_now(), stale_attempt.lease_expires_at) == :gt
+    {:ok, stale_attempt} = Jobs.claim(stale_job, "stale-runner", lease_ms: 60_000)
+
+    expired_at = DateTime.add(DateTime.utc_now(:microsecond), -1, :second)
+
+    {1, _} =
+      Repo.update_all(from(a in JobAttempt, where: a.id == ^stale_attempt.id),
+        set: [lease_expires_at: expired_at]
+      )
 
     {:ok, fresh_job} = Jobs.Admission.admit(token, request("fresh-claimer"))
     assert {:ok, _fresh_attempt} = Jobs.claim(fresh_job, "fresh-runner")
@@ -394,7 +399,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     # The job therefore reports its live status, not a recovery-induced one.
     assert {:error, {:not_queued, "provisioning"}} = Jobs.claim(stale_job, "second-runner")
 
-    recovery_time = DateTime.add(stale_attempt.lease_expires_at, 1, :millisecond)
+    recovery_time = DateTime.add(expired_at, 1, :millisecond)
     assert {:ok, 1} = Jobs.recover_stale(recovery_time)
     assert Repo.get!(Job, stale_job.id).status == "failed"
     assert capacity_row().active == 1
