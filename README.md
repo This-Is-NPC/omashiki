@@ -65,7 +65,14 @@ The operator reviews the branches before merging them.
 **Prepare a report.** A files environment supplies the required tools and permitted inputs.
 The agent writes output files. The house stores the validated archive.
 
-**Delegate from an existing coding agent.** Install the bundled skill with `mise run skill:install`.
+**Delegate from an existing coding agent.** Install the skill from the running house:
+
+```bash
+mkdir -p "${HOME:?}/.agents/skills/omashiki"
+curl --fail-with-body -sS "$OMASHIKI_URL/api/v1/agent-skill" \
+  > "${HOME:?}/.agents/skills/omashiki/SKILL.md"
+```
+
 Ask the agent to discover registered environments, submit a bounded task, and retrieve the result.
 The job continues after the client disconnects.
 

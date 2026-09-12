@@ -27,14 +27,15 @@ Keep actual secret values in the gitignored `.env` file.
 ## Agent clients
 
 The bundled Agent Skill operates the public HTTP API.
-Install it with `mise run skill:install`.
+Install it from the running house:
 
-[mcp.json.example](mcp.json.example) records a possible client configuration shape only.
+```bash
+mkdir -p "${HOME:?}/.agents/skills/omashiki"
+curl --fail-with-body -sS "$OMASHIKI_URL/api/v1/agent-skill" \
+  > "${HOME:?}/.agents/skills/omashiki/SKILL.md"
+```
+
 Omashiki has no public MCP endpoint.
-Do not install that example as `.mcp.json` for an existing installation.
-
-Internal MCP code serves job tools through the house.
-It does not provide the client API shown by that example.
 
 ## Development examples
 

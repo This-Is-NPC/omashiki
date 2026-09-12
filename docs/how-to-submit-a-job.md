@@ -34,7 +34,6 @@ The example below uses `omashiki` and `opencode` from the single-node template.
 ```bash
 cat > /tmp/omashiki-job.json <<'JSON'
 {
-  "schema_version": 1,
   "idempotency_key": "readme-health-check-001",
   "correlation_id": "maintenance:readme-health-check",
   "repo": "omashiki",
@@ -53,7 +52,6 @@ Use a new idempotency key for each new task.
 Keep the same key when you repeat a request after a connection failure.
 The correlation ID connects the job to your ticket or maintenance operation.
 
-The envelope uses schema V1. Its payload uses the neutral V2 contract.
 The payload accepts `instruction`, `context`, `title`, and `branch`.
 Git jobs require `title` or `branch` for the task branch.
 It does not accept provider, model, harness, or authentication controls.

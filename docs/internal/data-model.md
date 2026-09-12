@@ -9,15 +9,16 @@ Admission captures resolved declarations in each job.
 | Table | Responsibility |
 | --- | --- |
 | `users` | Operator identity and password hash. |
-| `api_tokens` | Owner, token hash, expiry, revocation, and encrypted webhook settings. |
+| `api_tokens` | Owner, token hash, scopes, allowed environments, active-job limit, expiry, revocation, and encrypted webhook settings. |
 | `jobs` | Admitted request, snapshots, digests, lifecycle, and terminal result. |
 | `job_dependencies` | Directed prerequisite edges and failure policy. |
-| `job_attempts` | Numbered attempts, machine identity, lease, capacity reservation, and result. |
+| `job_attempts` | Numbered attempts, machine identity, lease, capacity reservation, result, summary, and change stats. |
 | `job_steps` | Ordered execution steps with bounded input, output, and error data. |
 | `job_events` | Append-only observations with contiguous per-job sequence. |
 | `execution_capacity` | Database execution capacity by machine for embedded coordination. |
 | `webhook_deliveries` | Terminal outbox and delivery retry state. |
 | `usage_ledger` | Append-only usage attributed to a stable request and job. |
+| `token_audit_events` | Token actions: submit, cancel, retry, issue, rotate, revoke, redeliver. |
 | `oban_jobs` | Durable scheduler and notification work. |
 
 Worker-local slots are separate from database capacity rows.
@@ -29,7 +30,7 @@ Their enrollment state persists manager IDs, URLs, and worker tokens.
 | Group | Fields |
 | --- | --- |
 | Owner | `user_id`, `api_token_id`. |
-| Request | `schema_version`, `idempotency_key`, `correlation_id`, `repository`, `environment`, `payload`, `payload_hash`. |
+| Request | `idempotency_key`, `correlation_id`, `repository`, `environment`, `payload`, `payload_hash`. |
 | Repository snapshot | `admitted_repository`, `admitted_repository_digest`. |
 | Environment snapshot | `admitted_environment`, `admitted_environment_digest`. |
 | Plugin snapshot | `admitted_plugin`, `admitted_plugin_digest`. |

@@ -38,6 +38,13 @@ JOB_TIMEOUT_SEC = 180
 FLEET_TIMEOUT_SEC = 20
 FLEET_CONTAINER_STATES = {"created", "running", "exited", "removing"}
 
+TOKEN_GRANTS = {
+    "scopes": ["read", "submit", "cancel"],
+    "allowed_environments": ["*"],
+    "max_active_jobs": 100,
+    "ttl_days": 30,
+}
+
 INSTRUCTIONS = """\
 Create a Python file named hello.py at the repository root. It must print
 exactly `Hello, World!` followed by a newline when run with `python3 hello.py`.
@@ -233,7 +240,7 @@ def api_request(
 
 
 def ensure_api_token() -> str | None:
-    status, _ = api_request("POST", "/api/v1/jobs", {"schema_version": 1})
+    status, _ = api_request("POST", "/api/v1/jobs", {})
     if status == 401:
         username = f"host_e2e_{secrets.token_hex(4)}"
         password = secrets.token_urlsafe(24)
@@ -245,12 +252,13 @@ def ensure_api_token() -> str | None:
                 "username": username,
                 "password": password,
                 "name": "Host Worker E2E",
+                **TOKEN_GRANTS,
             },
         )
         if signup_status == 201 and signup_body.get("data", {}).get("token"):
             return signup_body["data"]["token"]
         if signup_status == 409:
-            retry_status, _ = api_request("POST", "/api/v1/jobs", {"schema_version": 1})
+            retry_status, _ = api_request("POST", "/api/v1/jobs", {})
             if retry_status in (400, 422):
                 return ""
             raise E2EError(
@@ -686,7 +694,6 @@ class Harness:
     def admit_job(self) -> str:
         self.api_token = ensure_api_token()
         request = {
-            "schema_version": 1,
             "idempotency_key": "host-worker-e2e-hello",
             "correlation_id": self.correlation_id,
             "repo": "overture",
@@ -746,17 +753,17 @@ class Harness:
         while time.monotonic() < deadline:
             status, body = api_request(
                 "GET",
-                f"/api/v1/jobs/{job_id}/result",
+                f"/api/v1/jobs/{job_id}/result?wait=60",
                 token=self.api_token,
             )
-            if status != 200:
-                time.sleep(1)
-                continue
-            last = body.get("data", {})
-            if last.get("status") == "succeeded":
+            last = body.get("data", {}) if isinstance(body, dict) else {}
+            if status == 200 and last.get("status") == "succeeded":
                 return last
-            if last.get("status") in {"failed", "cancelled"}:
+            if status == 200 and last.get("status") in {"failed", "cancelled"}:
                 raise E2EError(f"job finished with status {last.get('status')}: {last}")
+            if status in (202, 409):
+                time.sleep(0.1)
+                continue
             time.sleep(1)
         raise E2EError(f"timed out waiting for job result: {last}")
 
@@ -775,6 +782,10 @@ class Harness:
                 f"hello.py missing or wrong on overture remote branch {branch}: "
                 f"{show.stdout}{show.stderr}"
             )
+        changes = result.get("changes") or {}
+        files = changes.get("files") or []
+        if changes.get("files_changed") != 1 or "hello.py" not in files:
+            raise E2EError(f"expected hello.py as the sole change: {changes}")
 
     def cleanup(self) -> None:
         stop_process("worker", self.worker)

@@ -236,7 +236,7 @@ class Harness:
     def api_token(self, house: str) -> str | None:
         """Each house issues its own API token; none is valid in the other."""
         if house not in self.api_tokens:
-            status, _ = self.api(house, "POST", "/api/v1/jobs", {"schema_version": 1})
+            status, _ = self.api(house, "POST", "/api/v1/jobs", {})
             if status == 401:
                 username = f"{house}_{self.run_id}"
                 signup_status, body = self.api(
@@ -248,6 +248,7 @@ class Harness:
                         "username": username,
                         "password": secrets.token_urlsafe(24),
                         "name": f"House {house}",
+                        **host.TOKEN_GRANTS,
                     },
                 )
                 token = (body.get("data") or {}).get("token")
@@ -262,7 +263,6 @@ class Harness:
 
     def admit(self, house: str, tag: str) -> str:
         request = {
-            "schema_version": 1,
             "idempotency_key": f"two-houses-{self.run_id}-{house}-{tag}",
             "correlation_id": f"two-houses-{self.run_id}-{house}-{tag}",
             "repo": "overture",

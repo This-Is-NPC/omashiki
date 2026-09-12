@@ -2045,7 +2045,16 @@ sudo -n {q(self.kata_hypervisor_path)} --version
             self.wait_http(f"http://127.0.0.1:{self.worker_port}/api/v1/health", remote=name, process_key=f"{name}:worker")
         username = f"vm_e2e_{self.run_id.replace('-', '_')}"
         password = secrets.token_urlsafe(24)
-        status, body = self.api("POST", "/api/v1/sessions/signup", {"email": username + "@example.test", "username": username, "password": password, "name": "VM E2E"})
+        status, body = self.api("POST", "/api/v1/sessions/signup", {
+            "email": username + "@example.test",
+            "username": username,
+            "password": password,
+            "name": "VM E2E",
+            "scopes": ["read", "submit", "cancel"],
+            "allowed_environments": ["*"],
+            "max_active_jobs": 100,
+            "ttl_days": 30,
+        })
         if status != 201 or not body.get("data", {}).get("token"):
             raise E2EError(f"API signup failed with HTTP {status}: {body}")
         token = body["data"]["token"]
@@ -2057,7 +2066,7 @@ sudo -n {q(self.kata_hypervisor_path)} --version
             marker = f"vm-e2e-marker-{self.run_id}-{index}"
             markers[marker] = index
             jobs.append({"ref": title, "idempotency_key": f"{title}-idempotency", "repo": self.repository_name, "environment": self.environment_name, "payload": {"instruction": f'Create {self.expected_file} containing exactly {self.expected_content.decode().rstrip()} followed by a newline, then commit it. Test marker: {marker}', "title": title, "context": {"correlation_id": self.correlation_id}}, "priority": 1})
-        status, body = self.api("POST", "/api/v1/jobs/batch", {"schema_version": 1, "correlation_id": correlation, "jobs": jobs}, token)
+        status, body = self.api("POST", "/api/v1/jobs/batch", {"correlation_id": correlation, "jobs": jobs}, token)
         if status != 202 or len(body.get("data", [])) != self.workload_count:
             raise E2EError(f"batch admission failed with HTTP {status}: {body}")
         self.job_ids = [item["id"] for item in body["data"]]

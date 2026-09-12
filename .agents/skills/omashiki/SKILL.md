@@ -10,13 +10,15 @@ existing installation through its public HTTP API. Do not edit the Omashiki
 server configuration or start, stop, upgrade, or reinstall the server unless the
 user explicitly asks for administration work.
 
+The contract is the OpenAPI document the server publishes. Do not invent routes,
+fields, or error codes. Fetch the specification and follow it.
+
 ## Connection
 
 Use these environment variables:
 
 - `OMASHIKI_URL`: server base URL without a trailing slash. If it is unset, ask
-  the user for the URL and mention `http://127.0.0.1:4010` only as the common
-  local default.
+  the user for the URL. The common local default is `http://127.0.0.1:4010`.
 - `OMASHIKI_API_TOKEN`: bearer token used for discovery and job operations.
 
 Never ask the user to paste a password or API token into chat. Never print the
@@ -30,219 +32,99 @@ Check availability before doing other work:
 
 ```bash
 curl --fail-with-body --silent --show-error \
-  "$OMASHIKI_URL/api/v1/health"
+  "{{OMASHIKI_URL}}/api/v1/health"
 ```
 
 The expected response is `{"status":"ok"}`. Report connection failures as
 connection failures; do not infer that the queue or a job failed.
+
+Fetch the live contract:
+
+```bash
+curl --fail-with-body --silent --show-error \
+  "{{OMASHIKI_URL}}/api/v1/openapi.json"
+```
 
 For authenticated requests, use the bearer header:
 
 ```bash
 curl --fail-with-body --silent --show-error \
   --header "Authorization: Bearer $OMASHIKI_API_TOKEN" \
-  "$OMASHIKI_URL/api/v1/repositories"
+  "{{OMASHIKI_URL}}/api/v1/repositories"
+```
+
+Install or refresh this skill from the same server:
+
+```bash
+mkdir -p "${HOME:?}/.agents/skills/omashiki"
+curl --fail-with-body --silent --show-error \
+  "{{OMASHIKI_URL}}/api/v1/agent-skill" \
+  > "${HOME:?}/.agents/skills/omashiki/SKILL.md"
 ```
 
 ## Discover Before Submitting
 
-Never guess repository or environment names. Fetch both registries:
+Never guess repository or environment names. Read the discovery operations in
+the OpenAPI document and fetch both registries. Select only registered names. If
+multiple choices fit and the user did not select one, ask rather than guessing.
 
-```bash
-curl --fail-with-body --silent --show-error \
-  --header "Authorization: Bearer $OMASHIKI_API_TOKEN" \
-  "$OMASHIKI_URL/api/v1/repositories"
+The environment determines the harness, provider configuration, credentials,
+network, mounts, resources, and model policy. A caller cannot override those
+controls in a job.
 
-curl --fail-with-body --silent --show-error \
-  --header "Authorization: Bearer $OMASHIKI_API_TOKEN" \
-  "$OMASHIKI_URL/api/v1/environments"
-```
-
-Repository entries expose `name` and `base_branch`. Environment entries expose
-safe public metadata such as `name`, `preset`, `plugin`, `runtime`, timeout,
-network, capabilities, and resources. Select only registered names. If multiple
-choices fit and the user did not select one, ask rather than guessing.
-
-The environment determines the preset, plugin, provider configuration, credentials,
-network, mounts, resources, and model policy. Normal environments currently select
-`docker.runc.debian`; `docker.kata.debian` is also represented at the Docker
-API/configuration layer, subject to host/VM installation and compatibility gates.
-A caller cannot override the environment or any other control in a job.
-
-## Submit A Job
+## Submit And Follow Jobs
 
 Confirm that the instruction is concrete and contains enough acceptance criteria
 for an autonomous coding agent. Put optional structured, non-secret supporting
 data in `payload.context`.
 
-Submit this JSON shape to `POST /api/v1/jobs`:
+Build request bodies with a JSON encoder such as `jq -n`. Do not interpolate
+arbitrary task text into a hand-written JSON string. Follow the request schema
+in `openapi.json` for `POST /api/v1/jobs` and `POST /api/v1/jobs/batch`.
 
-```json
-{
-  "schema_version": 1,
-  "idempotency_key": "a-stable-unique-request-id",
-  "correlation_id": "a-logical-workflow-id",
-  "repo": "registered-repository-name",
-  "environment": "registered-environment-name",
-  "payload": {
-    "instruction": "The complete task for the coding agent.",
-    "context": {
-      "ticket": "optional-reference"
-    }
-  },
-  "priority": 1
-}
-```
+Rules that the schema does not restate:
 
-Rules:
-
-- `schema_version` must be `1`.
-- `idempotency_key` must be non-empty and unique to the intended submission.
-  Reuse the same key when retrying an HTTP request whose outcome is unknown. Do
-  not reuse it for different work.
-- `correlation_id` groups related work and must be non-empty.
-- `payload.instruction` is required and must not be blank.
-- `payload.context` is optional, but when present it must be a JSON object.
-- `priority` is an integer from `0` through `3`; lower values run first. Use `1`
-  unless the user or surrounding workflow requires another priority.
-- Do not include `harness`, `provider`, `model`, or `auth` in the payload. They
-  are forbidden control fields.
+- Reuse `idempotency_key` only when retrying an HTTP request whose outcome is
+  unknown. Do not reuse it for different work.
+- Do not include `harness`, `provider`, `model`, or `auth` in the payload.
 - Do not place passwords, tokens, private keys, or provider credentials in the
   instruction or context.
+- Capture `data.id` from a successful admission. Do not predict a job ID.
 
-Build JSON with a real JSON encoder such as `jq -n` or a language standard
-library. Do not interpolate arbitrary task text into a hand-written JSON string.
-Then submit it:
+Token scopes are `read`, `submit`, and `cancel`. Submit, retry, and webhook
+redeliver require `submit`. Cancellation requires `cancel`. Listing, inspection,
+events, and results require `read`.
 
-```bash
-curl --fail-with-body --silent --show-error \
-  --request POST \
-  --header "Authorization: Bearer $OMASHIKI_API_TOKEN" \
-  --header "Content-Type: application/json" \
-  --data-binary @request.json \
-  "$OMASHIKI_URL/api/v1/jobs"
-```
+## Wait For Results
 
-A successful admission returns HTTP `202` with the job under `data`. Capture
-`data.id` exactly from the response. Do not predict a job ID. The initial status
-is normally `queued`, or `blocked` for a child waiting on a parent.
+Prefer `GET /api/v1/jobs/{id}/result?wait=60` over a local poll loop. The server
+holds the connection until the job is terminal or the wait expires. HTTP `202`
+with `retry-after` means the job is still running; wait again. HTTP `409` with
+`code` `result_not_ready` means no `wait` was supplied and the job is not
+terminal.
 
-Avoid leaving request files containing sensitive business context behind. Use a
-secure temporary file and remove it after submission when the request cannot be
-sent directly from the JSON encoder.
+A successful result includes status, attempt, Git identity when the sink is
+git, `summary`, `changes`, and `compare_url` when the remote is recognised.
+Report the branch and commit identifiers exactly as returned. Do not claim that
+changes were merged.
 
-## Inspect And Follow Jobs
-
-List jobs owned by the current token:
-
-```bash
-curl --fail-with-body --silent --show-error \
-  --header "Authorization: Bearer $OMASHIKI_API_TOKEN" \
-  "$OMASHIKI_URL/api/v1/jobs?limit=50"
-```
-
-The optional `status` filter accepts `blocked`, `queued`, `provisioning`,
-`running`, `succeeded`, `failed`, or `cancelled`. `limit` must be from 1 to 100.
-
-Inspect one job:
-
-```bash
-curl --fail-with-body --silent --show-error \
-  --header "Authorization: Bearer $OMASHIKI_API_TOKEN" \
-  "$OMASHIKI_URL/api/v1/jobs/$JOB_ID"
-```
-
-For durable event history:
-
-```bash
-curl --fail-with-body --silent --show-error \
-  --header "Authorization: Bearer $OMASHIKI_API_TOKEN" \
-  "$OMASHIKI_URL/api/v1/jobs/$JOB_ID/events/history"
-```
-
-For live server-sent events:
-
-```bash
-curl --no-buffer --fail-with-body --silent --show-error \
-  --header "Authorization: Bearer $OMASHIKI_API_TOKEN" \
-  --header "Accept: text/event-stream" \
-  "$OMASHIKI_URL/api/v1/jobs/$JOB_ID/events"
-```
-
-Reconnect with the last received event ID in the `Last-Event-ID` header when a
-stream is interrupted. Never pass the bearer token as a query parameter.
-
-Terminal statuses are `succeeded`, `failed`, and `cancelled`. When polling rather
-than streaming, use a modest delay and stop at a user-appropriate deadline. Do
-not busy-loop and do not describe a non-terminal job as failed merely because a
-local wait timed out.
-
-## Retrieve Results
-
-Only request a result after the job reaches a terminal status:
-
-```bash
-curl --fail-with-body --silent --show-error \
-  --header "Authorization: Bearer $OMASHIKI_API_TOKEN" \
-  "$OMASHIKI_URL/api/v1/jobs/$JOB_ID/result"
-```
-
-HTTP `409` with `result_not_ready` means the job is still non-terminal. A
-successful response includes status, attempt number, branch, base and head SHAs,
-worktree cleanliness, result data, error data, and finish time. Report the branch
-and commit identifiers exactly as returned. Do not claim that changes were
-merged; Omashiki returns a result branch.
-
-## Cancel And Retry
+## Cancel, Retry, And Errors
 
 Cancellation is a mutation. Perform it only when the user requested it or has
-confirmed the specific job:
+confirmed the specific job. Retry is allowed only for `failed` or `cancelled`
+jobs.
 
-```bash
-curl --fail-with-body --silent --show-error \
-  --request POST \
-  --header "Authorization: Bearer $OMASHIKI_API_TOKEN" \
-  "$OMASHIKI_URL/api/v1/jobs/$JOB_ID/cancel"
-```
+Errors use `application/problem+json` (RFC 9457). Preserve HTTP status, `code`,
+`detail`, `errors`, and `request_id`. Do not work around authorization, ownership,
+admission, or environment policy errors.
 
-Cancellation is idempotent. Retry is allowed only for `failed` or `cancelled`
-jobs and creates a new attempt on the same job:
-
-```bash
-curl --fail-with-body --silent --show-error \
-  --request POST \
-  --header "Authorization: Bearer $OMASHIKI_API_TOKEN" \
-  "$OMASHIKI_URL/api/v1/jobs/$JOB_ID/retry"
-```
-
-Retry returns HTTP `202`. Do not retry automatically without understanding the
-failure and obtaining user approval when retrying could consume meaningful time,
-provider quota, or money.
-
-## Handle Errors Precisely
-
-Preserve the HTTP status and the server's error `code`, `message`, and `details`
-when reporting failures. Common meanings:
-
-- `401 missing_token` or `token_required`: authentication is absent.
-- `403 invalid_token`: the token is invalid.
-- `403 forbidden`: the job belongs to another token.
-- `404 not_found`: the job does not exist or is unavailable.
-- `409 idempotency_conflict`: the idempotency key belongs to another token.
-- `409 result_not_ready`: wait for a terminal status.
-- `422 unknown_repository` or `unknown_environment`: repeat discovery and use a
-  registered name.
-- `422 invalid_request`: fix the fields identified in `details`; do not silently
-  drop user intent.
-- `429 capacity_exhausted`: report saturation and wait or ask before retrying.
-
-Do not work around authorization, ownership, admission, or environment policy
-errors. Explain what the server rejected and ask for the minimum decision needed
-to continue.
+Common codes: `missing_token`, `token_expired`, `invalid_token`,
+`insufficient_scope`, `forbidden`, `not_found`, `result_not_ready`,
+`environment_not_allowed`, `max_active_jobs`, `capacity_exhausted`,
+`unknown_repository`, `unknown_environment`, `invalid_request`.
 
 ## Report Back
 
 After a mutation, report the job ID, current status, repository, environment,
 and attempt. After completion, report the terminal status and either the exact
-result branch and head SHA or the returned failure. Keep operational output
-concise, but never hide a partial submission, timeout, cancellation, or retry.
+result branch, head SHA, and change summary, or the returned failure.

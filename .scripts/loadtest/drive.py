@@ -7,8 +7,8 @@ What it measures
     Point it at the fake LLM (`fake_llm.py`) so provider latency is a constant
     rather than the thing being measured.
 
-Contract used (README.md at the repo root, `Omashiki.Jobs.Contract.V1`):
-    POST /api/v1/jobs      envelope with schema_version=1 and a V2 payload
+Contract used (OpenAPI at `/api/v1/openapi.json`):
+    POST /api/v1/jobs      envelope with a payload instruction
                            {"instruction": ..., "context": {...}}
                            -> 202 with {"data": {"id": ...}}
     GET  /api/v1/jobs/:id  status polling (blocked|queued|provisioning|running|
@@ -251,7 +251,6 @@ def run_job(index: int, args, client: Client, correlation_id: str) -> Outcome:
     outcome.submitted_at = time.time()
 
     envelope = {
-        "schema_version": 1,
         # Unique per job: a shared key would make Omashiki dedupe the run down
         # to one job and the report would be a lie.
         "idempotency_key": f"loadtest-{correlation_id}-{index:05d}",

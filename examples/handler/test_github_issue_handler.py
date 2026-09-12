@@ -78,7 +78,7 @@ class EnvelopeTest(unittest.TestCase):
     def test_nothing_github_specific_leaks_outside_payload_context(self):
         envelope = handler.envelope_for("issues", labeled_event(), CFG)
         top_level = {key for key in envelope if key != "payload"}
-        self.assertEqual(top_level, {"schema_version", "idempotency_key", "correlation_id", "environment", "priority", "repo"})
+        self.assertEqual(top_level, {"idempotency_key", "correlation_id", "environment", "priority", "repo"})
 
     def test_other_events_and_labels_are_ignored(self):
         self.assertIsNone(handler.envelope_for("issues", labeled_event(label="wontfix"), CFG))
@@ -124,9 +124,7 @@ class SubmitTest(unittest.TestCase):
 
 class OmashikiSignatureTest(unittest.TestCase):
     def payload(self, at: datetime):
-        return {
-            "schema_version": 1,
-            "event_id": "evt-1",
+        return {            "event_id": "evt-1",
             "timestamp": at.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
             "job_id": "job-1",
             "attempt_id": "att-1",

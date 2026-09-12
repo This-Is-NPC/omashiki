@@ -31,6 +31,7 @@ from host_worker_e2e import (
     LOCK_PATH,
     OVERTURE,
     ROOT,
+    TOKEN_GRANTS,
     api_request,
     docker_available,
     labelled_containers,
@@ -328,19 +329,25 @@ def teardown_leftovers() -> None:
 
 
 def ensure_api_token() -> str | None:
-    status, _ = api_request("POST", "/api/v1/jobs", {"schema_version": 1}, port=MANAGER_PORT)
+    status, _ = api_request("POST", "/api/v1/jobs", {}, port=MANAGER_PORT)
     if status == 401:
         username = f"compose_e2e_{secrets.token_hex(4)}"
         password = secrets.token_urlsafe(24)
         signup_status, signup_body = api_request(
             "POST", "/api/v1/sessions/signup",
-            {"email": f"{username}@example.test", "username": username, "password": password, "name": "Compose Worker E2E"},
+            {
+                "email": f"{username}@example.test",
+                "username": username,
+                "password": password,
+                "name": "Compose Worker E2E",
+                **TOKEN_GRANTS,
+            },
             port=MANAGER_PORT,
         )
         if signup_status == 201 and signup_body.get("data", {}).get("token"):
             return signup_body["data"]["token"]
         if signup_status == 409:
-            retry_status, _ = api_request("POST", "/api/v1/jobs", {"schema_version": 1}, port=MANAGER_PORT)
+            retry_status, _ = api_request("POST", "/api/v1/jobs", {}, port=MANAGER_PORT)
             if retry_status in (400, 422):
                 return ""
             raise E2EError(f"signup closed and auth-none probe returned HTTP {retry_status}")
@@ -470,9 +477,7 @@ class Harness:
 
     def admit_job(self) -> str:
         self.api_token = ensure_api_token()
-        request = {
-            "schema_version": 1,
-            "idempotency_key": "compose-worker-e2e-hello",
+        request = {            "idempotency_key": "compose-worker-e2e-hello",
             "correlation_id": self.correlation_id,
             "repo": "overture",
             "environment": "e2e-jcode",

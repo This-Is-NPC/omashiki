@@ -27,8 +27,15 @@ A job with a `files` or `none` sink can operate without a repository.
 | Give several houses access to one worker | [Share workers between houses](how-to-share-workers-between-houses.md) |
 | Select the Kata runtime | [Use Kata](how-to-use-kata.md) |
 
-To operate Omashiki from a coding agent, install the bundled skill with `mise run skill:install`.
-The [skill file](../.agents/skills/omashiki/SKILL.md) contains the agent instructions.
+To operate Omashiki from a coding agent, install the skill from the running house:
+
+```bash
+mkdir -p "${HOME:?}/.agents/skills/omashiki"
+curl --fail-with-body -sS "$OMASHIKI_URL/api/v1/agent-skill" \
+  > "${HOME:?}/.agents/skills/omashiki/SKILL.md"
+```
+
+The [skill file](../.agents/skills/omashiki/SKILL.md) is the source the house serves.
 
 ## References
 

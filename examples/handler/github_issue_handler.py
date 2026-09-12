@@ -126,7 +126,6 @@ def envelope_for(event_name: str, event: dict[str, Any], cfg: dict[str, Any]) ->
     instruction = title if not body else f"{title}\n\n{body}"
 
     envelope: dict[str, Any] = {
-        "schema_version": 1,
         # One job per labelling of one issue: re-labelling after removal is new
         # work, retries of the same delivery are not.
         "idempotency_key": f"github-{repository.get('id', full_name)}-{number}-{(event.get('label') or {}).get('id', cfg['label'])}",
