@@ -3,6 +3,7 @@ defmodule Omashiki.Runtime.AttemptTest do
 
   alias Omashiki.Config
   alias Omashiki.Jobs
+  alias Omashiki.Jobs.Admission
   alias Omashiki.Runtime.AttemptSupervisor
 
   @owner_key {__MODULE__, :owner}
@@ -100,7 +101,7 @@ defmodule Omashiki.Runtime.AttemptTest do
   test "runs independent attempts concurrently", %{token: token} do
     attempts =
       Enum.map(1..2, fn number ->
-        {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("parallel-#{number}"))
+        {:ok, _, job} = Admission.admit_once(token, request("parallel-#{number}"))
         {:ok, attempt} = Jobs.claim(job, "parallel-runner-#{number}")
         attempt
       end)
@@ -134,7 +135,7 @@ defmodule Omashiki.Runtime.AttemptTest do
   test "durable cancellation interrupts the active runtime and preserves cancelled", %{
     token: token
   } do
-    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("cancel-running"))
+    {:ok, _, job} = Admission.admit_once(token, request("cancel-running"))
     {:ok, attempt} = Jobs.claim(job, "cancel-runner")
 
     task =

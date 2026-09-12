@@ -5,7 +5,7 @@ defmodule Omashiki.Jobs.RunnerTest do
 
   alias Omashiki.Config
   alias Omashiki.Jobs
-  alias Omashiki.Jobs.{JobStep, Runner}
+  alias Omashiki.Jobs.{Admission, JobStep, Runner}
   alias Omashiki.Repo
 
   defmodule FakeContainer do
@@ -161,14 +161,14 @@ defmodule Omashiki.Jobs.RunnerTest do
   end
 
   test "docker container finalize without artifact is an error", %{token: token} do
-    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("success"))
+    {:ok, _, job} = Admission.admit_once(token, request("success"))
 
     assert {:error, :artifact_unavailable} =
              Omashiki.Jobs.Runner.DockerContainer.finalize(%{id: "missing-artifact"}, job, [])
   end
 
   test "runs one attempt in order and persists step evidence", %{token: token} do
-    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("success"))
+    {:ok, _, job} = Admission.admit_once(token, request("success"))
     {:ok, attempt} = Jobs.claim(job, "runner-test")
 
     assert {:ok, completed} =
@@ -195,7 +195,7 @@ defmodule Omashiki.Jobs.RunnerTest do
   end
 
   test "assigns contiguous step sequences without pre or post steps", %{token: token} do
-    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("no-command-steps"))
+    {:ok, _, job} = Admission.admit_once(token, request("no-command-steps"))
     {:ok, attempt} = Jobs.claim(job, "runner-test")
 
     assert {:ok, completed} =
@@ -219,7 +219,7 @@ defmodule Omashiki.Jobs.RunnerTest do
   end
 
   test "renews the lease while a harness turn is running", %{token: token} do
-    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("slow-turn"))
+    {:ok, _, job} = Admission.admit_once(token, request("slow-turn"))
     {:ok, attempt} = Jobs.claim(job, "runner-test", lease_ms: 100)
 
     assert {:ok, completed} =
@@ -235,7 +235,7 @@ defmodule Omashiki.Jobs.RunnerTest do
   end
 
   test "runs failure post steps and cleanup after a failed pre-step", %{token: token} do
-    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("failure"))
+    {:ok, _, job} = Admission.admit_once(token, request("failure"))
     {:ok, attempt} = Jobs.claim(job, "runner-test")
 
     assert {:ok, failed} =
@@ -270,7 +270,7 @@ defmodule Omashiki.Jobs.RunnerTest do
   end
 
   test "turn crashes still finalize the attempt and clean the container", %{token: token} do
-    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("crash"))
+    {:ok, _, job} = Admission.admit_once(token, request("crash"))
     {:ok, attempt} = Jobs.claim(job, "runner-test")
 
     assert {:ok, failed} =
@@ -286,7 +286,7 @@ defmodule Omashiki.Jobs.RunnerTest do
   end
 
   test "Docker provision failure still reaches one terminal effect", %{token: token} do
-    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("provision-failure"))
+    {:ok, _, job} = Admission.admit_once(token, request("provision-failure"))
     {:ok, attempt} = Jobs.claim(job, "runner-test")
 
     assert {:ok, failed} =
@@ -298,7 +298,7 @@ defmodule Omashiki.Jobs.RunnerTest do
   end
 
   test "Git finalization failure does not duplicate terminal completion", %{token: token} do
-    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("finalize-failure"))
+    {:ok, _, job} = Admission.admit_once(token, request("finalize-failure"))
     {:ok, attempt} = Jobs.claim(job, "runner-test")
 
     assert {:ok, failed} =
@@ -312,7 +312,7 @@ defmodule Omashiki.Jobs.RunnerTest do
   end
 
   test "failed git attempt does not preserve artifact when finalize fails", %{token: token} do
-    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("failed-git-finalize"))
+    {:ok, _, job} = Admission.admit_once(token, request("failed-git-finalize"))
     {:ok, attempt} = Jobs.claim(job, "runner-test")
 
     assert {:ok, failed} =
@@ -335,7 +335,7 @@ defmodule Omashiki.Jobs.RunnerTest do
   end
 
   test "cleanup failure does not reopen a committed terminal job", %{token: token} do
-    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("cleanup-failure"))
+    {:ok, _, job} = Admission.admit_once(token, request("cleanup-failure"))
     {:ok, attempt} = Jobs.claim(job, "runner-test")
 
     assert {:ok, succeeded} =
