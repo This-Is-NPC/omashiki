@@ -142,12 +142,10 @@ class Sampler(threading.Thread):
     So instead one thread asks the server for `GET /api/v1/jobs?status=running`
     and `?status=provisioning`, each of which is a single consistent query.
 
-    Two honest limitations:
-
-      * an attempt that starts and finishes entirely between two samples is
-        invisible, so the peak is a lower bound. Shrink --sample-interval, or
-        read `[:omashiki, :runtime, :attempt, :complete]` telemetry server-side
-        for the authoritative count.
+    One honest limitation: an attempt that starts and finishes entirely
+    between two samples is invisible, so the peak is a lower bound. Shrink
+    --sample-interval, or read `[:omashiki, :runtime, :attempt, :complete]`
+    telemetry server-side for the authoritative count.
     """
 
     def __init__(self, client: Client, interval: float):
