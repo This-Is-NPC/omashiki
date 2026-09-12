@@ -44,19 +44,13 @@ defmodule OmashikiWeb.RateLimiter do
     key = {scope, identifier, window}
 
     n = :ets.update_counter(@table, key, {2, 1}, {key, 0})
-    gc_expired_windows(scope, identifier, window)
+    maybe_gc(scope, window)
 
     if n > max do
       {:error, :rate_limited}
     else
       {:ok, n}
     end
-  end
-
-  @doc false
-  def size do
-    ensure_table()
-    :ets.info(@table, :size)
   end
 
   @doc """
@@ -99,9 +93,16 @@ defmodule OmashikiWeb.RateLimiter do
     :ok
   end
 
-  defp gc_expired_windows(scope, identifier, window) do
-    :ets.select_delete(@table, [
-      {{{scope, identifier, :"$1"}, :_}, [{:<, :"$1", window}], [true]}
-    ])
+  # One table scan per (scope, window), not per hit. The sentinel is itself
+  # collected when a later window wins the same insert_new race.
+  defp maybe_gc(scope, window) do
+    gc_key = {:gc, scope, window}
+
+    if :ets.insert_new(@table, {gc_key, true}) do
+      :ets.select_delete(@table, [
+        {{{scope, :"$1", :"$2"}, :_}, [{:<, :"$2", window}], [true]},
+        {{{:gc, scope, :"$1"}, :_}, [{:<, :"$1", window}], [true]}
+      ])
+    end
   end
 end

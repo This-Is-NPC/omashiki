@@ -25,6 +25,7 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
 
       assert response.status == 401
       assert Jason.decode!(response.resp_body)["code"] == "invalid_credentials"
+      assert_schema(Jason.decode!(response.resp_body), "Problem", OmashikiWeb.ApiSpec.spec())
     end
 
     @tag :unauthenticated
@@ -46,6 +47,7 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
       payload = Jason.decode!(response.resp_body)
       assert is_binary(payload["data"]["token"])
       assert payload["data"]["name"] == "CLI on test"
+      assert_schema(payload, "TokenResponse", OmashikiWeb.ApiSpec.spec())
     end
 
     test "authenticated rotate requires submit and returns a token", %{conn: conn} do
@@ -101,11 +103,14 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
 
       assert response.status == 429
       assert Jason.decode!(response.resp_body)["code"] == "rate_limited"
+      assert_schema(Jason.decode!(response.resp_body), "Problem", OmashikiWeb.ApiSpec.spec())
     end
 
     @tag :unauthenticated
-    test "issue_token budget is per address and username", %{conn: conn} do
-      _ = user_fixture(%{username: "bob", password: "right-password-1"})
+    test "issue_token budget is per address and account, not typed identifier", %{conn: conn} do
+      user =
+        user_fixture(%{username: "bob", email: "bob@example.com", password: "right-password-1"})
+
       _ = user_fixture(%{username: "ann", password: "right-password-2"})
 
       for _ <- 1..10 do
@@ -116,15 +121,23 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
         )
       end
 
-      response =
+      via_email =
+        post(
+          conn,
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => user.email, "password" => "wrong"})
+        )
+
+      assert via_email.status == 429
+
+      via_ann =
         post(
           conn,
           ~p"/api/v1/sessions/issue_token",
           token_grants(%{"username" => "ann", "password" => "wrong"})
         )
 
-      assert response.status == 401
-      assert Jason.decode!(response.resp_body)["code"] == "invalid_credentials"
+      assert via_ann.status == 401
     end
 
     @tag :unauthenticated
@@ -168,7 +181,7 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
 
       forwarded =
         conn
-        |> Plug.Conn.put_req_header("x-forwarded-for", "9.9.9.9")
+        |> Plug.Conn.put_req_header("x-forwarded-for", "8.8.8.8, 9.9.9.9")
         |> post(
           ~p"/api/v1/sessions/issue_token",
           token_grants(%{"username" => "bob", "password" => "wrong"})
@@ -176,6 +189,16 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
 
       assert forwarded.status == 401
       assert Jason.decode!(forwarded.resp_body)["code"] == "invalid_credentials"
+
+      spoofed =
+        conn
+        |> Plug.Conn.put_req_header("x-forwarded-for", "not-an-ip")
+        |> post(
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+
+      assert spoofed.status == 429
     end
   end
 end

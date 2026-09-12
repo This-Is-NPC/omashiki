@@ -51,7 +51,14 @@ defmodule OmashikiWeb.RateLimiterTest do
     assert {:ok, 1} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
     Process.sleep(5)
     assert {:ok, 1} = RateLimiter.hit("scope", "x", max: 1, per_ms: 1)
-    assert RateLimiter.size() == 1
+    assert bucket_count("scope") == 1
+  end
+
+  test "expired windows for other identifiers are collected" do
+    assert {:ok, 1} = RateLimiter.hit("scope", "old", max: 1, per_ms: 1)
+    Process.sleep(5)
+    assert {:ok, 1} = RateLimiter.hit("scope", "new", max: 1, per_ms: 1)
+    assert bucket_count("scope") == 1
   end
 
   test "concurrent hits share one atomic counter" do
@@ -70,7 +77,7 @@ defmodule OmashikiWeb.RateLimiterTest do
   test "checkin removes a zeroed counter" do
     assert {:ok, 1} = RateLimiter.checkout("conc", "id", 2)
     RateLimiter.checkin("conc", "id")
-    assert RateLimiter.size() == 0
+    assert conc_count() == 0
   end
 
   test "checkin does not drop a remaining checkout" do
@@ -78,5 +85,13 @@ defmodule OmashikiWeb.RateLimiterTest do
     assert {:ok, 2} = RateLimiter.checkout("conc", "id", 2)
     RateLimiter.checkin("conc", "id")
     assert {:ok, 2} = RateLimiter.checkout("conc", "id", 2)
+  end
+
+  defp bucket_count(scope) do
+    :ets.select_count(RateLimiter, [{{{scope, :"$1", :"$2"}, :_}, [], [true]}])
+  end
+
+  defp conc_count do
+    :ets.select_count(RateLimiter, [{{{:conc, :"$1", :"$2"}, :_}, [], [true]}])
   end
 end
