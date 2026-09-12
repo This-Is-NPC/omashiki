@@ -24,4 +24,17 @@ defmodule OmashikiWeb.ErrorJSONTest do
              request_id: nil
            }
   end
+
+  test "undeclared ErrorJSON status raises against the served operation" do
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> Map.put(:method, "GET")
+      |> Map.put(:path_info, ["api", "v1", "jobs"])
+      |> Plug.Conn.put_private(:phoenix_router, OmashikiWeb.Router)
+      |> OpenApiSpex.Plug.PutApiSpec.call(OmashikiWeb.ApiSpec)
+
+    assert_raise ArgumentError, ~r/undeclared problem status 400/, fn ->
+      OmashikiWeb.ErrorJSON.render("400.json", %{conn: conn})
+    end
+  end
 end

@@ -10,19 +10,17 @@ defmodule OmashikiWeb.ErrorJSON do
   def render("404.json", assigns), do: problem(assigns, "not_found")
 
   def render(template, assigns) do
-    status =
-      template
-      |> String.replace_suffix(".json", "")
-      |> String.to_integer()
+    case Integer.parse(String.replace_suffix(template, ".json", "")) do
+      {status, ""} ->
+        problem(assigns, "internal_error",
+          status: status,
+          title: Phoenix.Controller.status_message_from_template(template),
+          detail: Phoenix.Controller.status_message_from_template(template)
+        )
 
-    problem(assigns, "internal_error",
-      status: status,
-      title: Phoenix.Controller.status_message_from_template(template),
-      detail: Phoenix.Controller.status_message_from_template(template)
-    )
-  rescue
-    _ ->
-      problem(assigns, "internal_error")
+      _ ->
+        problem(assigns, "internal_error")
+    end
   end
 
   defp problem(assigns, code, opts \\ []) do
