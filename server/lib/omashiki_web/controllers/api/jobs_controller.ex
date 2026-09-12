@@ -192,7 +192,8 @@ defmodule OmashikiWeb.Api.JobsController do
       id: [in: :path, type: :string, required: true]
     ],
     responses: %{
-      200 => {"Events", "application/json", Schemas.JobEventListResponse}
+      200 => {"Events", "application/json", Schemas.JobEventListResponse},
+      422 => {"Invalid cursor", "application/problem+json", Schemas.Problem}
     }
   )
 

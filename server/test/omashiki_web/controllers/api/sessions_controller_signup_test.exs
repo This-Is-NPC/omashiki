@@ -25,6 +25,7 @@ defmodule OmashikiWeb.Api.SessionsControllerSignupTest do
       assert payload["data"]["user"]["username"] == "first"
       assert is_binary(payload["data"]["user"]["id"])
       assert Omashiki.Accounts.count() == 1
+      assert_schema(payload, "SignupResponse", OmashikiWeb.ApiSpec.spec())
     end
 
     @tag :unauthenticated
@@ -55,6 +56,7 @@ defmodule OmashikiWeb.Api.SessionsControllerSignupTest do
 
       assert response.status == 422
       assert json_response(response, 422)["code"] == "invalid_request"
+      assert_schema(json_response(response, 422), "Problem", OmashikiWeb.ApiSpec.spec())
       assert Omashiki.Accounts.count() == 0
     end
 
@@ -76,6 +78,7 @@ defmodule OmashikiWeb.Api.SessionsControllerSignupTest do
       assert response.status == 409
       payload = Jason.decode!(response.resp_body)
       assert payload["code"] == "signup_closed"
+      assert_schema(payload, "Problem", OmashikiWeb.ApiSpec.spec())
     end
 
     @tag :unauthenticated
@@ -94,6 +97,7 @@ defmodule OmashikiWeb.Api.SessionsControllerSignupTest do
       assert response.status == 422
       payload = Jason.decode!(response.resp_body)
       assert payload["code"] == "invalid_request"
+      assert_schema(payload, "Problem", OmashikiWeb.ApiSpec.spec())
     end
 
     @tag :unauthenticated

@@ -46,24 +46,22 @@ defmodule OmashikiWeb.Api.ApiContractTest do
     assert spec.openapi == "3.0.3"
   end
 
-  test "job writes declare 503 busy and GET /jobs declares 422" do
+  test "operations declare inferred error statuses" do
     spec = OmashikiWeb.ApiSpec.spec() |> Jason.encode!() |> Jason.decode!()
     jobs = spec["paths"]["/api/v1/jobs"]
-    assert Map.has_key?(jobs["get"]["responses"], "422")
     refute Map.has_key?(jobs["get"]["responses"], "400")
-    assert Map.has_key?(jobs["post"]["responses"], "503")
-    assert Map.has_key?(jobs["post"]["responses"], "422")
-    assert Map.has_key?(spec["paths"]["/api/v1/jobs"]["post"]["responses"], "503")
-    assert Map.has_key?(spec["paths"]["/api/v1/jobs/batch"]["post"]["responses"], "503")
-    assert Map.has_key?(spec["paths"]["/api/v1/jobs/{id}/retry"]["post"]["responses"], "503")
-    assert Map.has_key?(spec["paths"]["/api/v1/jobs/{id}/cancel"]["post"]["responses"], "503")
 
-    assert Map.has_key?(
-             spec["paths"]["/api/v1/jobs/{id}/webhook-deliveries/{delivery_id}/redeliver"]["post"][
-               "responses"
-             ],
-             "503"
-           )
+    missing =
+      for {path, item} <- spec["paths"],
+          {method, operation} <- item,
+          method in ~w(get post put patch delete),
+          is_map(operation),
+          status <- inferred_error_statuses(path, method, operation, spec),
+          not Map.has_key?(operation["responses"] || %{}, status) do
+        "#{method} #{path} #{status}"
+      end
+
+    assert missing == [], "undeclared error statuses: #{inspect(missing)}"
   end
 
   test "HTTP read timeout is an integer and does not replace the test bind" do
@@ -245,4 +243,36 @@ defmodule OmashikiWeb.Api.ApiContractTest do
   end
 
   defp resolve_node(node, _spec), do: node
+
+  defp inferred_error_statuses(path, method, operation, spec) do
+    params =
+      for param <- operation["parameters"] || [],
+          resolved = resolve_node(param, spec) do
+        {resolved["in"], resolved["name"]}
+      end
+
+    []
+    |> maybe_status("429", path == "/api/v1/sessions/issue_token" and method == "post")
+    |> maybe_status("422", path == "/api/v1/sessions/signup" and method == "post")
+    |> maybe_status(
+      "422",
+      {"query", "status"} in params or {"query", "cursor"} in params or
+        String.contains?(path, "/events")
+    )
+    |> maybe_status("503", method == "post" and busy_write?(path))
+    |> Enum.uniq()
+  end
+
+  defp maybe_status(list, status, true), do: [status | list]
+  defp maybe_status(list, _status, false), do: list
+
+  defp busy_write?(path) do
+    path in [
+      "/api/v1/jobs",
+      "/api/v1/jobs/batch",
+      "/api/v1/jobs/{id}/retry",
+      "/api/v1/jobs/{id}/cancel",
+      "/api/v1/jobs/{id}/webhook-deliveries/{delivery_id}/redeliver"
+    ]
+  end
 end

@@ -19,7 +19,8 @@ defmodule OmashikiWeb.Api.SessionsController do
     request_body: {"Credentials", "application/json", Schemas.IssueTokenRequest},
     responses: %{
       200 => {"Token", "application/json", Schemas.TokenResponse},
-      401 => {"Unauthorized", "application/problem+json", Schemas.Problem}
+      401 => {"Unauthorized", "application/problem+json", Schemas.Problem},
+      429 => {"Rate limited", "application/problem+json", Schemas.Problem}
     }
   )
 
@@ -40,7 +41,8 @@ defmodule OmashikiWeb.Api.SessionsController do
     request_body: {"Signup", "application/json", Schemas.SignupRequest},
     responses: %{
       201 => {"Created", "application/json", Schemas.SignupResponse},
-      409 => {"Closed", "application/problem+json", Schemas.Problem}
+      409 => {"Closed", "application/problem+json", Schemas.Problem},
+      422 => {"Invalid", "application/problem+json", Schemas.Problem}
     }
   )
 

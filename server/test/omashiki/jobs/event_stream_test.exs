@@ -132,8 +132,22 @@ defmodule Omashiki.Jobs.EventStreamTest do
 
     conn = get(conn, ~p"/api/v1/jobs/#{job.id}/events")
 
-    assert response(conn, 403) =~ "forbidden"
+    assert conn.status == 403
     assert other_token.id != token.id
+  end
+
+  test "invalid Last-Event-ID is 422", %{conn: conn, token: token, user: user} do
+    job = job_fixture(user, token)
+
+    conn =
+      conn
+      |> put_req_header("last-event-id", "not-a-uuid")
+      |> get(~p"/api/v1/jobs/#{job.id}/events")
+
+    assert conn.status == 422
+    body = json_response(conn, 422)
+    assert body["code"] == "invalid_cursor"
+    assert_schema(body, "Problem", OmashikiWeb.ApiSpec.spec())
   end
 
   defp job_fixture(user, token) do

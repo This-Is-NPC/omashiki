@@ -15,7 +15,8 @@ defmodule OmashikiWeb.Api.JobEventsController do
     responses: %{
       200 =>
         {"Event stream", "text/event-stream",
-         %OpenApiSpex.Schema{type: :string, description: "Server-sent events"}}
+         %OpenApiSpex.Schema{type: :string, description: "Server-sent events"}},
+      422 => {"Invalid cursor", "application/problem+json", Schemas.Problem}
     }
   )
 

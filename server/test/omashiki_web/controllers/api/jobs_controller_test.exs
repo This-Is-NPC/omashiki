@@ -403,6 +403,17 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
 
     assert requeued.status == 202
     assert_schema(json_response(requeued, 202), "WebhookDeliveryListResponse", @api_spec)
+
+    listed = get(conn, "/api/v1/jobs/#{job.id}/webhook-deliveries")
+    assert listed.status == 200
+    assert_schema(json_response(listed, 200), "WebhookDeliveryListResponse", @api_spec)
+  end
+
+  test "event history matches JobEventListResponse", %{conn: conn, user: user, token: token} do
+    {job, _attempt} = Omashiki.JobFixtures.job_fixture(user, token, %{status: "queued"})
+    history = get(conn, "/api/v1/jobs/#{job.id}/events/history")
+    assert history.status == 200
+    assert_schema(json_response(history, 200), "JobEventListResponse", @api_spec)
   end
 
   defp collect_ids(conn, cursor, acc) do
