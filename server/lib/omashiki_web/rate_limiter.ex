@@ -2,7 +2,8 @@ defmodule OmashikiWeb.RateLimiter do
   @moduledoc """
   Tiny ETS-based fixed-window rate limiter. Used by
   `Api.SessionsController.issue_token/2` to make brute-forcing the
-  credential exchange endpoint expensive.
+  credential exchange expensive. Only failed exchanges count, so a
+  successful login behind NAT is not locked out by a neighbour's budget.
 
   Not a replacement for Hammer in production deploys that need
   cluster-wide coordination — this is intentionally local + dependency-free.

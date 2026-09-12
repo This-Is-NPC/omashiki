@@ -20,6 +20,7 @@ defmodule OmashikiWeb.Api.SessionsController do
     responses: %{
       200 => {"Token", "application/json", Schemas.TokenResponse},
       401 => {"Unauthorized", "application/problem+json", Schemas.Problem},
+      422 => {"Invalid", "application/problem+json", Schemas.Problem},
       429 => {"Rate limited", "application/problem+json", Schemas.Problem}
     }
   )
@@ -27,11 +28,19 @@ defmodule OmashikiWeb.Api.SessionsController do
   def issue_token(conn, _params) do
     attrs = Maps.stringify_keys(conn.body_params)
 
-    with :ok <- check_rate(conn),
-         {:ok, user} <- authenticate(attrs),
+    with {:ok, user} <- authenticate(attrs),
          {:ok, token, plaintext} <- ApiTokens.create_for_user(user, token_attrs(attrs, "CLI")) do
       ApiConn.audit(conn, token, "issue")
       json(conn, %{data: token_json(token, plaintext)})
+    else
+      {:error, :invalid_credentials} = error ->
+        case record_failed_issue(conn) do
+          :ok -> error
+          {:error, :rate_limited} -> {:error, :rate_limited}
+        end
+
+      other ->
+        other
     end
   end
 
@@ -80,7 +89,9 @@ defmodule OmashikiWeb.Api.SessionsController do
     summary: "Issue a new token and revoke the current one",
     security: [%{"bearer" => ["submit"]}],
     responses: %{
-      200 => {"Token", "application/json", Schemas.TokenResponse}
+      200 => {"Token", "application/json", Schemas.TokenResponse},
+      404 => {"Missing", "application/problem+json", Schemas.Problem},
+      422 => {"Invalid", "application/problem+json", Schemas.Problem}
     }
   )
 
@@ -131,7 +142,7 @@ defmodule OmashikiWeb.Api.SessionsController do
     }
   end
 
-  defp check_rate(conn) do
+  defp record_failed_issue(conn) do
     case RateLimiter.hit("issue_token", ApiConn.client_ip_or_unknown(conn),
            max: @rate_limit_max,
            per_ms: @rate_limit_per_ms

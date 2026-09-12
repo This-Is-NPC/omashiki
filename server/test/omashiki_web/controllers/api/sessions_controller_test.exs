@@ -107,6 +107,51 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
     end
 
     @tag :unauthenticated
+    test "successful exchanges do not consume the failure budget", %{conn: conn} do
+      _ = user_fixture(%{username: "bob", password: "right-password-1"})
+      grants = token_grants(%{"username" => "bob", "password" => "right-password-1"})
+
+      for _ <- 1..10 do
+        response = post(conn, ~p"/api/v1/sessions/issue_token", grants)
+        assert response.status == 200
+      end
+
+      still_ok = post(conn, ~p"/api/v1/sessions/issue_token", grants)
+      assert still_ok.status == 200
+    end
+
+    @tag :unauthenticated
+    test "valid credentials succeed after the failure budget is spent", %{conn: conn} do
+      _ = user_fixture(%{username: "bob", password: "right-password-1"})
+
+      for _ <- 1..10 do
+        post(
+          conn,
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+      end
+
+      blocked =
+        post(
+          conn,
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "wrong"})
+        )
+
+      assert blocked.status == 429
+
+      recovered =
+        post(
+          conn,
+          ~p"/api/v1/sessions/issue_token",
+          token_grants(%{"username" => "bob", "password" => "right-password-1"})
+        )
+
+      assert recovered.status == 200
+    end
+
+    @tag :unauthenticated
     test "issue_token budget is per address, not typed identifier", %{conn: conn} do
       _ = user_fixture(%{username: "bob", password: "right-password-1"})
       _ = user_fixture(%{username: "ann", password: "right-password-2"})
