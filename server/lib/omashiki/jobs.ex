@@ -667,9 +667,15 @@ defmodule Omashiki.Jobs do
   defp completion_job(result), do: result
 
   defp transition_locked(job_id, status, attrs) do
-    if get_attr(attrs, :retry) == true do
-      lock_token_before_job!(job_id)
-    end
+    locked_token =
+      if get_attr(attrs, :retry) == true do
+        lock_token_before_job!(job_id)
+      end
+
+    attrs =
+      if match?(%Omashiki.ApiTokens.Token{}, locked_token),
+        do: Map.put(attrs, :locked_token, locked_token),
+        else: attrs
 
     case locked_job(job_id) do
       nil ->
@@ -718,10 +724,13 @@ defmodule Omashiki.Jobs do
     complete_locked(job, attempt, "succeeded", attrs, now())
   end
 
-  defp apply_transition(%Job{} = job, "queued", %{retry: true}) do
-    if is_binary(job.api_token_id) do
-      # `transition_locked/3` already `FOR UPDATE`s this token before the job row.
-      Admission.reject_over_capacity!(Repo.get!(Omashiki.ApiTokens.Token, job.api_token_id), 1)
+  defp apply_transition(%Job{} = job, "queued", %{retry: true} = attrs) do
+    case Map.get(attrs, :locked_token) do
+      %Omashiki.ApiTokens.Token{} = token ->
+        Admission.reject_over_capacity!(token, 1)
+
+      _ ->
+        :ok
     end
 
     now = now()
