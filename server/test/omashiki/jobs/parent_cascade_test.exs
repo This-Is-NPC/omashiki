@@ -29,7 +29,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
 
   test "A and B must both succeed before C queues (A then B)", %{token: token} do
     assert {:ok, [a, b, c]} =
-             Jobs.Admission.admit_batch(token, diamond_batch())
+             admit_batch(token, diamond_batch())
 
     assert a.status == "queued"
     assert b.status == "queued"
@@ -44,7 +44,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
 
   test "A and B must both succeed before C queues (B then A)", %{token: token} do
     assert {:ok, [a, b, c]} =
-             Jobs.Admission.admit_batch(token, diamond_batch())
+             admit_batch(token, diamond_batch())
 
     succeed_job!(b)
     assert Repo.get!(Job, c.id).status == "blocked"
@@ -62,13 +62,13 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
       ]
     }
 
-    assert {:error, {:validation, errors}} = Jobs.Admission.admit_batch(token, batch)
+    assert {:error, {:validation, errors}} = admit_batch(token, batch)
     assert Enum.any?(errors, &(&1.field == "jobs.depends_on" and &1.code == "cycle"))
   end
 
   test "failed dependency with block edge keeps child blocked", %{token: token} do
     assert {:ok, [a, c]} =
-             Jobs.Admission.admit_batch(
+             admit_batch(
                token,
                %{
                  "correlation_id" => "block-edge",
@@ -86,7 +86,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
 
   test "failed dependency with cancel edge cancels child", %{token: token} do
     assert {:ok, [a, c]} =
-             Jobs.Admission.admit_batch(
+             admit_batch(
                token,
                %{
                  "correlation_id" => "cancel-edge",
@@ -107,7 +107,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
 
   test "failed dependency with proceed edge unblocks when remaining deps succeed", %{token: token} do
     assert {:ok, [a, b, c]} =
-             Jobs.Admission.admit_batch(
+             admit_batch(
                token,
                %{
                  "correlation_id" => "proceed-edge",
@@ -144,7 +144,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
     parent_sha = commit_file!(repo_path, "parent.txt", "parent\n")
 
     assert {:ok, parent} =
-             Jobs.Admission.admit(
+             admit(
                token,
                single_job("parent-root", %{"branch" => "feat-parent"})
              )
@@ -152,7 +152,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
     succeed_job!(parent, head_sha: parent_sha)
 
     assert {:ok, child} =
-             Jobs.Admission.admit(
+             admit(
                token,
                single_job("child-root", %{"branch" => "feat-child"}, [
                  %{"id" => parent.id}
@@ -177,7 +177,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
     parent_sha = commit_file!(repo_path, "parent-default.txt", "parent\n")
 
     assert {:ok, parent} =
-             Jobs.Admission.admit(
+             admit(
                token,
                single_job("parent-default", %{"branch" => "feat-parent-default"})
              )
@@ -185,7 +185,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
     succeed_job!(parent, head_sha: parent_sha)
 
     assert {:ok, child} =
-             Jobs.Admission.admit(
+             admit(
                token,
                single_job("child-default", %{"branch" => "feat-child-default"}, [
                  %{"id" => parent.id}
@@ -216,7 +216,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
     sha_b = commit_file!(repo_path, "b-default.txt", "b\n")
 
     assert {:ok, [a, b, c]} =
-             Jobs.Admission.admit_batch(
+             admit_batch(
                token,
                %{
                  "correlation_id" => "default-base-proceed",
@@ -248,7 +248,7 @@ defmodule Omashiki.Jobs.ParentCascadeTest do
 
   test "a cancelled parent cascade-cancels blocked children with cancel edge", %{token: token} do
     assert {:ok, [parent, child]} =
-             Jobs.Admission.admit_batch(
+             admit_batch(
                token,
                %{
                  "correlation_id" => "parent-cancel",

@@ -89,7 +89,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     token: token,
     user: user
   } do
-    {:ok, job} = Omashiki.Jobs.Admission.admit(token, request())
+    {:ok, job} = admit(token, request())
     {_other, plaintext} = api_token_fixture(user)
 
     conn = json_conn() |> Plug.Conn.put_req_header("authorization", "Bearer #{plaintext}")
@@ -102,7 +102,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
   end
 
   test "the local operator can inspect jobs from every owned token", %{user: user, token: token} do
-    {:ok, job} = Omashiki.Jobs.Admission.admit(token, request())
+    {:ok, job} = admit(token, request())
     {_other, _plaintext} = api_token_fixture(user)
 
     conn =
@@ -140,7 +140,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     token: token,
     token_plaintext: plaintext
   } do
-    {:ok, job} = Omashiki.Jobs.Admission.admit(token, request())
+    {:ok, job} = admit(token, request())
 
     cancelled = post(conn, "/api/v1/jobs/#{job.id}/cancel", %{})
     repeated = post(build_conn_with_auth(plaintext), "/api/v1/jobs/#{job.id}/cancel", %{})
@@ -217,12 +217,12 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
       })
 
     {:ok, cancelled} =
-      Omashiki.Jobs.Admission.admit(token, request(%{"idempotency_key" => "retry-me"}))
+      admit(token, request(%{"idempotency_key" => "retry-me"}))
 
     {:ok, _} = Omashiki.Jobs.cancel(cancelled)
 
     {:ok, _active} =
-      Omashiki.Jobs.Admission.admit(token, request(%{"idempotency_key" => "held"}))
+      admit(token, request(%{"idempotency_key" => "held"}))
 
     conn = json_conn() |> Plug.Conn.put_req_header("authorization", "Bearer #{plaintext}")
     retried = post(conn, "/api/v1/jobs/#{cancelled.id}/retry", %{})
@@ -320,14 +320,14 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
   end
 
   test "result without wait is 409 while the job is running", %{conn: conn, token: token} do
-    {:ok, job} = Omashiki.Jobs.Admission.admit(token, request())
+    {:ok, job} = admit(token, request())
     response = get(conn, "/api/v1/jobs/#{job.id}/result")
     assert response.status == 409
     assert json_response(response, 409)["code"] == "result_not_ready"
   end
 
   test "result wait times out with 202", %{conn: conn, token: token} do
-    {:ok, job} = Omashiki.Jobs.Admission.admit(token, request())
+    {:ok, job} = admit(token, request())
     response = get(conn, "/api/v1/jobs/#{job.id}/result?wait=1")
     assert response.status == 202
     assert get_resp_header(response, "retry-after") != []

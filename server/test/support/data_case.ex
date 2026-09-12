@@ -62,6 +62,20 @@ defmodule Omashiki.DataCase do
     :ok
   end
 
+  def admit(token, attrs) do
+    case Omashiki.Jobs.Admission.admit_once(token, attrs) do
+      {:ok, _origin, job} -> {:ok, job}
+      other -> other
+    end
+  end
+
+  def admit_batch(token, attrs) do
+    case Omashiki.Jobs.Admission.admit_batch_once(token, attrs) do
+      {:ok, tagged} -> {:ok, Enum.map(tagged, fn {_origin, job} -> job end)}
+      other -> other
+    end
+  end
+
   @doc """
   A helper that transforms changeset errors into a map of messages.
 

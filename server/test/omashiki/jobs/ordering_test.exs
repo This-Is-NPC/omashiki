@@ -56,7 +56,7 @@ defmodule Omashiki.Jobs.OrderingTest do
 
   test "success queues direct children once in priority/FIFO order", %{token: token} do
     assert {:ok, [root, first, second, third]} =
-             Jobs.Admission.admit_batch(
+             admit_batch(
                token,
                batch_request([
                  {"root", [], 0},
@@ -116,7 +116,7 @@ defmodule Omashiki.Jobs.OrderingTest do
 
   test "failure and cancellation cascade-cancel blocked descendants", %{token: token} do
     assert {:ok, [root, child]} =
-             Jobs.Admission.admit_batch(
+             admit_batch(
                token,
                batch_request([{"root", [], 0}, {"child", [%{"ref" => "root"}], 0}])
              )
@@ -134,7 +134,7 @@ defmodule Omashiki.Jobs.OrderingTest do
     assert Repo.aggregate(Oban.Job, :count, :id) == 1
 
     assert {:ok, [failed_root, failed_child]} =
-             Jobs.Admission.admit_batch(
+             admit_batch(
                token,
                batch_request([
                  {"failed-root", [], 0},
@@ -155,7 +155,7 @@ defmodule Omashiki.Jobs.OrderingTest do
 
   test "retry success does not re-queue cascade-cancelled children", %{token: token} do
     assert {:ok, [root, child]} =
-             Jobs.Admission.admit_batch(
+             admit_batch(
                token,
                batch_request([{"root", [], 0}, {"child", [%{"ref" => "root"}], 0}])
              )
@@ -181,7 +181,7 @@ defmodule Omashiki.Jobs.OrderingTest do
 
   test "concurrent parent success has one unlock and one child dispatch", %{token: token} do
     assert {:ok, [root, child]} =
-             Jobs.Admission.admit_batch(
+             admit_batch(
                token,
                batch_request([{"root", [], 0}, {"child", [%{"ref" => "root"}], 0}])
              )
@@ -207,7 +207,7 @@ defmodule Omashiki.Jobs.OrderingTest do
   end
 
   test "dispatch intent survives an Oban process restart", %{token: token} do
-    assert {:ok, job} = Jobs.Admission.admit(token, single_request())
+    assert {:ok, job} = admit(token, single_request())
     dispatch = Repo.one!(from(j in Oban.Job, where: j.worker == "Omashiki.Jobs.DispatchWorker"))
 
     assert :ok = Supervisor.terminate_child(Omashiki.Supervisor, Oban)

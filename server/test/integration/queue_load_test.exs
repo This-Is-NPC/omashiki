@@ -65,7 +65,7 @@ defmodule Omashiki.Integration.QueueLoadTest do
       |> Enum.map(&request/1)
       |> Enum.chunk_every(Admission.max_batch_size())
       |> Enum.flat_map(fn requests ->
-        assert {:ok, admitted} = Admission.admit_batch(token, batch(requests))
+        assert {:ok, admitted} = admit_batch(token, batch(requests))
         admitted
       end)
 

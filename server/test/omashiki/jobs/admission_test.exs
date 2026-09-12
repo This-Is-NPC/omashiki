@@ -116,7 +116,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
     :ok = Config.load_map!(configured, path: Path.join(root, "omashiki.toml"))
 
-    assert {:ok, job} = Admission.admit(token, single_request())
+    assert {:ok, job} = admit(token, single_request())
 
     assert [%{"name" => "ana-bot", "kind" => "github-app", "app_id" => "123456"} = public] =
              job.admitted_environment["preset"]["identities"]
@@ -128,7 +128,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
   test "rejects git sink jobs without branch or title", %{token: token} do
     assert {:error, :task_branch_required} =
-             Admission.admit(
+             admit(
                token,
                Map.put(single_request(), "payload", %{"instruction" => "run"})
              )
@@ -138,7 +138,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
     payload = %{"instruction" => "run", "title" => "Hello World"}
 
     assert {:ok, job} =
-             Admission.admit(
+             admit(
                token,
                single_request(%{"payload" => payload, "idempotency_key" => "title-only"})
              )
@@ -151,13 +151,13 @@ defmodule Omashiki.Jobs.AdmissionTest do
   test "an admitted job is announced to subscribers", %{token: token} do
     Phoenix.PubSub.subscribe(Omashiki.PubSub, "jobs")
 
-    assert {:ok, job} = Admission.admit(token, single_request())
+    assert {:ok, job} = admit(token, single_request())
     assert_receive {:job_updated, id}
     assert id == job.id
   end
 
   test "admits a root job with an immutable redacted snapshot", %{token: token} do
-    assert {:ok, job} = Admission.admit(token, single_request())
+    assert {:ok, job} = admit(token, single_request())
     assert job.status == "queued"
     assert job.payload == %{"instruction" => "run", "branch" => "feat-test"}
     assert job.payload_hash == sha256(Jason.encode!(job.payload))
@@ -226,13 +226,13 @@ defmodule Omashiki.Jobs.AdmissionTest do
              )
 
     refute Rollout.admission_open?()
-    assert {:error, :admission_paused} = Admission.admit(token, single_request())
-    assert {:error, :admission_paused} = Admission.admit_batch(token, batch_request())
+    assert {:error, :admission_paused} = admit(token, single_request())
+    assert {:error, :admission_paused} = admit_batch(token, batch_request())
     assert Repo.aggregate(Job, :count, :id) == 0
 
     set_fleet(0)
     assert eventually(fn -> Rollout.admission_open?() end)
-    assert {:ok, %Job{}} = Admission.admit(token, single_request())
+    assert {:ok, %Job{}} = admit(token, single_request())
   end
 
   # The digest is captured so a reload cannot move the ground under an admitted
@@ -241,7 +241,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
   # model above all, since swapping it is the operator gesture this exists for.
   test "the model a job was admitted with survives a hot swap",
        %{token: token, load_config: load_config} do
-    assert {:ok, job} = Admission.admit(token, single_request())
+    assert {:ok, job} = admit(token, single_request())
     assert [%{"name" => "secret", "model" => "test"}] = job.admitted_environment["credentials"]
 
     load_config.("swapped-after-admission", "omashiki/agent:swapped")
@@ -261,7 +261,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
     # Newly admitted work does get the swap, with no restart in between.
     assert {:ok, next} =
-             Admission.admit(token, single_request(%{"idempotency_key" => "request-2"}))
+             admit(token, single_request(%{"idempotency_key" => "request-2"}))
 
     assert [%{"model" => "swapped-after-admission"}] = next.admitted_environment["credentials"]
     assert next.admitted_environment["runtime"]["image"] == "omashiki/agent:swapped"
@@ -290,7 +290,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
   test "rejects oversized submissions without writes", %{token: token} do
     assert {:error, :unknown_repository} =
-             Admission.admit(token, Map.put(single_request(), "repo", "missing"))
+             admit(token, Map.put(single_request(), "repo", "missing"))
 
     oversized = %{
       "instruction" => "run",
@@ -300,7 +300,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
     }
 
     assert {:error, {:validation, errors}} =
-             Admission.admit(token, Map.put(single_request(), "payload", oversized))
+             admit(token, Map.put(single_request(), "payload", oversized))
 
     assert %{field: "payload", code: "too_large"} in errors
     assert Repo.aggregate(Job, :count, :id) == 0
@@ -309,13 +309,13 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
   test "rejects single jobs with empty depends_on objects without writes", %{token: token} do
     assert {:error, {:validation, errors}} =
-             Admission.admit(token, Map.put(single_request(), "depends_on", [%{}]))
+             admit(token, Map.put(single_request(), "depends_on", [%{}]))
 
     assert %{field: "depends_on", code: "id_or_ref_required"} in errors
     assert Repo.aggregate(Job, :count, :id) == 0
 
     assert {:error, {:validation, on_failure_errors}} =
-             Admission.admit(
+             admit(
                token,
                Map.put(
                  single_request(%{"idempotency_key" => "depends-on-failure-only"}),
@@ -332,7 +332,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
   test "accepts exactly 1 MiB of encoded payload and rejects the next byte", %{token: token} do
     exact = %{"instruction" => String.duplicate("x", 128), "branch" => "feat-exact"}
-    assert {:ok, job} = Admission.admit(token, Map.put(single_request(), "payload", exact))
+    assert {:ok, job} = admit(token, Map.put(single_request(), "payload", exact))
     assert job.payload == exact
 
     oversized = %{
@@ -340,7 +340,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
     }
 
     assert {:error, {:validation, errors}} =
-             Admission.admit(token, Map.put(single_request("next"), "payload", oversized))
+             admit(token, Map.put(single_request("next"), "payload", oversized))
 
     assert %{field: "payload", code: "too_large"} in errors
   end
@@ -350,7 +350,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
       set: [revoked_at: DateTime.utc_now(:microsecond)]
     )
 
-    assert {:error, :unauthorized} = Admission.admit(token, single_request())
+    assert {:error, :unauthorized} = admit(token, single_request())
   end
 
   test "duplicate idempotency returns the original without side effects", %{token: token} do
@@ -368,12 +368,12 @@ defmodule Omashiki.Jobs.AdmissionTest do
     user = Repo.get!(Omashiki.Accounts.User, token.user_id)
     {other_token, _plaintext} = api_token_fixture(user)
 
-    assert {:ok, _original} = Admission.admit(token, single_request())
-    assert {:error, :idempotency_conflict} = Admission.admit(other_token, single_request())
+    assert {:ok, _original} = admit(token, single_request())
+    assert {:error, :idempotency_conflict} = admit(other_token, single_request())
   end
 
   test "admits a batch atomically and queues only roots", %{token: token} do
-    assert {:ok, [root, child]} = Admission.admit_batch(token, batch_request())
+    assert {:ok, [root, child]} = admit_batch(token, batch_request())
     assert root.status == "queued"
     assert child.status == "blocked"
     assert root.correlation_id == child.correlation_id
@@ -387,7 +387,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
 
   test "batch validation and registry failures write nothing", %{token: token} do
     invalid = Map.put(batch_request(), "jobs", [batch_job("child", [%{"ref" => "unknown"}])])
-    assert {:error, {:validation, errors}} = Admission.admit_batch(token, invalid)
+    assert {:error, {:validation, errors}} = admit_batch(token, invalid)
     assert %{code: "unknown_ref"} = Enum.find(errors, &(&1.code == "unknown_ref"))
 
     assert Repo.aggregate(Job, :count, :id) == 0
@@ -401,7 +401,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
         batch_job("b", [%{"ref" => "a"}])
       ])
 
-    assert {:error, {:validation, errors}} = Admission.admit_batch(token, cyclic)
+    assert {:error, {:validation, errors}} = admit_batch(token, cyclic)
     assert %{code: "cycle"} = Enum.find(errors, &(&1.code == "cycle"))
     assert Repo.aggregate(Job, :count, :id) == 0
     assert Repo.aggregate(Oban.Job, :count, :id) == 0
@@ -410,7 +410,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
   test "concurrent duplicate submissions create one job, event, and oban row", %{token: token} do
     results =
       1..2
-      |> Task.async_stream(fn _ -> Admission.admit(token, single_request()) end,
+      |> Task.async_stream(fn _ -> admit(token, single_request()) end,
         max_concurrency: 2,
         timeout: 10_000
       )
@@ -429,7 +429,7 @@ defmodule Omashiki.Jobs.AdmissionTest do
       1..2
       |> Task.async_stream(
         fn n ->
-          Admission.admit(token, single_request(%{"idempotency_key" => "limit-#{n}"}))
+          admit(token, single_request(%{"idempotency_key" => "limit-#{n}"}))
         end,
         max_concurrency: 2,
         timeout: 10_000

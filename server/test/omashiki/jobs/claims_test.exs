@@ -24,7 +24,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   end
 
   test "concurrent claims fence one active attempt", %{token: token} do
-    {:ok, job} = Jobs.Admission.admit(token, request("fenced"))
+    {:ok, job} = admit(token, request("fenced"))
 
     results =
       Task.async_stream(1..2, fn n -> Jobs.claim(job, "runner-#{n}") end, max_concurrency: 2)
@@ -52,7 +52,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   # A worker finishes jobs through `complete`; without this event a finished
   # job would stay "running" on the operator screens until their next resync.
   test "completing an attempt is announced to subscribers", %{token: token} do
-    {:ok, job} = Jobs.Admission.admit(token, request("announced"))
+    {:ok, job} = admit(token, request("announced"))
     {:ok, attempt} = Jobs.claim(job, "runner-1")
     Phoenix.PubSub.subscribe(Omashiki.PubSub, "jobs")
 
@@ -72,7 +72,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     # has no budget and claims nothing, so the claim below would fail for a
     # reason that has nothing to do with what this test asserts.
     assert {:ok, _} = Jobs.sync_capacity()
-    {:ok, job} = Jobs.Admission.admit(token, request("declared-node"))
+    {:ok, job} = admit(token, request("declared-node"))
 
     assert {:ok, attempt} = Jobs.claim(job, "oban:1")
     assert attempt.machine_id == "builder-01"
@@ -101,14 +101,14 @@ defmodule Omashiki.Jobs.ClaimsTest do
     load_config!(root, %{})
     assert {:ok, _} = Jobs.sync_capacity()
     refute Enum.any?(Config.nodes(), &(&1.name == "builder-01"))
-    {:ok, job} = Jobs.Admission.admit(token, request("implicit-node"))
+    {:ok, job} = admit(token, request("implicit-node"))
 
     assert {:ok, attempt} = Jobs.claim(job, "oban:2")
     assert attempt.machine_id == "implicit-claim-host"
   end
 
   test "worker crash before claim leaves the job queued without capacity", %{token: token} do
-    {:ok, job} = Jobs.Admission.admit(token, request("crash-before-claim"))
+    {:ok, job} = admit(token, request("crash-before-claim"))
     parent = self()
 
     {pid, ref} =
@@ -124,7 +124,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   end
 
   test "worker crash during provisioning is recovered once", %{token: token} do
-    {:ok, job} = Jobs.Admission.admit(token, request("crash-provisioning"))
+    {:ok, job} = admit(token, request("crash-provisioning"))
     parent = self()
 
     {pid, ref} =
@@ -153,7 +153,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   end
 
   test "worker crash during execution is recovered once", %{token: token} do
-    {:ok, job} = Jobs.Admission.admit(token, request("crash-execution"))
+    {:ok, job} = admit(token, request("crash-execution"))
     parent = self()
 
     {pid, ref} =
@@ -182,7 +182,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   end
 
   test "heartbeat and running transition reject a stale fencing token", %{token: token} do
-    {:ok, job} = Jobs.Admission.admit(token, request("heartbeat"))
+    {:ok, job} = admit(token, request("heartbeat"))
     {:ok, attempt} = Jobs.claim(job, "heartbeat-runner")
 
     assert {:error, :stale_lease} = Jobs.heartbeat(attempt, "wrong-token")
@@ -195,7 +195,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   test "global capacity admits exactly eight concurrent containers", %{token: token} do
     jobs =
       Enum.map(1..9, fn n ->
-        {:ok, job} = Jobs.Admission.admit(token, request("capacity-#{n}"))
+        {:ok, job} = admit(token, request("capacity-#{n}"))
         job
       end)
 
@@ -235,7 +235,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
 
     jobs =
       Enum.map(1..13, fn n ->
-        {:ok, job} = Jobs.Admission.admit(token, request("raised-#{n}"))
+        {:ok, job} = admit(token, request("raised-#{n}"))
         job
       end)
 
@@ -273,7 +273,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
 
     attempts =
       Enum.map(1..3, fn n ->
-        {:ok, job} = Jobs.Admission.admit(token, request("clamp-#{n}"))
+        {:ok, job} = admit(token, request("clamp-#{n}"))
         {:ok, attempt} = Jobs.claim(job, "clamp-runner-#{n}")
         attempt
       end)
@@ -306,22 +306,22 @@ defmodule Omashiki.Jobs.ClaimsTest do
   test "cancellation is idempotent in blocked queued provisioning and running states", %{
     token: token
   } do
-    {:ok, [parent, blocked]} = Jobs.Admission.admit_batch(token, batch_request())
+    {:ok, [parent, blocked]} = admit_batch(token, batch_request())
     assert {:ok, _} = Jobs.cancel(blocked)
     assert {:ok, same_blocked} = Jobs.cancel(blocked)
     assert same_blocked.status == "cancelled"
 
-    {:ok, queued} = Jobs.Admission.admit(token, request("queued-cancel"))
+    {:ok, queued} = admit(token, request("queued-cancel"))
     assert {:ok, _} = Jobs.cancel(queued)
     assert {:ok, _} = Jobs.cancel(queued)
 
-    {:ok, provisioning} = Jobs.Admission.admit(token, request("provisioning-cancel"))
+    {:ok, provisioning} = admit(token, request("provisioning-cancel"))
     {:ok, provisioning_attempt} = Jobs.claim(provisioning, "provisioning-runner")
     assert {:ok, _} = Jobs.cancel(provisioning)
     assert {:ok, _} = Jobs.cancel(provisioning)
     assert provisioning_attempt.status == "provisioning"
 
-    {:ok, running} = Jobs.Admission.admit(token, request("running-cancel"))
+    {:ok, running} = admit(token, request("running-cancel"))
     {:ok, running_attempt} = Jobs.claim(running, "running-runner")
     assert {:ok, _} = Jobs.mark_running(running_attempt, running_attempt.lease_token)
     assert {:ok, _} = Jobs.cancel(running)
@@ -340,7 +340,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   end
 
   test "retry preserves the job and numbers attempts after cancellation", %{token: token} do
-    {:ok, job} = Jobs.Admission.admit(token, request("retry-number"))
+    {:ok, job} = admit(token, request("retry-number"))
     assert {:ok, _} = Jobs.cancel(job)
     assert {:ok, retried} = Jobs.retry(job)
     assert retried.id == job.id
@@ -354,7 +354,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   end
 
   test "stale recovery is deterministic after a worker exits after claim", %{token: token} do
-    {:ok, job} = Jobs.Admission.admit(token, request("stale-recovery"))
+    {:ok, job} = admit(token, request("stale-recovery"))
 
     task =
       Task.async(fn ->
@@ -377,7 +377,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   end
 
   test "claiming never reclaims an expired attempt inline", %{token: token} do
-    {:ok, stale_job} = Jobs.Admission.admit(token, request("stale-holder"))
+    {:ok, stale_job} = admit(token, request("stale-holder"))
     {:ok, stale_attempt} = Jobs.claim(stale_job, "stale-runner", lease_ms: 60_000)
 
     expired_at = DateTime.add(DateTime.utc_now(:microsecond), -1, :second)
@@ -387,7 +387,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
         set: [lease_expires_at: expired_at]
       )
 
-    {:ok, fresh_job} = Jobs.Admission.admit(token, request("fresh-claimer"))
+    {:ok, fresh_job} = admit(token, request("fresh-claimer"))
     assert {:ok, _fresh_attempt} = Jobs.claim(fresh_job, "fresh-runner")
 
     # `Jobs.Recovery` is the sole owner of stale reclamation: the claim above
@@ -406,7 +406,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   end
 
   test "repeated terminal completion has one effect", %{token: token} do
-    {:ok, job} = Jobs.Admission.admit(token, request("terminal-race"))
+    {:ok, job} = admit(token, request("terminal-race"))
     {:ok, attempt} = Jobs.claim(job, "terminal-runner")
 
     results =
@@ -429,7 +429,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   end
 
   test "a second terminal outcome is a no-op for the same attempt", %{token: token} do
-    {:ok, job} = Jobs.Admission.admit(token, request("terminal-conflict"))
+    {:ok, job} = admit(token, request("terminal-conflict"))
     {:ok, attempt} = Jobs.claim(job, "terminal-conflict-runner")
 
     assert {:ok, %JobAttempt{status: "failed"}} =
@@ -452,7 +452,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   end
 
   test "terminal persistence faults roll back the whole projection", %{token: token} do
-    {:ok, job} = Jobs.Admission.admit(token, request("terminal-fault"))
+    {:ok, job} = admit(token, request("terminal-fault"))
     {:ok, attempt} = Jobs.claim(job, "terminal-fault-runner")
 
     assert {:error, {:persistence, %Ecto.Changeset{}}} =
@@ -473,7 +473,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   end
 
   test "job events carry ordered identity and sanitized terminal attributes", %{token: token} do
-    {:ok, job} = Jobs.Admission.admit(token, request("event-shape"))
+    {:ok, job} = admit(token, request("event-shape"))
     {:ok, attempt} = Jobs.claim(job, "event-shape-runner")
 
     assert {:ok, _} = Jobs.complete(attempt, attempt.lease_token, :succeeded, success_attrs())
@@ -499,7 +499,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
   end
 
   test "a succeeded job is irreversible and cannot create another attempt", %{token: token} do
-    {:ok, job} = Jobs.Admission.admit(token, request("irreversible"))
+    {:ok, job} = admit(token, request("irreversible"))
     {:ok, attempt} = Jobs.claim(job, "irreversible-runner")
 
     assert {:ok, %JobAttempt{status: "succeeded"}} =
@@ -511,7 +511,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
 
   describe "orphaned dispatch recovery" do
     test "a discarded dispatch cancels both the job row and its queued attempt", %{token: token} do
-      {:ok, job} = Jobs.Admission.admit(token, request("orphan-discarded"))
+      {:ok, job} = admit(token, request("orphan-discarded"))
 
       # The premise this sweep is built on: admission leaves an attempt behind.
       assert %JobAttempt{number: 1, status: "queued"} = current_attempt(job)
@@ -562,7 +562,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     end
 
     test "the sweep is idempotent and releases no capacity it never held", %{token: token} do
-      {:ok, job} = Jobs.Admission.admit(token, request("orphan-idempotent"))
+      {:ok, job} = admit(token, request("orphan-idempotent"))
       discard_dispatch!(job.id)
 
       assert {:ok, 1} = Jobs.recover_orphaned_dispatches(past_grace())
@@ -573,7 +573,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     end
 
     test "a job whose dispatch was pruned away entirely is recovered", %{token: token} do
-      {:ok, job} = Jobs.Admission.admit(token, request("orphan-pruned"))
+      {:ok, job} = admit(token, request("orphan-pruned"))
       {1, _} = Repo.delete_all(dispatch_query(job.id))
 
       assert {:ok, 1} = Jobs.recover_orphaned_dispatches(past_grace())
@@ -583,7 +583,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
 
     for state <- ~w(available scheduled retryable executing) do
       test "a dispatch still #{state} is left alone", %{token: token} do
-        {:ok, job} = Jobs.Admission.admit(token, request("orphan-live-#{unquote(state)}"))
+        {:ok, job} = admit(token, request("orphan-live-#{unquote(state)}"))
         set_dispatch_state!(job.id, unquote(state))
 
         assert {:ok, 0} = Jobs.recover_orphaned_dispatches(past_grace())
@@ -593,7 +593,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     end
 
     test "a freshly admitted job is protected by the grace period", %{token: token} do
-      {:ok, job} = Jobs.Admission.admit(token, request("orphan-grace"))
+      {:ok, job} = admit(token, request("orphan-grace"))
       discard_dispatch!(job.id)
 
       # Inside the grace window nothing is touched, even with no live dispatch.
@@ -605,7 +605,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     end
 
     test "a claimed job is never swept, even with its dispatch discarded", %{token: token} do
-      {:ok, job} = Jobs.Admission.admit(token, request("orphan-claimed"))
+      {:ok, job} = admit(token, request("orphan-claimed"))
       {:ok, _attempt} = Jobs.claim(job, "orphan-runner")
       discard_dispatch!(job.id)
 
@@ -618,7 +618,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     end
 
     test "one Recovery tick runs the orphan sweep alongside the stale sweep", %{token: token} do
-      {:ok, job} = Jobs.Admission.admit(token, request("orphan-tick"))
+      {:ok, job} = admit(token, request("orphan-tick"))
       discard_dispatch!(job.id)
 
       # Age the row out of the grace window so a tick using the real clock sees
@@ -634,7 +634,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     test "several stranded jobs are recovered in one pass, oldest first", %{token: token} do
       jobs =
         Enum.map(1..3, fn n ->
-          {:ok, job} = Jobs.Admission.admit(token, request("orphan-batch-#{n}"))
+          {:ok, job} = admit(token, request("orphan-batch-#{n}"))
           discard_dispatch!(job.id)
           job
         end)
@@ -659,7 +659,7 @@ defmodule Omashiki.Jobs.ClaimsTest do
     end
 
     test "a cancelled dispatch is swept, since Oban will never run it", %{token: token} do
-      {:ok, job} = Jobs.Admission.admit(token, request("orphan-cancelled"))
+      {:ok, job} = admit(token, request("orphan-cancelled"))
       set_dispatch_state!(job.id, "cancelled")
 
       assert {:ok, 1} = Jobs.recover_orphaned_dispatches(past_grace())

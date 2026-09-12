@@ -140,7 +140,7 @@ defmodule Omashiki.Runtime.LeaseRenewerTest do
   end
 
   defp claim!(token, key) do
-    {:ok, job} = Jobs.Admission.admit(token, request(key))
+    {:ok, job} = admit(token, request(key))
     {:ok, attempt} = Jobs.claim(job, "lease-runner-#{key}")
     attempt
   end

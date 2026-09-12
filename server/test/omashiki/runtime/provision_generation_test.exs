@@ -24,7 +24,6 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
   alias Omashiki.Config
   alias Omashiki.Harness.LaunchPlan
   alias Omashiki.Plugin.Preset
-  alias Omashiki.Jobs.Admission
   alias Omashiki.Repo
   alias Omashiki.Runtime.ContainerManager
   alias Omashiki.Runtime.Spec
@@ -78,7 +77,7 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
 
   test "a job queued across a hot swap is provisioned with the model it was admitted with",
        %{token: token, repo_path: repo_path, load_config: load_config} do
-    assert {:ok, job} = Admission.admit(token, request())
+    assert {:ok, job} = admit(token, request())
     assert [%{"model" => "admitted-model"}] = job.admitted_environment["credentials"]
 
     # The operator swaps the model while the job is still queued.
@@ -98,7 +97,7 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
   test "a job admitted after the swap is provisioned with the new model",
        %{token: token, repo_path: repo_path, load_config: load_config} do
     load_config.("swapped-before-admission")
-    assert {:ok, job} = Admission.admit(token, request())
+    assert {:ok, job} = admit(token, request())
 
     provision(job, repo_path)
 

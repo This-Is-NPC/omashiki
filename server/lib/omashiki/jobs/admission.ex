@@ -29,16 +29,6 @@ defmodule Omashiki.Jobs.Admission do
   def max_batch_size, do: @max_batch_size
   def max_payload_bytes, do: Statuses.max_payload_bytes()
 
-  @doc "Admit one root job for an active, persisted API token."
-  def admit(%Token{} = token, attrs) when is_map(attrs) do
-    case admit_once(token, attrs) do
-      {:ok, _origin, job} -> {:ok, job}
-      other -> other
-    end
-  end
-
-  def admit(_, _), do: {:error, :unauthorized}
-
   @doc """
   Admit one job and say whether the row was created or replayed.
 
@@ -61,16 +51,6 @@ defmodule Omashiki.Jobs.Admission do
   end
 
   def admit_once(_, _), do: {:error, :unauthorized}
-
-  @doc "Admit an ordered, atomically persisted batch of jobs."
-  def admit_batch(%Token{} = token, attrs) when is_map(attrs) do
-    case admit_batch_once(token, attrs) do
-      {:ok, tagged} -> {:ok, Enum.map(tagged, fn {_origin, job} -> job end)}
-      other -> other
-    end
-  end
-
-  def admit_batch(_, _), do: {:error, :unauthorized}
 
   @doc "Admit a batch and tag each job as `:created` or `:existing`."
   def admit_batch_once(%Token{} = token, attrs) when is_map(attrs) do
@@ -264,21 +244,22 @@ defmodule Omashiki.Jobs.Admission do
   @doc false
   def enforce_token_active_limit!(token_id, incoming)
       when is_binary(token_id) and is_integer(incoming) and incoming >= 0 do
-    lock_token!(token_id)
-    reject_over_capacity!(token_id, incoming)
+    reject_over_capacity!(lock_token!(token_id), incoming)
   end
 
   @doc false
   def reject_over_capacity!(token_id, incoming)
       when is_binary(token_id) and is_integer(incoming) and incoming >= 0 do
-    locked = Repo.get(Token, token_id)
-    if is_nil(locked), do: Repo.rollback(:unauthorized)
+    reject_over_capacity!(lock_token!(token_id), incoming)
+  end
 
+  def reject_over_capacity!(%Token{} = locked, incoming)
+      when is_integer(incoming) and incoming >= 0 do
     terminal = Statuses.terminal()
 
     active =
       from(j in Job,
-        where: j.api_token_id == ^token_id and j.status not in ^terminal,
+        where: j.api_token_id == ^locked.id and j.status not in ^terminal,
         select: count(j.id)
       )
       |> Repo.one()

@@ -2,7 +2,7 @@ defmodule Omashiki.Jobs.SinkTest do
   use Omashiki.DataCase, async: false
 
   alias Omashiki.Config
-  alias Omashiki.Jobs.{Admission, Job, WorkArtifact}
+  alias Omashiki.Jobs.{Job, WorkArtifact}
 
   setup do
     root =
@@ -33,23 +33,23 @@ defmodule Omashiki.Jobs.SinkTest do
       single_request()
       |> Map.delete("repo")
 
-    assert {:error, :repository_required} = Admission.admit(token, request)
+    assert {:error, :repository_required} = admit(token, request)
   end
 
   test "none sink with repository is rejected", %{token: token} do
     assert {:error, :repository_not_allowed} =
-             Admission.admit(token, single_request("none-env", "app"))
+             admit(token, single_request("none-env", "app"))
   end
 
   test "files sink with repository is rejected", %{token: token} do
     assert {:error, :repository_not_allowed} =
-             Admission.admit(token, single_request("files-env", "app"))
+             admit(token, single_request("files-env", "app"))
   end
 
   test "files sink without repository is admitted", %{token: token} do
     request = single_request("files-env") |> Map.delete("repo")
 
-    assert {:ok, job} = Admission.admit(token, request)
+    assert {:ok, job} = admit(token, request)
     assert is_nil(job.repository)
     assert is_nil(job.admitted_repository)
     assert job.admitted_environment["sink"] == "files"
@@ -57,7 +57,7 @@ defmodule Omashiki.Jobs.SinkTest do
 
   test "succeeded none persists terminal_result without git shas", %{token: token} do
     request = single_request("none-env") |> Map.delete("repo")
-    assert {:ok, job} = Admission.admit(token, request)
+    assert {:ok, job} = admit(token, request)
     assert {:ok, attempt} = Omashiki.Jobs.claim(job, "sink-runner")
 
     result = %{"summary" => "done"}
@@ -76,7 +76,7 @@ defmodule Omashiki.Jobs.SinkTest do
   end
 
   test "git sink cannot succeed without git fields", %{token: token} do
-    assert {:ok, job} = Admission.admit(token, single_request("git-env", "app"))
+    assert {:ok, job} = admit(token, single_request("git-env", "app"))
     assert {:ok, attempt} = Omashiki.Jobs.claim(job, "sink-runner")
 
     assert {:error, :invalid_success_result} =
@@ -87,7 +87,7 @@ defmodule Omashiki.Jobs.SinkTest do
 
   test "none sink cannot succeed with git fields", %{token: token} do
     request = single_request("none-env") |> Map.delete("repo")
-    assert {:ok, job} = Admission.admit(token, request)
+    assert {:ok, job} = admit(token, request)
     assert {:ok, attempt} = Omashiki.Jobs.claim(job, "sink-runner")
 
     assert {:error, :invalid_success_result} =
@@ -101,7 +101,7 @@ defmodule Omashiki.Jobs.SinkTest do
   end
 
   test "provision rejects environment missing sink", %{token: token} do
-    assert {:ok, job} = Admission.admit(token, single_request("git-env", "app"))
+    assert {:ok, job} = admit(token, single_request("git-env", "app"))
     assert {:ok, attempt} = Omashiki.Jobs.claim(job, "sink-runner")
 
     environment = job.admitted_environment |> Map.delete("sink") |> Map.delete(:sink)
