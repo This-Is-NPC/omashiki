@@ -1,8 +1,6 @@
 defmodule OmashikiWeb.Api.HealthController do
   use OmashikiWeb.Api.Controller
 
-  alias OmashikiWeb.ApiSpec.Schemas
-
   tags(["meta"])
 
   operation(:show,

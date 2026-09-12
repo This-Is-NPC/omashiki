@@ -24,12 +24,11 @@ defmodule Omashiki.Jobs.DispatchWorker do
     ]
 
   alias Omashiki.Jobs
-  alias Omashiki.Jobs.{Job, Statuses}
+  alias Omashiki.Jobs.Job
   alias Omashiki.Repo
   alias Omashiki.Worker.Offer
 
-  @terminal Statuses.terminal()
-  @active Statuses.active()
+  import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_active: 1]
 
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}),
@@ -109,10 +108,10 @@ defmodule Omashiki.Jobs.DispatchWorker do
       nil ->
         :ok
 
-      %Job{status: status} when status in @terminal ->
+      %Job{status: status} when is_terminal(status) ->
         :ok
 
-      %Job{status: status} = job when status in @active ->
+      %Job{status: status} = job when is_active(status) ->
         # The attempt is already burnt: a retry would only see `not_queued`.
         force_terminal(job, reason)
 
@@ -122,7 +121,7 @@ defmodule Omashiki.Jobs.DispatchWorker do
     end
   end
 
-  defp force_terminal(%Job{status: status} = job, reason) when status in @active do
+  defp force_terminal(%Job{status: status} = job, reason) when is_active(status) do
     error = dispatch_error(reason)
 
     case Jobs.fail(job.id, %{error: error}) do

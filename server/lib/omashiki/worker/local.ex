@@ -8,12 +8,12 @@ defmodule Omashiki.Worker.Local do
 
   @behaviour Omashiki.Worker.Transport
 
-  alias Omashiki.Jobs.{Job, JobAttempt, Statuses}
+  alias Omashiki.Jobs.{Job, JobAttempt}
   alias Omashiki.Repo
   alias Omashiki.Runtime.AttemptSupervisor
   alias Omashiki.Worker.{Complete, Execution, Offer}
 
-  @terminal Statuses.terminal()
+  import Omashiki.Jobs.Statuses, only: [is_terminal: 1]
   @sinks ~w(git files none)
 
   @impl Omashiki.Worker.Transport
@@ -60,7 +60,7 @@ defmodule Omashiki.Worker.Local do
     timeout_ms = Keyword.get(opts, :await_timeout_ms, offer.timeout_ms)
 
     case runner().run(attempt, await_timeout_ms: timeout_ms) do
-      {:ok, %Job{status: status}} when status in @terminal ->
+      {:ok, %Job{status: status}} when is_terminal(status) ->
         job = Repo.get!(Job, offer.job_id)
         complete = Complete.from_job(job)
         {:ok, complete}

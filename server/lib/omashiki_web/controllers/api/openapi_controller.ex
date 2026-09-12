@@ -2,7 +2,6 @@ defmodule OmashikiWeb.Api.OpenApiController do
   use OmashikiWeb.Api.Controller
 
   alias OmashikiWeb.ApiSpec
-  alias OmashikiWeb.ApiSpec.Schemas
 
   tags(["meta"])
 

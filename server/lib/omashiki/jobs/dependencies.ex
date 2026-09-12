@@ -6,7 +6,7 @@ defmodule Omashiki.Jobs.Dependencies do
   alias Omashiki.Jobs.{DispatchWorker, Job, JobAttempt, JobDependency, JobEvent, Statuses}
   alias Omashiki.Repo
 
-  @terminal Statuses.terminal()
+  import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_retry_allowed: 1]
 
   def notify_dependents!(%Job{} = dependency, unlock_event_id) do
     dependents =
@@ -49,7 +49,7 @@ defmodule Omashiki.Jobs.Dependencies do
         Enum.find_value(edges, fn {dep_id, on_failure} ->
           dep = Map.fetch!(dep_jobs, dep_id)
 
-          if dep.status in ~w(failed cancelled) and on_failure == "cancel" do
+          if Statuses.retry_allowed?(dep.status) and on_failure == "cancel" do
             dep
           end
         end)
@@ -73,7 +73,7 @@ defmodule Omashiki.Jobs.Dependencies do
     Enum.all?(edges, fn {dep_id, on_failure} ->
       case Map.fetch!(dep_jobs, dep_id).status do
         "succeeded" -> true
-        status when status in ~w(failed cancelled) -> on_failure == "proceed"
+        status when is_retry_allowed(status) -> on_failure == "proceed"
         _ -> false
       end
     end)
@@ -117,7 +117,7 @@ defmodule Omashiki.Jobs.Dependencies do
   defp terminal_attempt(%Job{id: job_id, current_attempt: number}) do
     Repo.one(
       from(a in JobAttempt,
-        where: a.job_id == ^job_id and a.number == ^number and a.status in ^@terminal
+        where: a.job_id == ^job_id and a.number == ^number and a.status in ^Statuses.terminal()
       )
     )
   end
@@ -215,7 +215,7 @@ defmodule Omashiki.Jobs.Dependencies do
     }
 
     case %JobEvent{} |> JobEvent.changeset(attrs) |> Repo.insert() do
-      {:ok, event} when status in @terminal ->
+      {:ok, event} when is_terminal(status) ->
         attempt = attempt || current_attempt!(job)
         :ok = Omashiki.Jobs.Webhooks.enqueue_for_event!(job, attempt, event)
         event

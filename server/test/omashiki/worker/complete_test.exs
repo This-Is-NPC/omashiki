@@ -36,8 +36,7 @@ defmodule Omashiki.Worker.CompleteTest do
           "insertions" => 3,
           "deletions" => 0,
           "files" => [%{"path" => "hello.py", "insertions" => 3, "deletions" => 0}]
-        },
-        compare_url: "https://github.com/acme/repo/compare/a...b"
+        }
       }
 
       map = Complete.to_map(complete)
@@ -47,8 +46,6 @@ defmodule Omashiki.Worker.CompleteTest do
       assert round.changes["files"] == [
                %{"path" => "hello.py", "insertions" => 3, "deletions" => 0}
              ]
-
-      assert round.compare_url == complete.compare_url
     end
 
     test "round-trips and Jason-encodes files" do

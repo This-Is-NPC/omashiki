@@ -2,6 +2,7 @@ defmodule Omashiki.Jobs do
   @moduledoc "DB-authoritative claims, leases, retries, cancellation, and recovery."
 
   import Ecto.Query
+  import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_retry_allowed: 1]
 
   require Logger
 
@@ -23,8 +24,6 @@ defmodule Omashiki.Jobs do
   alias Omashiki.Repo
   alias Omashiki.Tx
 
-  @terminal Statuses.terminal()
-  @active Statuses.active()
   @transitions %{
     "blocked" => ~w(cancelled),
     "queued" => ~w(provisioning cancelled),
@@ -83,7 +82,6 @@ defmodule Omashiki.Jobs do
           %Job{status: status} -> Repo.rollback({:not_queued, status})
         end
       end)
-      |> normalize_transaction_result()
       |> notify_job()
     else
       false -> {:error, :invalid_runner_id}
@@ -115,10 +113,7 @@ defmodule Omashiki.Jobs do
             %Job{} = job -> claim_locked(job, runner_id, now(), lease_ms, opts)
           end
         end)
-        |> case do
-          {:ok, :empty} -> {:ok, :empty}
-          other -> normalize_transaction_result(other) |> notify_job()
-        end
+        |> notify_job()
       else
         false -> {:error, :invalid_runner_id}
       end
@@ -143,7 +138,6 @@ defmodule Omashiki.Jobs do
           attempt -> refresh_lease!(attempt, lease_token, now, lease_ms)
         end
       end)
-      |> normalize_transaction_result()
       |> notify_job()
     else
       false -> {:error, :invalid_lease_token}
@@ -204,7 +198,6 @@ defmodule Omashiki.Jobs do
             end
         end
       end)
-      |> normalize_transaction_result()
       |> notify_job()
     else
       false -> {:error, :invalid_lease_token}
@@ -239,7 +232,6 @@ defmodule Omashiki.Jobs do
             updated
         end
       end)
-      |> normalize_transaction_result()
       |> notify_job()
     end
   end
@@ -260,7 +252,7 @@ defmodule Omashiki.Jobs do
             Repo.rollback(:not_found)
 
           %{attempt: %JobAttempt{status: attempt_status} = attempt}
-          when attempt_status in @terminal ->
+          when is_terminal(attempt_status) ->
             attempt
 
           %{attempt: attempt, job: job} ->
@@ -269,7 +261,6 @@ defmodule Omashiki.Jobs do
             Repo.get!(JobAttempt, attempt.id)
         end
       end)
-      |> normalize_transaction_result()
       |> notify_job()
     end
   end
@@ -282,7 +273,6 @@ defmodule Omashiki.Jobs do
          status <- normalize_status(status),
          :ok <- valid_status(status) do
       Tx.run(fn -> transition_locked(job_id, status, attrs) end)
-      |> normalize_transaction_result()
       |> notify_job()
     end
   end
@@ -330,14 +320,13 @@ defmodule Omashiki.Jobs do
     at = at || now()
 
     Tx.run(fn -> recover_stale_locked(at) end)
-    |> normalize_transaction_result()
   end
 
   @doc """
   Cancel queued jobs whose Oban dispatch is gone, together with their queued attempt.
 
-  `recover_stale/1` cannot see these rows. It scans attempts `where: a.status in
-  @active`, and a job that was never claimed still carries its attempt at
+  `recover_stale/1` cannot see these rows. It scans attempts whose status is in
+  `Statuses.active/0`, and a job that was never claimed still carries its attempt at
   `queued` — `Jobs.Admission` inserts attempt number 1 alongside the job row. So
   the loss is two rows deep: the job *and* its attempt are parked at `queued`
   with no dispatch left to move either of them. Both are driven to a terminal
@@ -361,7 +350,6 @@ defmodule Omashiki.Jobs do
     at = at || now()
 
     Tx.run(fn -> recover_orphaned_locked(at) end)
-    |> normalize_transaction_result()
   end
 
   @doc """
@@ -499,7 +487,7 @@ defmodule Omashiki.Jobs do
 
   defp assert_lease!(%JobAttempt{} = attempt, token, now) do
     cond do
-      attempt.status not in @active ->
+      attempt.status not in Statuses.active() ->
         Repo.rollback(:attempt_not_active)
 
       attempt.lease_token != token ->
@@ -540,13 +528,7 @@ defmodule Omashiki.Jobs do
           lease_expires_at: nil,
           summary: AttemptResult.truncate_summary(get_attr(attrs, :summary)),
           changes: AttemptResult.sanitize_changes(get_attr(attrs, :changes)),
-          compare_url:
-            AttemptResult.resolve_compare_url(
-              job,
-              base_sha,
-              head_sha,
-              get_attr(attrs, :compare_url)
-            )
+          compare_url: AttemptResult.resolve_compare_url(job, base_sha, head_sha)
         }
         |> maybe_put_git_fields(branch, base_sha, head_sha, worktree_clean)
 
@@ -569,7 +551,7 @@ defmodule Omashiki.Jobs do
     end
   end
 
-  defp complete_locked(job, attempt, status, attrs, now) when status in ~w(failed cancelled) do
+  defp complete_locked(job, attempt, status, attrs, now) when is_retry_allowed(status) do
     error = get_attr(attrs, :error) || default_error(status)
 
     updated =
@@ -667,7 +649,7 @@ defmodule Omashiki.Jobs do
     with {:ok, id} <- job_id(job_or_id) do
       case Repo.one(
              from(a in JobAttempt,
-               where: a.job_id == ^id and a.status in ^@active,
+               where: a.job_id == ^id and a.status in ^Statuses.active(),
                order_by: [desc: a.number],
                limit: 1
              )
@@ -693,17 +675,17 @@ defmodule Omashiki.Jobs do
       nil ->
         Repo.rollback(:not_found)
 
-      %Job{status: ^status} = job when status in @terminal ->
+      %Job{status: ^status} = job when is_terminal(status) ->
         job
 
       %Job{} = job ->
         retry? = get_attr(attrs, :retry) == true
 
-        if status in ~w(succeeded failed) and job.status in @active do
+        if status in ~w(succeeded failed) and Statuses.active?(job.status) do
           Repo.rollback(:lease_required)
         else
           if status in Map.get(@transitions, job.status, []) or
-               (status == "queued" and job.status in ~w(failed cancelled) and retry?) do
+               (status == "queued" and Statuses.retry_allowed?(job.status) and retry?) do
             apply_transition(job, status, attrs)
           else
             Repo.rollback({:invalid_transition, job.status, status})
@@ -726,7 +708,7 @@ defmodule Omashiki.Jobs do
     end
   end
 
-  defp apply_transition(%Job{} = job, status, attrs) when status in ~w(failed cancelled) do
+  defp apply_transition(%Job{} = job, status, attrs) when is_retry_allowed(status) do
     attempt = current_attempt!(job)
     complete_locked(job, attempt, status, attrs, now())
   end
@@ -768,7 +750,7 @@ defmodule Omashiki.Jobs do
   defp recover_stale_locked(at) do
     stale =
       from(a in JobAttempt,
-        where: a.status in ^@active and a.lease_expires_at < ^at,
+        where: a.status in ^Statuses.active() and a.lease_expires_at < ^at,
         order_by: [asc: a.lease_expires_at, asc: a.id]
       )
       |> Repo.all()
@@ -777,8 +759,8 @@ defmodule Omashiki.Jobs do
       job = locked_job(candidate.job_id)
       attempt = job && locked_attempt(candidate.id)
 
-      if attempt && attempt.status in @active and attempt.lease_expires_at < at and
-           job.current_attempt == attempt.number and job.status in @active do
+      if attempt && Statuses.active?(attempt.status) and attempt.lease_expires_at < at and
+           job.current_attempt == attempt.number and Statuses.active?(job.status) do
         error = %{
           "code" => "stale_attempt",
           "message" => "attempt lease expired",
@@ -1049,7 +1031,7 @@ defmodule Omashiki.Jobs do
     }
 
     case %JobEvent{} |> JobEvent.changeset(attrs) |> Repo.insert() do
-      {:ok, event} when status in @terminal ->
+      {:ok, event} when is_terminal(status) ->
         attempt = attempt || current_attempt!(job)
         :ok = Webhooks.enqueue_for_event!(job, attempt, event)
         event
@@ -1158,9 +1140,6 @@ defmodule Omashiki.Jobs do
     end
   end
 
-  defp normalize_transaction_result({:ok, value}), do: {:ok, value}
-  defp normalize_transaction_result({:error, reason}), do: {:error, reason}
-
   @doc """
   Tell this node's subscribers that a job's visible state changed. Call it
   after the change commits, so a subscriber that reads again sees it.
@@ -1201,7 +1180,7 @@ defmodule Omashiki.Jobs do
        do: :ok
 
   defp valid_status(_), do: {:error, :invalid_status}
-  defp valid_terminal(status) when status in @terminal, do: :ok
+  defp valid_terminal(status) when is_terminal(status), do: :ok
   defp valid_terminal(_), do: {:error, :invalid_terminal_status}
 
   defp get_attr(attrs, key), do: Map.get(attrs, key, Map.get(attrs, Atom.to_string(key)))

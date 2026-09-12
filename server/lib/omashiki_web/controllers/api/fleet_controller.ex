@@ -4,7 +4,6 @@ defmodule OmashikiWeb.Api.FleetController do
   alias Omashiki.Fleet
   alias Omashiki.Jobs.Api
   alias OmashikiWeb.Api.Conn, as: ApiConn
-  alias OmashikiWeb.ApiSpec.Schemas
 
   tags(["fleet"])
 

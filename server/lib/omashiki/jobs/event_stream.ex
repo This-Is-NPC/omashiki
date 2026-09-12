@@ -15,7 +15,6 @@ defmodule Omashiki.Jobs.EventStream do
   alias Omashiki.Jobs.{Job, JobEvent, Statuses}
   alias Omashiki.Repo
 
-  @terminal Statuses.terminal()
   @default_page_size 100
   @max_page_size 100
   @default_poll_interval_ms 1_000
@@ -76,7 +75,7 @@ defmodule Omashiki.Jobs.EventStream do
       last_heartbeat_at: monotonic_ms(),
       max_polls: Keyword.get(opts, :max_polls, :infinity),
       polls: 0,
-      terminal?: status in @terminal
+      terminal?: Statuses.terminal?(status)
     }
 
     stream_loop(conn, state)
@@ -196,7 +195,7 @@ defmodule Omashiki.Jobs.EventStream do
         {:ok, conn} ->
           state = %{state | after_sequence: event.sequence}
 
-          if event.status in @terminal do
+          if Statuses.terminal?(event.status) do
             {:halt, {:ok, conn, state, true}}
           else
             {:cont, {:ok, conn, state, false}}

@@ -2,7 +2,6 @@ defmodule OmashikiWeb.Api.DiscoveryController do
   use OmashikiWeb.Api.Controller
 
   alias Omashiki.Config
-  alias OmashikiWeb.ApiSpec.Schemas
 
   tags(["discovery"])
 

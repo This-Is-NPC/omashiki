@@ -39,12 +39,7 @@ defmodule Omashiki.Jobs.AttemptResultTest do
     base = String.duplicate("a", 40)
     head = String.duplicate("b", 40)
 
-    assert AttemptResult.resolve_compare_url(
-             job,
-             base,
-             head,
-             "https://github.com/evil/repo/compare/#{base}...#{head}"
-           ) == nil
+    assert AttemptResult.resolve_compare_url(job, base, head) == nil
   end
 
   test "recomputes compare_url from the admitted remote" do
@@ -52,11 +47,7 @@ defmodule Omashiki.Jobs.AttemptResultTest do
     base = String.duplicate("a", 40)
     head = String.duplicate("b", 40)
 
-    assert AttemptResult.resolve_compare_url(
-             job,
-             base,
-             head,
-             "javascript:alert(1)"
-           ) == "https://github.com/acme/omashiki/compare/#{base}...#{head}"
+    assert AttemptResult.resolve_compare_url(job, base, head) ==
+             "https://github.com/acme/omashiki/compare/#{base}...#{head}"
   end
 end

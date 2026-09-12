@@ -1,5 +1,5 @@
 defmodule Omashiki.JobFixtures do
-  alias Omashiki.Jobs.{Job, JobAttempt}
+  alias Omashiki.Jobs.{Job, JobAttempt, Statuses}
   alias Omashiki.Repo
 
   def job_fixture(user, token, attrs \\ %{}) do
@@ -35,9 +35,9 @@ defmodule Omashiki.JobFixtures do
           current_attempt: 1,
           queued_at: if(status == "blocked", do: nil, else: now),
           started_at: if(status in ~w(provisioning running succeeded failed), do: now),
-          finished_at: if(status in ~w(failed cancelled succeeded), do: now),
+          finished_at: if(Statuses.terminal?(status), do: now),
           terminal_result: if(status == "succeeded", do: %{"ok" => true}),
-          terminal_error: if(status in ~w(failed cancelled), do: %{"code" => status})
+          terminal_error: if(Statuses.retry_allowed?(status), do: %{"code" => status})
         },
         attrs
       )
@@ -48,14 +48,13 @@ defmodule Omashiki.JobFixtures do
       job_id: job.id,
       number: 1,
       status: status,
-      finished_at: if(status in ~w(failed cancelled succeeded), do: now),
+      finished_at: if(Statuses.terminal?(status), do: now),
       result: if(status == "succeeded", do: %{"ok" => true}),
-      error: if(status in ~w(failed cancelled), do: %{"code" => status}),
+      error: if(Statuses.retry_allowed?(status), do: %{"code" => status}),
       started_at: if(status in ~w(provisioning running succeeded failed), do: now),
-      lease_token: if(status in ~w(provisioning running), do: "fixture-lease"),
-      lease_expires_at:
-        if(status in ~w(provisioning running), do: DateTime.add(now, 60, :second)),
-      capacity_reserved: status in ~w(provisioning running),
+      lease_token: if(Statuses.active?(status), do: "fixture-lease"),
+      lease_expires_at: if(Statuses.active?(status), do: DateTime.add(now, 60, :second)),
+      capacity_reserved: Statuses.active?(status),
       branch: if(status == "succeeded", do: "feat-fixture-run-001"),
       base_sha: if(status == "succeeded", do: String.duplicate("1", 40)),
       head_sha: if(status == "succeeded", do: String.duplicate("2", 40)),

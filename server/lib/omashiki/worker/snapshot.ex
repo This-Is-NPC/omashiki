@@ -308,8 +308,7 @@ defmodule Omashiki.Worker.Snapshot do
       base_sha: fetch_key(final, :base_sha),
       head_sha: fetch_key(final, :head_sha),
       summary: Runner.harness_summary(state.harness_result),
-      changes: fetch_key(final, :changes),
-      compare_url: fetch_key(final, :compare_url)
+      changes: fetch_key(final, :changes)
     }
   end
 

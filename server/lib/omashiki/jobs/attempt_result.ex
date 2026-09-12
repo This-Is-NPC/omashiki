@@ -45,11 +45,11 @@ defmodule Omashiki.Jobs.AttemptResult do
   def sanitize_changes(nil), do: nil
 
   def sanitize_changes(other) do
-    Logger.warning("dropping malformed job changes: #{inspect(other)}")
+    Logger.warning("dropping malformed job changes: #{inspect(other, limit: 8)}")
     nil
   end
 
-  def resolve_compare_url(%Job{} = job, base_sha, head_sha, _worker_url \\ nil) do
+  def resolve_compare_url(%Job{} = job, base_sha, head_sha) do
     GitArtifact.web_compare_url(admitted_remote(job), base_sha, head_sha)
   end
 

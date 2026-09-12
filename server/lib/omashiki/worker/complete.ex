@@ -7,10 +7,10 @@ defmodule Omashiki.Worker.Complete do
 
   import Ecto.Query
 
-  alias Omashiki.Jobs.{Job, JobAttempt, Statuses}
+  alias Omashiki.Jobs.{Job, JobAttempt}
   alias Omashiki.Repo
 
-  @terminal Statuses.terminal()
+  import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_retry_allowed: 1]
 
   @type kind :: :git | :files | :none | :error
 
@@ -27,8 +27,7 @@ defmodule Omashiki.Worker.Complete do
           message: String.t() | nil,
           details: map() | nil,
           summary: String.t() | nil,
-          changes: map() | nil,
-          compare_url: String.t() | nil
+          changes: map() | nil
         }
 
   defstruct [
@@ -44,15 +43,14 @@ defmodule Omashiki.Worker.Complete do
     :message,
     :details,
     :summary,
-    :changes,
-    :compare_url
+    :changes
   ]
 
   @doc "Build a complete value from a terminal job row."
   def from_job(%Job{status: "succeeded"} = job), do: from_succeeded_job(job)
 
   def from_job(%Job{status: status, terminal_error: error})
-      when status in ["failed", "cancelled"] and is_map(error) do
+      when is_retry_allowed(status) and is_map(error) do
     %__MODULE__{
       kind: :error,
       code: error_code(error),
@@ -61,7 +59,7 @@ defmodule Omashiki.Worker.Complete do
     }
   end
 
-  def from_job(%Job{status: status}) when status in @terminal do
+  def from_job(%Job{status: status}) when is_terminal(status) do
     %__MODULE__{
       kind: :error,
       code: "terminal_without_error",
@@ -81,7 +79,6 @@ defmodule Omashiki.Worker.Complete do
     }
     |> maybe_put("summary", complete.summary)
     |> maybe_put("changes", complete.changes)
-    |> maybe_put("compare_url", complete.compare_url)
   end
 
   def to_map(%__MODULE__{kind: :files} = complete) do
@@ -124,8 +121,7 @@ defmodule Omashiki.Worker.Complete do
        base_sha: map["base_sha"],
        head_sha: map["head_sha"],
        summary: Map.get(map, "summary"),
-       changes: Map.get(map, "changes"),
-       compare_url: Map.get(map, "compare_url")
+       changes: Map.get(map, "changes")
      }}
   end
 
@@ -166,8 +162,7 @@ defmodule Omashiki.Worker.Complete do
             base_sha: attempt.base_sha,
             head_sha: attempt.head_sha,
             summary: attempt.summary,
-            changes: attempt.changes,
-            compare_url: attempt.compare_url
+            changes: attempt.changes
           }
         else
           _ ->

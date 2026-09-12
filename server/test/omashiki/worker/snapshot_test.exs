@@ -160,7 +160,6 @@ defmodule Omashiki.Worker.SnapshotTest do
     assert complete.head_sha == String.duplicate("b", 40)
     assert complete.summary == "run"
     assert complete.changes["files_changed"] == 1
-    assert complete.compare_url =~ "/compare/"
 
     mirror = mirror_path(@remote)
 

@@ -5,7 +5,6 @@ defmodule OmashikiWeb.Api.JobsController do
   alias Omashiki.Jobs.{Admission, Api, EventStream, Job, Statuses}
   alias Omashiki.Maps
   alias OmashikiWeb.Api.Conn, as: ApiConn
-  alias OmashikiWeb.ApiSpec.Schemas
   alias OmashikiWeb.RateLimiter
 
   @page_size 50

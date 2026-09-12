@@ -326,7 +326,6 @@ defmodule Omashiki.Jobs.Runner do
           worktree_clean: Map.get(final, :worktree_clean, Map.get(final, "worktree_clean")),
           summary: harness_summary(state.harness_result),
           changes: Map.get(final, :changes, Map.get(final, "changes")),
-          compare_url: Map.get(final, :compare_url, Map.get(final, "compare_url")),
           result:
             deep_stringify(
               Map.get(final, :result, Map.get(final, "result", state.harness_result))
