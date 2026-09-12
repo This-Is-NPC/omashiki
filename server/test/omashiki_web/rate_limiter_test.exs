@@ -87,30 +87,22 @@ defmodule OmashikiWeb.RateLimiterTest do
   end
 
   test "refund credits the reserved window after rollover" do
-    opts = [max: 1, per_ms: 1]
-    assert {:ok, 1, key} = RateLimiter.hit("scope", "x", opts)
-    Process.sleep(5)
-    assert {:ok, 1, _fresh} = RateLimiter.hit("scope", "x", opts)
-    assert :ok = RateLimiter.refund(key)
+    opts = [max: 1, per_ms: 60_000]
+    assert {:ok, 1, {_scope, _id, window}} = RateLimiter.hit("scope", "x", opts)
+    assert {:error, :rate_limited} = RateLimiter.hit("scope", "x", opts)
+    assert :ok = RateLimiter.refund({"scope", "x", window - 1})
     assert {:error, :rate_limited} = RateLimiter.hit("scope", "x", opts)
   end
 
   test "over-limit rollback does not raise when the key vanishes" do
     opts = [max: 1, per_ms: 60_000]
     assert {:ok, 1, key} = RateLimiter.hit("scope", "x", opts)
-
-    results =
-      1..20
-      |> Task.async_stream(
-        fn _ ->
-          :ets.delete(RateLimiter, key)
-          RateLimiter.hit("scope", "x", opts)
-        end,
-        timeout: 5_000
-      )
-      |> Enum.map(fn {:ok, result} -> result end)
-
-    assert Enum.all?(results, &(match?({:ok, _, _}, &1) or match?({:error, :rate_limited}, &1)))
+    # Replay increment-past-max then GC: the same rollback/1 hit/3 runs
+    # after n > max, without a sleep between the two ETS ops.
+    assert :ets.update_counter(RateLimiter, key, {2, 1}) == 2
+    :ets.delete(RateLimiter, key)
+    assert :ok = RateLimiter.refund(key)
+    assert {:ok, 1, _key} = RateLimiter.hit("scope", "x", opts)
   end
 
   test "checkin removes a zeroed counter" do
