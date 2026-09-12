@@ -19,6 +19,9 @@ defmodule Omashiki.Jobs.WebhookDeliveryWorker do
         seconds = max(DateTime.diff(next_attempt_at, DateTime.utc_now(:second), :second), 1)
         {:snooze, seconds}
 
+      {:error, :busy} ->
+        {:snooze, 1}
+
       {:error, reason} ->
         {:error, reason}
     end

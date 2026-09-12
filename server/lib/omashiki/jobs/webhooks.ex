@@ -176,6 +176,9 @@ defmodule Omashiki.Jobs.Webhooks do
 
       {:error, :not_found} ->
         {:error, :not_found}
+
+      {:error, :busy} ->
+        {:error, :busy}
     end
   end
 
@@ -348,6 +351,7 @@ defmodule Omashiki.Jobs.Webhooks do
       {:ok, :dead} -> {:ok, :dead}
       {:ok, %WebhookDelivery{} = delivery} -> {:ok, delivery}
       {:error, :not_found} -> {:error, :not_found}
+      {:error, :busy} -> {:error, :busy}
     end
   end
 

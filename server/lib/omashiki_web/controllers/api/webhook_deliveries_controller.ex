@@ -3,7 +3,6 @@ defmodule OmashikiWeb.Api.WebhookDeliveriesController do
 
   alias Omashiki.Jobs.Webhooks
   alias OmashikiWeb.Api.Conn, as: ApiConn
-  alias OmashikiWeb.ApiSpec.Schemas
 
   tags(["webhooks"])
 
@@ -36,7 +35,8 @@ defmodule OmashikiWeb.Api.WebhookDeliveriesController do
     ],
     responses: %{
       202 => {"Requeued", "application/json", Schemas.WebhookDeliveryListResponse},
-      409 => {"Refused", "application/problem+json", Schemas.Problem}
+      409 => {"Refused", "application/problem+json", Schemas.Problem},
+      503 => {"Busy", "application/problem+json", Schemas.Problem}
     }
   )
 

@@ -178,10 +178,10 @@ defmodule Omashiki.Worker.Poller do
       {:ok, %Complete{kind: :files} = complete} ->
         complete
         |> maybe_upload_blob(client, offer)
-        |> then(&Client.complete(client, execution, &1))
+        |> then(&complete_with_retry(client, execution, &1))
 
       {:ok, %Complete{} = complete} ->
-        Client.complete(client, execution, complete)
+        complete_with_retry(client, execution, complete)
 
       {:error, reason} ->
         error_complete = %Complete{
@@ -190,7 +190,21 @@ defmodule Omashiki.Worker.Poller do
           message: Exception.format(:error, reason, [])
         }
 
-        Client.complete(client, execution, error_complete)
+        complete_with_retry(client, execution, error_complete)
+    end
+  end
+
+  defp complete_with_retry(client, execution, complete, attempts \\ 8) do
+    case Client.complete(client, execution, complete) do
+      :ok ->
+        :ok
+
+      {:error, :busy} when attempts > 1 ->
+        Process.sleep(25)
+        complete_with_retry(client, execution, complete, attempts - 1)
+
+      other ->
+        other
     end
   end
 

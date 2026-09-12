@@ -97,6 +97,47 @@ defmodule Omashiki.Worker.PollerTest do
       assert_receive {:complete, _}, 2_000
     end
 
+    test "retries complete after a busy manager", %{bypass: bypass, parent: parent, slots: slots} do
+      offer = sample_offer("git")
+
+      expect_register(bypass)
+      expect_accept(bypass, parent)
+      expect_poll_sequence(bypass, [offer], parent)
+
+      {:ok, hits} = Agent.start_link(fn -> 0 end)
+
+      Bypass.expect(bypass, "POST", "/internal/work/complete", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        n = Agent.get_and_update(hits, fn count -> {count + 1, count + 1} end)
+
+        if n == 1 do
+          Plug.Conn.resp(conn, 503, ~s({"code":"busy"}))
+        else
+          send(parent, {:complete, Jason.decode!(body)})
+
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"ok":true}))
+        end
+      end)
+
+      put_env(:fake_executor_result, {
+        :ok,
+        %Complete{
+          kind: :git,
+          remote: "https://example.com/repo.git",
+          branch: "main",
+          base_sha: "abc",
+          head_sha: "def"
+        }
+      })
+
+      assert {:ok, _pid} = start_poller(slots)
+      assert_receive {:accept, _}, 2_000
+      assert_receive {:complete, _}, 2_000
+      assert Agent.get(hits, & &1) >= 2
+    end
+
     test "uploads a blob then completes a files sink offer", %{
       bypass: bypass,
       parent: parent,

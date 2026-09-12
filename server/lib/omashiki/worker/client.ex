@@ -141,6 +141,9 @@ defmodule Omashiki.Worker.Client do
     with {:ok, %{status: status}} when status in 200..299 <-
            request(client, "POST", "/internal/work/complete", json_headers(client), body) do
       :ok
+    else
+      {:error, :busy} -> {:error, :busy}
+      other -> other
     end
   end
 
@@ -178,6 +181,8 @@ defmodule Omashiki.Worker.Client do
         {:error, reason}
     end
   end
+
+  defp map_http_response(%{status: 503}), do: {:error, :busy}
 
   defp map_http_response(%{status: status, body: _body}) when status in 401..403 do
     {:error, :unauthorized}
