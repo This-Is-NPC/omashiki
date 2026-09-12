@@ -55,6 +55,27 @@ defmodule OmashikiWeb.RateLimiter do
   end
 
   @doc """
+  True when the bucket is already at `max` for the current window.
+
+  Unlike `hit/3`, this does not increment. Call it before work that must not
+  run once the budget is spent (password hashing on `issue_token`).
+  """
+  def limited?(scope, identifier, opts) when is_binary(scope) do
+    ensure_table()
+
+    max = Keyword.fetch!(opts, :max)
+    per_ms = Keyword.fetch!(opts, :per_ms)
+    now = System.system_time(:millisecond)
+    window = div(now, per_ms)
+    key = {scope, identifier, window}
+
+    case :ets.lookup(@table, key) do
+      [{^key, n}] when is_integer(n) -> n >= max
+      _ -> false
+    end
+  end
+
+  @doc """
   Increment a concurrent-use counter. Returns `{:ok, count}` or
   `{:error, :rate_limited}` when `max` is already held.
   """

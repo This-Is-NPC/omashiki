@@ -23,6 +23,17 @@ defmodule OmashikiWeb.RateLimiterTest do
              RateLimiter.hit("scope", "1.2.3.4", max: 3, per_ms: 60_000)
   end
 
+  test "limited? is true at max without incrementing" do
+    opts = [max: 2, per_ms: 60_000]
+    refute RateLimiter.limited?("scope", "1.2.3.4", opts)
+    assert {:ok, 1} = RateLimiter.hit("scope", "1.2.3.4", opts)
+    refute RateLimiter.limited?("scope", "1.2.3.4", opts)
+    assert {:ok, 2} = RateLimiter.hit("scope", "1.2.3.4", opts)
+    assert RateLimiter.limited?("scope", "1.2.3.4", opts)
+    assert RateLimiter.limited?("scope", "1.2.3.4", opts)
+    assert {:error, :rate_limited} = RateLimiter.hit("scope", "1.2.3.4", opts)
+  end
+
   test "different identifiers do not share buckets" do
     Enum.each(1..3, fn _ ->
       RateLimiter.hit("scope", "1.2.3.4", max: 3, per_ms: 60_000)

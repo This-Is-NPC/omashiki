@@ -28,19 +28,21 @@ defmodule OmashikiWeb.Api.SessionsController do
   def issue_token(conn, _params) do
     attrs = Maps.stringify_keys(conn.body_params)
 
-    with {:ok, user} <- authenticate(attrs),
-         {:ok, token, plaintext} <- ApiTokens.create_for_user(user, token_attrs(attrs, "CLI")) do
-      ApiConn.audit(conn, token, "issue")
-      json(conn, %{data: token_json(token, plaintext)})
+    if issue_limited?(conn) do
+      {:error, :rate_limited}
     else
-      {:error, :invalid_credentials} = error ->
-        case record_failed_issue(conn) do
-          :ok -> error
-          {:error, :rate_limited} -> {:error, :rate_limited}
-        end
+      with {:ok, user} <- authenticate(attrs),
+           {:ok, token, plaintext} <- ApiTokens.create_for_user(user, token_attrs(attrs, "CLI")) do
+        ApiConn.audit(conn, token, "issue")
+        json(conn, %{data: token_json(token, plaintext)})
+      else
+        {:error, :invalid_credentials} = error ->
+          _ = record_failed_issue(conn)
+          error
 
-      other ->
-        other
+        other ->
+          other
+      end
     end
   end
 
@@ -142,13 +144,15 @@ defmodule OmashikiWeb.Api.SessionsController do
     }
   end
 
+  defp issue_opts do
+    [max: @rate_limit_max, per_ms: @rate_limit_per_ms]
+  end
+
+  defp issue_limited?(conn) do
+    RateLimiter.limited?("issue_token", ApiConn.client_ip_or_unknown(conn), issue_opts())
+  end
+
   defp record_failed_issue(conn) do
-    case RateLimiter.hit("issue_token", ApiConn.client_ip_or_unknown(conn),
-           max: @rate_limit_max,
-           per_ms: @rate_limit_per_ms
-         ) do
-      {:ok, _} -> :ok
-      {:error, :rate_limited} -> {:error, :rate_limited}
-    end
+    RateLimiter.hit("issue_token", ApiConn.client_ip_or_unknown(conn), issue_opts())
   end
 end

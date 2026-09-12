@@ -121,7 +121,7 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
     end
 
     @tag :unauthenticated
-    test "valid credentials succeed after the failure budget is spent", %{conn: conn} do
+    test "valid credentials are also 429 after the failure budget is spent", %{conn: conn} do
       _ = user_fixture(%{username: "bob", password: "right-password-1"})
 
       for _ <- 1..10 do
@@ -132,23 +132,24 @@ defmodule OmashikiWeb.Api.SessionsControllerTest do
         )
       end
 
-      blocked =
+      wrong =
         post(
           conn,
           ~p"/api/v1/sessions/issue_token",
           token_grants(%{"username" => "bob", "password" => "wrong"})
         )
 
-      assert blocked.status == 429
-
-      recovered =
+      right =
         post(
           conn,
           ~p"/api/v1/sessions/issue_token",
           token_grants(%{"username" => "bob", "password" => "right-password-1"})
         )
 
-      assert recovered.status == 200
+      assert wrong.status == 429
+      assert right.status == 429
+      assert Jason.decode!(wrong.resp_body)["code"] == "rate_limited"
+      assert Jason.decode!(right.resp_body)["code"] == "rate_limited"
     end
 
     @tag :unauthenticated
