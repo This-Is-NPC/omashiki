@@ -3,6 +3,8 @@ defmodule Omashiki.Worker.PollerTest do
 
   alias Omashiki.Worker.{Complete, Offer, Poller, Slots}
 
+  import Omashiki.Await, only: [until: 1]
+
   @poll_interval_ms 60_000
 
   setup do
@@ -145,9 +147,11 @@ defmodule Omashiki.Worker.PollerTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert {:ok, _pid} = start_poller(slots)
+          assert {:ok, pid} = start_poller(slots)
           assert_receive {:accept, _}, 2_000
-          wait_until(fn -> Agent.get(hits, & &1) >= 8 end)
+          until(fn -> Agent.get(hits, & &1) >= 8 end)
+          until(fn -> map_size(:sys.get_state(pid).in_flight) == 0 end)
+          Logger.flush()
         end)
 
       assert Agent.get(hits, & &1) == 8
@@ -178,9 +182,11 @@ defmodule Omashiki.Worker.PollerTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert {:ok, _pid} = start_poller(slots)
+          assert {:ok, pid} = start_poller(slots)
           assert_receive {:accept, _}, 2_000
-          wait_until(fn -> Agent.get(hits, & &1) >= 8 end)
+          until(fn -> Agent.get(hits, & &1) >= 8 end)
+          until(fn -> map_size(:sys.get_state(pid).in_flight) == 0 end)
+          Logger.flush()
         end)
 
       assert Agent.get(hits, & &1) == 8
@@ -207,9 +213,11 @@ defmodule Omashiki.Worker.PollerTest do
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
-          assert {:ok, _pid} = start_poller(slots)
+          assert {:ok, pid} = start_poller(slots)
           assert_receive {:accept, _}, 2_000
-          wait_until(fn -> Agent.get(hits, & &1) >= 1 end)
+          until(fn -> Agent.get(hits, & &1) >= 1 end)
+          until(fn -> map_size(:sys.get_state(pid).in_flight) == 0 end)
+          Logger.flush()
         end)
 
       assert Agent.get(hits, & &1) == 1
@@ -699,20 +707,6 @@ defmodule Omashiki.Worker.PollerTest do
        base_sha: "abc",
        head_sha: "def"
      }}
-  end
-
-  defp wait_until(fun, remaining \\ 2_000) do
-    cond do
-      fun.() ->
-        true
-
-      remaining <= 0 ->
-        flunk("condition not met")
-
-      true ->
-        Process.sleep(10)
-        wait_until(fun, remaining - 10)
-    end
   end
 
   defp put_env(key, value) do

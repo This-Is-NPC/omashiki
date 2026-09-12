@@ -3,6 +3,8 @@ defmodule Omashiki.Runtime.ContainerTrackerTest do
 
   alias Omashiki.Runtime.{ContainerEvents, ContainerTracker}
 
+  import Omashiki.Await, only: [until: 1]
+
   @attempt_id "7d3f7c2e-9d1a-4c55-9a51-2f7e2b3c4d5e"
   @container "a1b2c3d4e5f60718"
 
@@ -16,7 +18,7 @@ defmodule Omashiki.Runtime.ContainerTrackerTest do
       )
 
     Phoenix.PubSub.subscribe(Omashiki.PubSub, ContainerTracker.topic())
-    wait_until(fn -> :sys.get_state(tracker).task == nil end)
+    until(fn -> :sys.get_state(tracker).task == nil end)
     flush_changes()
 
     {:ok, tracker: tracker, census: census}
@@ -66,7 +68,7 @@ defmodule Omashiki.Runtime.ContainerTrackerTest do
     end)
 
     ContainerTracker.reconcile(tracker)
-    wait_until(fn -> length(ContainerTracker.list(tracker)) == 2 end)
+    until(fn -> length(ContainerTracker.list(tracker)) == 2 end)
 
     containers = Map.new(ContainerTracker.list(tracker), &{&1.id, &1})
     assert containers[@container].started_at == started
@@ -77,7 +79,7 @@ defmodule Omashiki.Runtime.ContainerTrackerTest do
 
   test "an unchanged census announces nothing", %{tracker: tracker} do
     ContainerTracker.reconcile(tracker)
-    wait_until(fn -> :sys.get_state(tracker).task == nil end)
+    until(fn -> :sys.get_state(tracker).task == nil end)
 
     refute_receive :containers_changed, 100
   end
@@ -102,14 +104,6 @@ defmodule Omashiki.Runtime.ContainerTrackerTest do
       :containers_changed -> flush_changes()
     after
       50 -> :ok
-    end
-  end
-
-  defp wait_until(fun, attempts \\ 50) do
-    cond do
-      fun.() -> :ok
-      attempts == 0 -> flunk("condition not met")
-      true -> Process.sleep(20) && wait_until(fun, attempts - 1)
     end
   end
 end

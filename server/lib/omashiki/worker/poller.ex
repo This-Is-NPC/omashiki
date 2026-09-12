@@ -73,10 +73,10 @@ defmodule Omashiki.Worker.Poller do
   def handle_info({:job_finished, _execution, offer, result}, state) do
     attempt_id = offer.attempt_id
 
-    case Map.fetch(in_flight(state), attempt_id) do
+    case Map.fetch(state.in_flight, attempt_id) do
       {:ok, job} ->
         complete = complete_from_result(job.client, offer, result)
-        complete_or_schedule(state, attempt_id, complete, @complete_attempts)
+        start_complete(state, attempt_id, complete, @complete_attempts)
 
       :error ->
         {:noreply, state}
@@ -84,7 +84,17 @@ defmodule Omashiki.Worker.Poller do
   end
 
   def handle_info({:complete_retry, attempt_id, complete, left}, state) do
-    complete_or_schedule(state, attempt_id, complete, left)
+    start_complete(state, attempt_id, complete, left)
+  end
+
+  def handle_info({:complete_result, attempt_id, complete, left, result}, state) do
+    case Map.fetch(state.in_flight, attempt_id) do
+      {:ok, _} ->
+        handle_complete_result(state, attempt_id, complete, left, result)
+
+      :error ->
+        {:noreply, state}
+    end
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -195,41 +205,46 @@ defmodule Omashiki.Worker.Poller do
     end
   end
 
-  defp complete_or_schedule(state, attempt_id, complete, left) do
-    case Map.fetch(in_flight(state), attempt_id) do
+  defp start_complete(state, attempt_id, complete, left) do
+    case Map.fetch(state.in_flight, attempt_id) do
       {:ok, %{client: client, execution: execution}} ->
-        case Client.complete(client, execution, complete) do
-          :ok ->
-            finish_in_flight(state, attempt_id)
+        poller = self()
 
-          result ->
-            if left > 1 and retryable_complete?(result) do
-              Process.send_after(
-                self(),
-                {:complete_retry, attempt_id, complete, left - 1},
-                complete_retry_delay(left - 1)
-              )
+        _ =
+          Task.start(fn ->
+            result = Client.complete(client, execution, complete)
+            send(poller, {:complete_result, attempt_id, complete, left, result})
+          end)
 
-              {:noreply, state}
-            else
-              Logger.warning(
-                "Worker.Poller dropping complete for #{attempt_id}: #{inspect(result)}"
-              )
-
-              finish_in_flight(state, attempt_id)
-            end
-        end
+        {:noreply, state}
 
       :error ->
         {:noreply, state}
     end
   end
 
-  defp retryable_complete?(:ok), do: false
+  defp handle_complete_result(state, attempt_id, complete, left, result) do
+    cond do
+      result == :ok ->
+        finish_in_flight(state, attempt_id)
+
+      left > 1 and retryable_complete?(result) ->
+        Process.send_after(
+          self(),
+          {:complete_retry, attempt_id, complete, left - 1},
+          complete_retry_delay(left - 1)
+        )
+
+        {:noreply, state}
+
+      true ->
+        Logger.warning("Worker.Poller dropping complete for #{attempt_id}: #{inspect(result)}")
+        finish_in_flight(state, attempt_id)
+    end
+  end
+
   defp retryable_complete?({:error, :unauthorized}), do: false
   defp retryable_complete?({:error, {:http, status, _}}) when status in 400..499, do: false
-  defp retryable_complete?({:error, :busy}), do: true
-  defp retryable_complete?({:error, {:http, 503, _}}), do: true
   defp retryable_complete?({:error, _reason}), do: true
   defp retryable_complete?(_), do: false
 
@@ -246,9 +261,6 @@ defmodule Omashiki.Worker.Poller do
     cap = Application.get_env(:omashiki, :worker_complete_retry_cap_ms, @complete_retry_cap_ms)
     min(cap, base * trunc(:math.pow(2, used)))
   end
-
-  defp in_flight(%{in_flight: in_flight}) when is_map(in_flight), do: in_flight
-  defp in_flight(_state), do: %{}
 
   defp adopt_in_flight(%{mode: :active} = next, %{in_flight: previous})
        when map_size(previous) > 0 do
