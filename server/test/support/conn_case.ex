@@ -28,7 +28,6 @@ defmodule OmashikiWeb.ConnCase do
       import Plug.Conn
       import Phoenix.ConnTest
       import OmashikiWeb.ConnCase
-      import Omashiki.DataCase, only: [admit: 2, admit_batch: 2]
       import Omashiki.Fixtures
       import OpenApiSpex.TestAssertions
     end

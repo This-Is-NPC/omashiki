@@ -80,7 +80,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     token: token
   } do
     become!(root, "node-a")
-    {:ok, job} = admit(token, request("unbooted"))
+    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("unbooted"))
 
     assert Repo.get(ExecutionCapacity, "node-a") == nil
     assert {:error, :capacity_exhausted} = Jobs.claim(job, "runner-1")
@@ -104,7 +104,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     assert row("node-b").active == 0
 
     # node-a is full and says so, while node-b has not lost a single slot to it.
-    {:ok, overflow} = admit(token, request("a-overflow"))
+    {:ok, _, overflow} = Omashiki.Jobs.Admission.admit_once(token, request("a-overflow"))
     assert {:error, :capacity_exhausted} = Jobs.claim(overflow, "a-overflow-runner")
 
     become!(root, "node-b")
@@ -244,7 +244,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     boot!(root, "node-b", 10)
 
     become!(root, "node-a")
-    {:ok, job} = admit(token, request("double-release"))
+    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("double-release"))
 
     # An operator cancels a job whose lease has already lapsed. The slot comes
     # back here, and the sweep that arrives later must find nothing to give back
@@ -272,7 +272,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     assert [_] = claim_concurrently(token, "refill", 1)
     assert row("node-a").active == 10
 
-    {:ok, eleventh} = admit(token, request("eleventh"))
+    {:ok, _, eleventh} = Omashiki.Jobs.Admission.admit_once(token, request("eleventh"))
     assert {:error, :capacity_exhausted} = Jobs.claim(eleventh, "eleventh-runner")
   end
 
@@ -286,7 +286,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
     become!(root, "local")
     assert {:ok, _} = Jobs.sync_capacity()
 
-    {:ok, job} = admit(token, request("legacy-attempt"))
+    {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("legacy-attempt"))
     {:ok, attempt} = Jobs.claim(job, "legacy-runner")
     assert row("local").active == 1
 
@@ -324,7 +324,7 @@ defmodule Omashiki.Jobs.NodeCapacityTest do
   defp claim_concurrently(token, key, count, opts \\ []) do
     jobs =
       Enum.map(1..count, fn n ->
-        {:ok, job} = admit(token, request("#{key}-#{n}"))
+        {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, request("#{key}-#{n}"))
         job
       end)
 

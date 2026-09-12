@@ -55,8 +55,8 @@ defmodule Omashiki.Jobs.OrderingTest do
   end
 
   test "success queues direct children once in priority/FIFO order", %{token: token} do
-    assert {:ok, [root, first, second, third]} =
-             admit_batch(
+    assert {:ok, [{_, root}, {_, first}, {_, second}, {_, third}]} =
+             Omashiki.Jobs.Admission.admit_batch_once(
                token,
                batch_request([
                  {"root", [], 0},
@@ -115,8 +115,8 @@ defmodule Omashiki.Jobs.OrderingTest do
   end
 
   test "failure and cancellation cascade-cancel blocked descendants", %{token: token} do
-    assert {:ok, [root, child]} =
-             admit_batch(
+    assert {:ok, [{_, root}, {_, child}]} =
+             Omashiki.Jobs.Admission.admit_batch_once(
                token,
                batch_request([{"root", [], 0}, {"child", [%{"ref" => "root"}], 0}])
              )
@@ -133,8 +133,8 @@ defmodule Omashiki.Jobs.OrderingTest do
 
     assert Repo.aggregate(Oban.Job, :count, :id) == 1
 
-    assert {:ok, [failed_root, failed_child]} =
-             admit_batch(
+    assert {:ok, [{_, failed_root}, {_, failed_child}]} =
+             Omashiki.Jobs.Admission.admit_batch_once(
                token,
                batch_request([
                  {"failed-root", [], 0},
@@ -154,8 +154,8 @@ defmodule Omashiki.Jobs.OrderingTest do
   end
 
   test "retry success does not re-queue cascade-cancelled children", %{token: token} do
-    assert {:ok, [root, child]} =
-             admit_batch(
+    assert {:ok, [{_, root}, {_, child}]} =
+             Omashiki.Jobs.Admission.admit_batch_once(
                token,
                batch_request([{"root", [], 0}, {"child", [%{"ref" => "root"}], 0}])
              )
@@ -180,8 +180,8 @@ defmodule Omashiki.Jobs.OrderingTest do
   end
 
   test "concurrent parent success has one unlock and one child dispatch", %{token: token} do
-    assert {:ok, [root, child]} =
-             admit_batch(
+    assert {:ok, [{_, root}, {_, child}]} =
+             Omashiki.Jobs.Admission.admit_batch_once(
                token,
                batch_request([{"root", [], 0}, {"child", [%{"ref" => "root"}], 0}])
              )
@@ -207,7 +207,7 @@ defmodule Omashiki.Jobs.OrderingTest do
   end
 
   test "dispatch intent survives an Oban process restart", %{token: token} do
-    assert {:ok, job} = admit(token, single_request())
+    assert {:ok, _, job} = Omashiki.Jobs.Admission.admit_once(token, single_request())
     dispatch = Repo.one!(from(j in Oban.Job, where: j.worker == "Omashiki.Jobs.DispatchWorker"))
 
     assert :ok = Supervisor.terminate_child(Omashiki.Supervisor, Oban)
