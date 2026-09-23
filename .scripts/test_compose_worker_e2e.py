@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 SCRIPT = Path(__file__).with_name("compose_worker_e2e.py")
@@ -106,25 +107,35 @@ class ComposeWorkerHelperTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:4014", argv)
         self.assertNotIn("--allow-localhost", argv)
 
-
     def test_cleanup_overture_fixture_deletes_stale_branches(self) -> None:
-        calls: list[list[str]] = []
+        with tempfile.TemporaryDirectory() as directory:
+            overture = Path(directory)
+            git = ["git", "-C", str(overture)]
+            MODULE.run([*git, "init", "-q", "-b", "main"])
+            MODULE.run([
+                *git,
+                "-c", "user.name=e2e",
+                "-c", "user.email=e2e@localhost",
+                "-c", "commit.gpgsign=false",
+                "commit", "-q", "--allow-empty", "-m", "init",
+            ])
+            for branch in MODULE.E2E_BRANCHES:
+                MODULE.run([*git, "branch", branch])
+            worktree_root = overture / ".omashiki-worktrees"
+            (worktree_root / "e2e-hello-world").mkdir(parents=True)
 
-        def fake_run(cmd: list[str], **kwargs: object) -> object:
-            calls.append(cmd)
-            return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+            original_overture = MODULE.OVERTURE
+            try:
+                MODULE.OVERTURE = overture
+                MODULE.cleanup_overture_fixture()
+            finally:
+                MODULE.OVERTURE = original_overture
 
-        original_run = MODULE.run
-        original_exists = MODULE.OVERTURE.__class__  # noqa: B009
-        try:
-            MODULE.run = fake_run
-            MODULE.cleanup_overture_fixture()
-        finally:
-            MODULE.run = original_run
-
-        joined = [" ".join(cmd) for cmd in calls]
-        self.assertTrue(any("branch -D e2e-hello-world" in cmd for cmd in joined))
-        self.assertTrue(any("branch -D e2e-hello-world-run-001" in cmd for cmd in joined))
+            branches = MODULE.run(
+                [*git, "branch", "--format=%(refname:short)"]
+            ).stdout.split()
+            self.assertEqual(branches, ["main"])
+            self.assertFalse(worktree_root.exists())
 
 
 if __name__ == "__main__":
