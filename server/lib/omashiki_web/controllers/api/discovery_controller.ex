@@ -36,6 +36,7 @@ defmodule OmashikiWeb.Api.DiscoveryController do
       name: environment.name,
       preset: environment.preset.name,
       plugin: profile.plugin,
+      sink: environment.sink,
       runtime: environment.runtime.name,
       handler: environment.runtime.handler,
       backend: environment.runtime.backend,

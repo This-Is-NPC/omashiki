@@ -70,7 +70,9 @@ multiple choices fit and the user did not select one, ask rather than guessing.
 
 The environment determines the harness, provider configuration, credentials,
 network, mounts, resources, and model policy. A caller cannot override those
-controls in a job.
+controls in a job. Each environment's `sink` decides `repo`: send a registered
+repository name when `sink` is `git`, and omit `repo` when it is `files` or
+`none`.
 
 ## Submit And Follow Jobs
 

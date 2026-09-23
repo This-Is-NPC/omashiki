@@ -432,7 +432,14 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     refute repositories.resp_body =~ root
     assert environments.status == 200
     refute environments.resp_body =~ "credentials"
-    environment = json_response(environments, 200)["data"] |> List.first()
+    listed = json_response(environments, 200)["data"]
+
+    assert Map.new(listed, &{&1["name"], &1["sink"]}) == %{
+             "safe" => "git",
+             "notes" => "files"
+           }
+
+    environment = Enum.find(listed, &(&1["name"] == "safe"))
     assert environment["runtime"] == "docker.runc.debian"
     assert environment["handler"] == "runc"
     assert environment["backend"] == "docker"

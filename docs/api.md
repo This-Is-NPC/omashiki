@@ -103,6 +103,45 @@ curl --fail-with-body -sS \
 The served file is the versioned skill with the installation URL filled in.
 The skill points at `/api/v1/openapi.json` for routes and schemas.
 
+## Discovery
+
+`GET /repositories` lists the registered repositories with `name` and `base_branch`.
+`GET /environments` lists the registered environments.
+Both require the `read` scope.
+
+```json
+{
+  "data": [
+    {
+      "name": "opencode",
+      "sink": "git",
+      "preset": "opencode",
+      "plugin": "opencode",
+      "runtime": "docker.runc.debian",
+      "handler": "runc",
+      "backend": "docker",
+      "distribution": "debian",
+      "image": "omashiki/agent:latest",
+      "timeout_ms": 1800000,
+      "network": "restricted",
+      "capabilities": [],
+      "resources": {"cpus": 2.0, "memory": "2GB", "pids": 256}
+    }
+  ]
+}
+```
+
+`sink` is `git`, `files`, or `none`.
+It decides whether a job for that environment takes `repo`:
+
+| `sink` | `repo` in the job request |
+| --- | --- |
+| `git` | Required. Use a name from `GET /repositories`. |
+| `files` | Omit it. A request with `repo` is rejected. |
+| `none` | Omit it. A request with `repo` is rejected. |
+
+[Result sinks](configuration.md#result-sinks) describes the output of each sink.
+
 ## Wait and listing
 
 `GET /jobs/{id}/result?wait=60` holds the connection until the job is terminal or the wait expires, to a maximum of 60 seconds.

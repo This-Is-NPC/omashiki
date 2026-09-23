@@ -375,11 +375,17 @@ defmodule OmashikiWeb.ApiSpec.Schemas.Environment do
     title: "Environment",
     type: :object,
     additionalProperties: false,
-    required: [:name],
+    required: [:name, :sink],
     properties: %{
       name: %Schema{type: :string},
       preset: %Schema{type: :string},
       plugin: %Schema{type: :string},
+      sink: %Schema{
+        type: :string,
+        enum: ["git", "files", "none"],
+        description:
+          "Result type. Jobs for a git environment require repo; files and none jobs must omit it."
+      },
       runtime: %Schema{type: :string},
       handler: %Schema{type: :string},
       backend: %Schema{type: :string},
