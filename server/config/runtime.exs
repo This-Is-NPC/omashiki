@@ -180,21 +180,34 @@ if config_env() == :prod do
 end
 
 # ---------------------------------------------------------------------------
-# omashiki.toml — local configuration file at the repo root.
+# omashiki.toml — the house configuration file.
+#
+# One rule names it: OMASHIKI_CONFIG when set, otherwise omashiki.toml at the
+# repository root. A release has no repository root, so it reads the file only
+# from OMASHIKI_CONFIG. The resolved path becomes :config_path, which
+# Omashiki.Config.default_path/0 returns, so the infrastructure read here and
+# the registry loaded at boot come from the same file. .scripts/omashiki.py
+# config_file() applies the same rule for the dev tasks.
 #
 # Runs for every environment and comes last in the config chain
 # (config.exs -> <env>.exs -> runtime.exs), so it overrides the defaults in
-# dev.exs:40 and test.exs:29 rather than competing with them. That matters:
-# before this, the DB port had two independent defaults — one in
-# docker-compose.yml and one in dev.exs — that could silently disagree.
+# dev.exs and test.exs rather than competing with them.
 #
-# Entirely optional. A missing file (releases, a fresh clone, CI) leaves every
-# default untouched. Environment variables still win over it so CI can
-# override without editing the file.
+# A missing file leaves every default untouched. Environment variables still
+# win over it so CI can override without editing the file.
 # ---------------------------------------------------------------------------
-omashiki_toml = Path.expand("../../omashiki.toml", __DIR__)
+omashiki_toml =
+  case System.get_env("OMASHIKI_CONFIG") do
+    path when path not in [nil, ""] ->
+      Path.expand(path)
 
-if File.exists?(omashiki_toml) do
+    _ ->
+      unless System.get_env("RELEASE_ROOT"), do: Path.expand("../../omashiki.toml", __DIR__)
+  end
+
+if omashiki_toml, do: config(:omashiki, :config_path, omashiki_toml)
+
+if omashiki_toml && File.exists?(omashiki_toml) do
   cfg =
     case Toml.decode_file(omashiki_toml) do
       {:ok, map} ->
@@ -223,7 +236,7 @@ end
 # test suite has to stay hermetic: a developer running with `auth.enabled =
 # false` must not watch the auth-gate tests fail because of their own local
 # config. Ports and flags for the running app only.
-if File.exists?(omashiki_toml) and config_env() != :test do
+if omashiki_toml && File.exists?(omashiki_toml) && config_env() != :test do
   cfg = Toml.decode_file!(omashiki_toml)
   get = fn section, key -> get_in(cfg, [section, key]) end
 

@@ -206,12 +206,9 @@ defmodule Omashiki.Config.Rollout do
   end
 
   # Same precedence the rest of the app uses for an injectable source: explicit
-  # argument, then how this server was started, then application environment,
-  # then the repo-root default.
-  defp path(state, opts), do: Keyword.get(opts, :path) || state.path || config_path()
-
-  @doc "The file a reload re-reads when neither the call nor the server names one."
-  def config_path, do: Application.get_env(:omashiki, :config_path) || Config.default_path()
+  # argument, then how this server was started, then the house configuration
+  # file.
+  defp path(state, opts), do: Keyword.get(opts, :path) || state.path || Config.default_path()
 
   defp schedule(poll_ms), do: Process.send_after(self(), :drain_tick, poll_ms)
 

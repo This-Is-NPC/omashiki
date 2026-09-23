@@ -35,15 +35,14 @@ import statistics
 import sys
 import threading
 import time
-import tomllib
 import urllib.error
 import urllib.request
 import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
-CONFIG_FILE = ROOT / "omashiki.toml"
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from omashiki import config  # noqa: E402
 
 TERMINAL = ("succeeded", "failed", "cancelled")
 ACTIVE = ("provisioning", "running")
@@ -59,11 +58,8 @@ DEFAULT_INSTRUCTION = (
 
 
 def configured_port(default: int = 4010) -> int:
-    """App port from omashiki.toml, same source `.scripts/omashiki.py` reads."""
-    if not CONFIG_FILE.exists():
-        return default
-    with CONFIG_FILE.open("rb") as fh:
-        return tomllib.load(fh).get("app", {}).get("port", default)
+    """App port from the house configuration file `.scripts/omashiki.py` names."""
+    return config().get("app", {}).get("port", default)
 
 
 class ApiError(Exception):

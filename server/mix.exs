@@ -57,7 +57,7 @@ defmodule Omashiki.MixProject do
       {:ecto_sql, "~> 3.14"},
       {:postgrex, "~> 0.22.4"},
       {:jason, "~> 1.2"},
-      # Reads omashiki.toml at the repo root (see config/runtime.exs). Pure
+      # Reads omashiki.toml (see config/runtime.exs). Pure
       # Elixir, no NIF — runtime.exs must be able to parse it before boot.
       {:toml, "~> 0.7"},
       {:mint, "~> 1.9.3"},

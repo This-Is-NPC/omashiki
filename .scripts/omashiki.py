@@ -16,7 +16,6 @@ import tomllib
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SERVER = ROOT / "server"
 ASSETS = SERVER / "assets"
-CONFIG_FILE = ROOT / "omashiki.toml"
 
 # Build recipes are keyed by plugin; image tags come from the runtime catalog.
 AGENT_IMAGE_REPOSITORIES = {
@@ -36,12 +35,23 @@ AGENT_IMAGE_BUILDS = {
 }
 
 
+def config_file() -> pathlib.Path:
+    """The house configuration file: OMASHIKI_CONFIG when set, otherwise
+    omashiki.toml at the repository root. server/config/runtime.exs applies the
+    same rule, so the ports read here are the ones the server reads."""
+    path = os.environ.get("OMASHIKI_CONFIG", "")
+    if path:
+        return pathlib.Path(path).expanduser().resolve()
+    return ROOT / "omashiki.toml"
+
+
 def config() -> dict:
-    """omashiki.toml, or an empty mapping. Absent is fine — every value has a
-    default further down the chain (see server/config/runtime.exs)."""
-    if not CONFIG_FILE.exists():
+    """The house configuration file, or an empty mapping. Absent is fine —
+    every value has a default further down the chain."""
+    path = config_file()
+    if not path.exists():
         return {}
-    with CONFIG_FILE.open("rb") as fh:
+    with path.open("rb") as fh:
         return tomllib.load(fh)
 
 
@@ -92,6 +102,9 @@ def task_env() -> dict:
         value = cfg.get(section, {}).get(key)
         if value is not None and var not in os.environ:
             env[var] = str(value)
+    # Spawned commands run in server/, where a relative path names another file.
+    if os.environ.get("OMASHIKI_CONFIG"):
+        env["OMASHIKI_CONFIG"] = str(config_file())
     return env
 
 

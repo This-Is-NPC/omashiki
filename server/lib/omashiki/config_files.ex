@@ -349,7 +349,7 @@ defmodule Omashiki.ConfigFiles do
 
   # -- store -------------------------------------------------------------------
 
-  defp live_path(:config), do: Path.expand(Rollout.config_path())
+  defp live_path(:config), do: Config.default_path()
   defp live_path(:views), do: TaskViews.path()
 
   defp root(kind), do: Path.dirname(live_path(kind))

@@ -4,6 +4,20 @@ The house reads its registry from `omashiki.toml`.
 A worker reads machine settings from `worker.toml`.
 Use the [example files](../examples/README.md) for complete configurations.
 
+## File location
+
+The house reads `omashiki.toml` from the path in `OMASHIKI_CONFIG`.
+A relative path is resolved against the directory you start the house or `mise` task from.
+Without `OMASHIKI_CONFIG`, a checkout reads `omashiki.toml` at the repository root.
+
+A release, such as the container image, has no repository root.
+Set `OMASHIKI_CONFIG` for a manager or embedded house started from a release.
+Without it, the house stops at boot with `OMASHIKI_CONFIG is not set`.
+A worker does not read this file.
+
+Every section comes from the same file, `[app]`, `[db]`, and `[auth]` included.
+The `mise` tasks and the Config screen use the same file.
+
 ## Terms
 
 | Term | Meaning |

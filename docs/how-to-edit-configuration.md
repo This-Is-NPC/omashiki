@@ -90,6 +90,7 @@ Select **Reload** to open the current content. The reload replaces your unsaved 
 
 The page writes the live files at their usual paths.
 The house configuration is the `OMASHIKI_CONFIG` file, or `omashiki.toml` at the repository root.
+See [File location](configuration.md#file-location).
 The views file is at its [usual location](how-to-customize-task-views.md#file-location).
 Documents and their history live in `.omashiki-files/` next to each live file.
 The house does not read this directory at boot.

@@ -118,15 +118,15 @@ defmodule Omashiki.Config do
     source: :empty
   }
 
-  @doc "Default path: `OMASHIKI_CONFIG` when set, otherwise repo-root `omashiki.toml`."
-  def default_path do
-    case System.get_env("OMASHIKI_CONFIG") do
-      path when is_binary(path) and path != "" ->
-        Path.expand(path)
+  @doc """
+  The house configuration file, as `config/runtime.exs` resolved it:
+  `OMASHIKI_CONFIG` when set, otherwise `omashiki.toml` at the repository root.
 
-      _ ->
-        Path.expand("../../../omashiki.toml", __DIR__)
-    end
+  Raises `Omashiki.Config.Error` in a release started without `OMASHIKI_CONFIG`.
+  """
+  def default_path do
+    Application.get_env(:omashiki, :config_path) ||
+      raise Error, "OMASHIKI_CONFIG is not set; a release reads omashiki.toml only from that path"
   end
 
   @doc """
