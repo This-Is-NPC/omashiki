@@ -3,6 +3,9 @@
 Use a handler to convert tracker events into Omashiki requests.
 The handler also receives terminal notifications from the house.
 
+For a ready-made setup, follow the [GitHub issue triage recipe](../examples/github-triage/README.md).
+It triages each new issue with an agent that acts on GitHub as an App.
+
 ## Before you start
 
 Complete [one manual submission](how-to-submit-a-job.md).

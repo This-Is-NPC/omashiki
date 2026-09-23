@@ -12,6 +12,7 @@ Replace example paths, registered names, and secrets with your installation valu
 | [worker.toml](worker.toml) | Worker limits and Docker settings. |
 | [ui.toml](ui.toml) | Task views for the browser Home screen. |
 | [handler/github_issue_handler.py](handler/github_issue_handler.py) | Labelled GitHub issue admission and signed terminal callback verification. |
+| [github-triage/](github-triage/README.md) | Ready-made GitHub issue triage: an agent labels, answers, and closes new issues. |
 | [loadtest.omashiki.toml](loadtest.omashiki.toml) | Test registry declarations for the internal load-test procedure. |
 
 ## Select a deployment

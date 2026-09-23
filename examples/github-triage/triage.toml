@@ -1,0 +1,51 @@
+# GitHub issue triage: a piece of omashiki.toml.
+#
+# Load it from the root file with
+#
+#   include = ["examples/github-triage/triage.toml"]
+#
+# The agent reads each new issue, labels it, comments, and closes jokes as not
+# planned. It acts on GitHub through the identity tools only: no repository,
+# no code, no result to deliver. See examples/github-triage/README.md.
+
+# The GitHub App the agent acts as. Replace both IDs with your App's values.
+# The key must be an ${env:VAR} reference; a literal key is refused.
+[identities.triage-bot]
+kind = "github-app"
+app_id = "123456"
+installation_id = "987654"
+private_key = "${env:TRIAGE_BOT_PRIVATE_KEY}"
+
+# OpenCode is the harness that receives the identity tools. Same options as
+# [presets.opencode] in the root file.
+[presets.triage]
+plugin = "opencode"
+identities = ["triage-bot"]
+options = { model = "opencode-go/glm-5.3-flash", auth_path = "/run/omashiki/state/auth.json", config_path = "/run/omashiki/state/opencode.json" }
+
+[environments.triage]
+runtime = "docker.runc.debian"
+# Nothing to deliver: the job is what the agent does on GitHub. A none job
+# takes no repository, so the house needs no [repositories] for it.
+sink = "none"
+packages = []
+preset = "triage"
+# No lifecycle steps, so no commands to allow.
+executables = []
+# Model access through the host credential the root file declares.
+credentials = ["opencode-local"]
+# The GitHub identity tools, and no others.
+capabilities = ["github_*"]
+timeout_ms = 600000
+# OpenCode talks to the house over HTTP, so it needs the Docker network named
+# by OMASHIKI_AGENT_NETWORK_MODE. With "none" the harness cannot start.
+network = "restricted"
+mounts = []
+
+[environments.triage.policy]
+mode = "off"
+
+[environments.triage.resources]
+cpus = 1.0
+memory = "1GB"
+pids = 256
