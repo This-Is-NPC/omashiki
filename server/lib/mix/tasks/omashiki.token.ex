@@ -14,7 +14,8 @@ defmodule Mix.Tasks.Omashiki.Token do
 
   `create` prints the plaintext token once. `webhook` reads the signing
   secret from the named environment variable, so it never appears in argv
-  or shell history, and never prints it.
+  or shell history, and never prints it. The destination follows the
+  `[webhooks]` policy of `omashiki.toml`.
   """
 
   use Mix.Task
@@ -106,6 +107,7 @@ defmodule Mix.Tasks.Omashiki.Token do
 
       {false, url} when is_binary(url) ->
         secret = secret!(Keyword.get(opts, :secret_env))
+        Omashiki.Config.load_webhooks!()
 
         case ApiTokens.configure_webhook(token, %{destination: url, secret: secret}) do
           {:ok, configured} ->

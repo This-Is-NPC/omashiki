@@ -95,5 +95,12 @@ defmodule Omashiki.Config.CheckTest do
 
     assert {:ok, %{restart_required: []}} =
              Config.check(house_toml(model: "new-model"), ctx.path)
+
+    # The webhook policy is read live, so a reload is enough.
+    assert {:ok, %{restart_required: []}} =
+             Config.check(
+               house_toml() <> "\n[webhooks]\nallow_private_destinations = true\n",
+               ctx.path
+             )
   end
 end

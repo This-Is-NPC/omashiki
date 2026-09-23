@@ -9,6 +9,7 @@ defmodule Omashiki.Jobs.Webhooks do
   import Ecto.Query
 
   alias Omashiki.ApiTokens.Token
+  alias Omashiki.Config
   alias Omashiki.Jobs.{Job, JobAttempt, JobEvent, WebhookDelivery, WebhookDeliveryWorker}
   alias Omashiki.Repo
   alias Omashiki.Security.Network
@@ -58,7 +59,7 @@ defmodule Omashiki.Jobs.Webhooks do
       uri.userinfo -> {:error, :destination_userinfo_not_allowed}
       uri.fragment -> {:error, :destination_fragment_not_allowed}
       invalid_port?(uri.port) -> {:error, :invalid_destination_port}
-      private_host?(uri.host) -> {:error, :private_destination_not_allowed}
+      restricted_host?(uri.host) -> {:error, :private_destination_not_allowed}
       true -> {:ok, normalized_destination(uri)}
     end
   end
@@ -468,8 +469,7 @@ defmodule Omashiki.Jobs.Webhooks do
     scheme = String.to_atom(uri.scheme)
     transport_opts = if scheme == :https, do: [verify: :verify_peer], else: []
 
-    with :ok <- Network.authorize_host(uri.host),
-         {:ok, conn} <-
+    with {:ok, conn} <-
            Mint.HTTP.connect(scheme, uri.host, port,
              mode: :passive,
              transport_opts: transport_opts
@@ -651,6 +651,13 @@ defmodule Omashiki.Jobs.Webhooks do
     |> Map.put(:host, String.downcase(uri.host))
     |> URI.to_string()
   end
+
+  # The one destination rule. `validate_destination/1` applies it when a
+  # token's destination is set, when an event is queued and right before each
+  # delivery attempt, resolving the host every time. Redirects are never
+  # followed, so no other address is contacted.
+  defp restricted_host?(host),
+    do: not Config.webhooks().allow_private_destinations and private_host?(host)
 
   defp private_host?(host) do
     host = String.downcase(host)

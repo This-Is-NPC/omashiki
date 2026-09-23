@@ -50,6 +50,11 @@ File results use path validation and a digest-checked archive.
 A `none` result contains completion metadata.
 Cancellation cannot reverse an external action that already completed.
 
+## Terminal webhooks
+
+A terminal webhook refuses loopback and private addresses, so a token holder cannot make the house send requests into its own network.
+`[webhooks] allow_private_destinations = true` removes that protection for every token. Enable it only when you trust every token holder with that network.
+
 ## Limits
 
 | Item | Limit or policy |

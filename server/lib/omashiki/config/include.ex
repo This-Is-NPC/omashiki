@@ -17,8 +17,8 @@ defmodule Omashiki.Config.Include do
     * Only product sections may live in a piece: `identities`, `presets`,
       `environments`, `credentials`, `host_credentials`, `repositories`,
       `caches`. Infrastructure (`[app]`, `[db]`, `[auth]`, `[reload]`,
-      `[runtimes]`, `[limits]`, `[nodes]`) stays on the root, which
-      `runtime.exs` reads directly before `Config.load!/1` runs.
+      `[runtimes]`, `[limits]`, `[nodes]`, `[webhooks]`) stays on the root,
+      which `runtime.exs` reads directly before `Config.load!/1` runs.
     * The same entry name declared in two places is a collision. There is no
       overlay: the root and every piece must each own distinct names.
   """

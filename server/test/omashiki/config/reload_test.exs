@@ -190,17 +190,64 @@ defmodule Omashiki.Config.ReloadTest do
     end
   end
 
+  describe "[webhooks] policy" do
+    test "private destinations stay refused when the section is absent", ctx do
+      write(ctx, model: "m")
+      assert :ok = Config.load!(ctx.path)
+
+      assert %{allow_private_destinations: false} = Config.webhooks()
+    end
+
+    test "the opt-in applies on reload, with no restart", ctx do
+      write(ctx, model: "m", webhooks: "allow_private_destinations = true\n")
+      assert :ok = Config.load!(ctx.path)
+      assert %{allow_private_destinations: true} = Config.webhooks()
+
+      write(ctx, model: "m", webhooks: "allow_private_destinations = false\n")
+      assert {:ok, _info} = Config.reload(ctx.path)
+      assert %{allow_private_destinations: false} = Config.webhooks()
+    end
+
+    test "only the policy is published for a task beside the house", ctx do
+      write(ctx, model: "m", webhooks: "allow_private_destinations = true\n")
+
+      assert :ok = Config.load_webhooks!(ctx.path)
+      assert %{allow_private_destinations: true} = Config.webhooks()
+      assert Config.environments() == []
+    end
+
+    test "a value that is not a boolean is rejected", ctx do
+      write(ctx, model: "m", webhooks: ~s(allow_private_destinations = "yes"\n))
+
+      assert_raise Config.Error, ~r/webhooks\.allow_private_destinations/, fn ->
+        Config.load!(ctx.path)
+      end
+
+      assert_raise Config.Error, ~r/webhooks\.allow_private_destinations/, fn ->
+        Config.load_webhooks!(ctx.path)
+      end
+    end
+
+    test "an unknown field in [webhooks] is rejected", ctx do
+      write(ctx, model: "m", webhooks: "allow_private = true\n")
+
+      assert_raise Config.Error, ~r/unknown fields/, fn -> Config.load!(ctx.path) end
+    end
+  end
+
   defp write(ctx, opts) do
     model = Keyword.fetch!(opts, :model)
     api_key = Keyword.get(opts, :api_key, "plaintext-key")
     reload = Keyword.get(opts, :reload)
+    webhooks = Keyword.get(opts, :webhooks)
 
     reload_section = if reload, do: "\n[reload]\n" <> reload, else: ""
+    webhooks_section = if webhooks, do: "\n[webhooks]\n" <> webhooks, else: ""
 
     File.write!(ctx.path, """
     [limits]
     max_concurrent_containers = 4
-    #{reload_section}
+    #{reload_section}#{webhooks_section}
     [repositories.app]
     path = "repo"
     base_branch = "main"

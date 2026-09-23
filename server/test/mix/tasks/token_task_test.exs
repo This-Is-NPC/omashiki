@@ -120,7 +120,22 @@ defmodule Mix.Tasks.Omashiki.TokenTest do
     setup do
       auth(:none)
       {token, _} = api_token_fixture(Accounts.local_owner())
-      {:ok, token: token}
+
+      # The task reads the house policy from its file, so point it at one the
+      # test owns rather than whatever this checkout declares.
+      config =
+        Path.join(System.tmp_dir!(), "omashiki-token-#{System.unique_integer([:positive])}")
+
+      File.write!(config, "")
+      previous = Application.get_env(:omashiki, :config_path)
+      Application.put_env(:omashiki, :config_path, config)
+
+      on_exit(fn ->
+        Application.put_env(:omashiki, :config_path, previous)
+        File.rm(config)
+      end)
+
+      {:ok, token: token, config: config}
     end
 
     test "sets the destination from an env var secret without printing it", %{token: token} do
@@ -167,6 +182,17 @@ defmodule Mix.Tasks.Omashiki.TokenTest do
 
       refute error.message =~ "very-secret-value"
       assert is_nil(Repo.get!(Token, token.id).webhook_destination)
+    end
+
+    test "accepts a private destination when the house opts in", %{token: token, config: config} do
+      File.write!(config, "[webhooks]\nallow_private_destinations = true\n")
+      System.put_env(@secret_var, "very-secret-value")
+
+      TokenTask.run(
+        ~w(webhook #{token.id} --url http://127.0.0.1:8090/omashiki --secret-env #{@secret_var})
+      )
+
+      assert Repo.get!(Token, token.id).webhook_destination == "http://127.0.0.1:8090/omashiki"
     end
 
     test "clears the destination and keys", %{token: token} do

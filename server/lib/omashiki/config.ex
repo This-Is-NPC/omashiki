@@ -83,6 +83,10 @@ defmodule Omashiki.Config do
   @default_reload_policy %{mode: :gradual, drain_timeout_ms: 300_000}
   @reload_modes %{"gradual" => :gradual, "drain_all" => :drain_all}
 
+  # Where a token's terminal webhook may point. Private and loopback
+  # destinations stay refused unless the house opts in.
+  @default_webhooks %{allow_private_destinations: false}
+
   # Sections the running core reads once. `runtime.exs` reads `[app]`, `[db]`
   # and `[auth]` before boot; `[limits].max_concurrent_containers` and `[nodes]`
   # shape this node's execution capacity row, which only `Jobs.sync_capacity/0`
@@ -112,6 +116,7 @@ defmodule Omashiki.Config do
     limits: %{},
     restart_sections: %{},
     reload_policy: @default_reload_policy,
+    webhooks: @default_webhooks,
     generation: 0,
     loaded_at: nil,
     path: nil,
@@ -136,11 +141,24 @@ defmodule Omashiki.Config do
   section is absent, a required field is missing, or the TOML is unreadable.
   """
   def load!(path \\ default_path()) when is_binary(path) do
-    unless File.exists?(path) do
-      raise Error, "omashiki.toml not found at #{path}"
-    end
+    path |> read_file!() |> build_file!(path, %{}) |> put_snapshot!()
+  end
 
-    path |> File.read!() |> build_file!(path, %{}) |> put_snapshot!()
+  @doc """
+  Publish only the `[webhooks]` policy of the file at `path`.
+
+  For a task that runs beside the house, such as `mix omashiki.token`, and
+  applies the house's webhook policy without loading its registry.
+  """
+  def load_webhooks!(path \\ default_path()) when is_binary(path) do
+    webhooks =
+      path
+      |> read_file!()
+      |> decode_file!(path)
+      |> section_map("webhooks")
+      |> build_webhooks!()
+
+    snapshot() |> Map.put(:webhooks, webhooks) |> put_snapshot!()
   end
 
   @doc """
@@ -163,12 +181,25 @@ defmodule Omashiki.Config do
     error -> {:error, Exception.message(error)}
   end
 
+  defp read_file!(path) do
+    unless File.exists?(path) do
+      raise Error, "omashiki.toml not found at #{path}"
+    end
+
+    File.read!(path)
+  end
+
   defp build_file!(content, path, pieces) do
+    content
+    |> decode_file!(path)
+    |> Include.expand!(path, pieces)
+    |> build_snapshot!(path, :toml, require_sections?: true)
+  end
+
+  defp decode_file!(content, path) do
     case Toml.decode(content, filename: path) do
       {:ok, map} ->
         map
-        |> Include.expand!(path, pieces)
-        |> build_snapshot!(path, :toml, require_sections?: true)
 
       {:error, reason} ->
         raise Error, "omashiki.toml at #{path} is unreadable: #{Error.toml_reason(reason)}"
@@ -252,6 +283,13 @@ defmodule Omashiki.Config do
   Declared `[reload]` policy: `%{mode: :gradual | :drain_all, drain_timeout_ms: pos_integer}`.
   """
   def reload_policy, do: snapshot().reload_policy
+
+  @doc """
+  Declared `[webhooks]` policy: `%{allow_private_destinations: boolean}`.
+
+  Read live, so a reload applies it to the next configuration and delivery.
+  """
+  def webhooks, do: snapshot().webhooks
 
   # The single `:persistent_term` write. Everything above it can raise; nothing
   # below it can, so the term is either the whole previous generation or the
@@ -535,6 +573,7 @@ defmodule Omashiki.Config do
 
     limits = build_limits(section_map(map, "limits"))
     reload_policy = build_reload_policy!(section_map(map, "reload"))
+    webhooks = build_webhooks!(section_map(map, "webhooks"))
 
     %{
       credentials: credentials,
@@ -551,6 +590,7 @@ defmodule Omashiki.Config do
       limits: limits,
       restart_sections: Map.take(map, @restart_sections),
       reload_policy: reload_policy,
+      webhooks: webhooks,
       path: path,
       source: source
     }
@@ -594,6 +634,20 @@ defmodule Omashiki.Config do
       end
 
     %{mode: mode, drain_timeout_ms: drain_timeout_ms}
+  end
+
+  defp build_webhooks!(section) do
+    section = stringify_keys(section)
+    reject_unknown_fields!(section, ~w(allow_private_destinations), "webhooks")
+
+    case Map.get(section, "allow_private_destinations", false) do
+      allow when is_boolean(allow) ->
+        %{allow_private_destinations: allow}
+
+      other ->
+        raise Error,
+              "webhooks.allow_private_destinations must be true or false, got #{inspect(other)}"
+    end
   end
 
   defp section(map, key) do

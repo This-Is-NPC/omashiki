@@ -61,7 +61,8 @@ The applied document and included files cannot be deleted.
 
 ## Changes that need a restart
 
-A reload applies registry sections only.
+A reload applies the registry sections, `[webhooks]`, and `[reload]` without a restart.
+A changed `[reload]` mode or drain timeout governs the next reload, not the one that applies it.
 Changes to `[app]`, `[db]`, `[auth]`, `[limits]`, and `[nodes]` take effect after a restart.
 Before you confirm a save or an apply, the page lists these sections in a `Restart required` warning.
 The file is still written. Restart the house to apply those sections.

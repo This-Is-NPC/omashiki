@@ -65,7 +65,9 @@ mix omashiki.token webhook TOKEN_ID \
 ```
 
 The destination must use the handler's reachable `/omashiki` URL.
-The house refuses loopback and private addresses.
+The house refuses loopback and private addresses by default.
+For a handler on the house machine or local network, set `allow_private_destinations = true` under `[webhooks]` in `omashiki.toml`.
+See [terminal webhook destinations](configuration.md#terminal-webhook-destinations).
 The task reads the secret from the named variable and never prints it.
 The secret must have at least 8 bytes.
 Setting the variable in the handler alone does not configure the house.

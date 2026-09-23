@@ -152,5 +152,7 @@ Run `mise run doctor` first. It reports most setup problems with a fix.
 | The job succeeds but nothing changes on GitHub | Check that the App has **Issues: Read and write** and is installed on the repository. |
 
 The same error is in `GET /api/v1/jobs/<id>`. See [follow a job](../../docs/how-to-follow-and-retrieve-a-job.md).
-The house does not notify the handler when the job ends. The agent's work is on GitHub.
+The recipe sets no terminal webhook, so the house does not notify the handler when the job ends. The agent's work is on GitHub.
+To receive that notification on this local handler, set `[webhooks] allow_private_destinations = true` in `omashiki.toml`.
+Then set the token's webhook to `http://127.0.0.1:8090/omashiki`. See [the return path](../../docs/how-to-connect-an-issue-tracker.md#3-configure-the-return-path).
 For the tools and the identity model, see [agent identity](../../docs/how-to-configure-an-agent-identity.md).

@@ -42,6 +42,7 @@ Use these terms consistently in requests and documentation.
 | `[db]` | Database connection settings used by local tasks. |
 | `[auth]` | Browser and API authentication mode. |
 | `[reload]` | Registry reload mode and drain timeout. |
+| `[webhooks]` | Whether terminal webhooks may use loopback and private addresses. |
 | `[limits]` | Local container capacity and default resource limits. |
 | `[nodes.<name>]` | Declared embedded nodes in a shared-database deployment. |
 | `[repositories.<name>]` | Git remote or local path, base branch, and Git access settings. |
@@ -156,6 +157,22 @@ A configuration reload does not cancel user work.
 
 The restart sections are `[app]`, `[db]`, `[auth]`, `[limits]`, and `[nodes]`.
 To validate, apply, and undo configuration changes from the browser, see [edit the configuration in the browser](how-to-edit-configuration.md).
+
+## Terminal webhook destinations
+
+By default, a token's terminal webhook cannot use a loopback, link-local, or private address.
+The house checks the address when the destination is set, when a job ends, and before each delivery.
+
+```toml
+[webhooks]
+allow_private_destinations = true
+```
+
+`allow_private_destinations = true` accepts those addresses at every check.
+Use it for a handler on the house machine or the local network.
+The value must be `true` or `false`, and the section stays in the root file.
+A reload applies a change without a restart.
+With the value back at `false`, the house stops delivering to a private destination that is already set.
 
 ## Task views file
 

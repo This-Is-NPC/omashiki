@@ -40,6 +40,50 @@ defmodule Omashiki.Jobs.WebhooksTest do
     refute inspect(Repo.get!(Token, token.id)) =~ "client-secret"
   end
 
+  test "the house opt-in admits and delivers to a loopback destination", %{
+    user: user,
+    token: token
+  } do
+    allow_private_destinations(true)
+    port = receiver(self())
+
+    assert {:ok, configured} =
+             Webhooks.configure(token, %{
+               destination: "http://127.0.0.1:#{port}/hook",
+               secret: "client-secret"
+             })
+
+    assert configured.webhook_destination == "http://127.0.0.1:#{port}/hook"
+    {_job, _attempt, delivery} = terminal_fixture(user, token, "succeeded")
+
+    assert {:ok, :delivered} = Webhooks.deliver(delivery.id)
+    assert_receive {:received, request}
+    assert request =~ "POST /hook HTTP/1.1"
+    assert request =~ "x-webhook-signature: v1="
+  end
+
+  test "withdrawing the opt-in refuses delivery to a configured private destination", %{
+    user: user,
+    token: token
+  } do
+    allow_private_destinations(true)
+
+    assert {:ok, _} =
+             Webhooks.configure(token, %{
+               destination: "http://127.0.0.1:9/hook",
+               secret: "client-secret"
+             })
+
+    {_job, _attempt, delivery} = terminal_fixture(user, token, "succeeded")
+    allow_private_destinations(false)
+
+    assert {:retry, _} =
+             Webhooks.deliver(delivery.id, transport: fn _, _, _ -> flunk("not sent") end)
+
+    persisted = Repo.get!(WebhookDelivery, delivery.id)
+    assert persisted.last_error["code"] == "private_destination_not_allowed"
+  end
+
   test "canonical payload signs and rejects replayed timestamps" do
     payload = %{"b" => %{"a" => true}, "a" => 1, "timestamp" => "2026-08-24T10:00:00Z"}
 
@@ -205,6 +249,27 @@ defmodule Omashiki.Jobs.WebhooksTest do
       |> Repo.update!()
 
     assert {:error, :already_delivered} = Webhooks.redeliver(job.id, delivered.id, token)
+  end
+
+  defp allow_private_destinations(allow),
+    do: merge_config!(%{"webhooks" => %{"allow_private_destinations" => allow}})
+
+  # A one-request HTTP server on loopback that answers 204 and hands the raw
+  # request to `test_pid`.
+  defp receiver(test_pid) do
+    {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+    {:ok, port} = :inet.port(listen)
+
+    spawn_link(fn ->
+      {:ok, client} = :gen_tcp.accept(listen)
+      {:ok, request} = :gen_tcp.recv(client, 0, 5_000)
+      send(test_pid, {:received, request})
+      :ok = :gen_tcp.send(client, "HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n")
+      :gen_tcp.close(client)
+    end)
+
+    on_exit(fn -> :gen_tcp.close(listen) end)
+    port
   end
 
   defp configure!(token) do
