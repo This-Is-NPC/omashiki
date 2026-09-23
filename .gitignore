@@ -6,6 +6,8 @@
 # --- Generated at runtime or on first boot --------------------------------
 # Local secrets and lock files, generated on first boot.
 .omashiki/
+# Named config and views files, with their history, edited from the Config screen.
+.omashiki-files/
 # Per-attempt Git worktrees.
 .omashiki-worktrees/
 # Disposable nested repository, rebuilt by .scripts/overture_e2e.py.

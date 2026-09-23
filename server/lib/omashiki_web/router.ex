@@ -48,6 +48,7 @@ defmodule OmashikiWeb.Router do
       live "/", TaskViewsLive, :index
       live "/system", OverviewLive, :index
       live "/config", ConfigLive, :index
+      live "/config/files", ConfigFilesLive, :index
     end
   end
 

@@ -405,7 +405,7 @@ class Harness:
             "OMASHIKI_WORKER_TOKEN": self.worker_token,
             "OMASHIKI_ENROLL_SECRET": self.enroll_secret,
             "SECRET_KEY_BASE": "compose-worker-e2e-secret",
-            "OMASHIKI_CONFIG_HOST": str(E2E_CONFIG.resolve()),
+            "OMASHIKI_CONFIG_DIR": str(E2E_CONFIG.resolve().parent),
             "OMASHIKI_HOST_HOME": str(self.host_home),
         })
         return env

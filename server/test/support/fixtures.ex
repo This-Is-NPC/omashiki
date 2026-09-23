@@ -28,6 +28,68 @@ defmodule Omashiki.Fixtures do
     :ok
   end
 
+  @doc """
+  A complete `omashiki.toml` for a root prepared with `copy_plugins!/1` and a
+  Git repository at `repo`. `credentials: false` leaves `[credentials]` for a
+  piece; `credential_toml/1` writes it.
+  """
+  def house_toml(opts \\ []) do
+    credentials =
+      if Keyword.get(opts, :credentials, true),
+        do: credential_toml(Keyword.get(opts, :model, "some-model")),
+        else: ""
+
+    """
+    [limits]
+    max_concurrent_containers = #{Keyword.get(opts, :containers, 4)}
+
+    [repositories.app]
+    path = "repo"
+    base_branch = "main"
+
+    [runtimes.docker.runc.debian.images]
+    opencode = "omashiki/agent:latest"
+
+    [presets.opencode]
+    plugin = "opencode"
+
+    [environments.opencode]
+    runtime = "docker.runc.debian"
+    sink = "git"
+    packages = []
+    preset = "opencode"
+    executables = ["git"]
+    credentials = ["provider"]
+    caches = []
+    timeout_ms = 1800000
+    network = "restricted"
+    mounts = []
+    pre_steps = []
+    post_steps = []
+
+    [environments.opencode.policy]
+    mode = "off"
+
+    [environments.opencode.resources]
+    cpus = 2.0
+    memory = "2GB"
+    pids = 256
+    """ <> credentials
+  end
+
+  @doc "Root ignores file permissions, so read-only directory tests cannot run as root."
+  def root_user?, do: System.cmd("id", ["-u"]) |> elem(0) |> String.trim() == "0"
+
+  def credential_toml(model) do
+    """
+
+    [credentials.provider]
+    provider = "openai_compat"
+    model = "#{model}"
+    api_key = "plaintext-key"
+    """
+  end
+
   def merge_config!(partial) when is_map(partial) do
     partial = stringify_keys(partial)
 

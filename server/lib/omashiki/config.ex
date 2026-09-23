@@ -56,6 +56,13 @@ defmodule Omashiki.Config do
 
     @impl true
     def exception(msg) when is_binary(msg), do: %__MODULE__{message: msg}
+
+    @doc "Why a TOML file did not decode. The decoder's own text names the file and line."
+    def toml_reason({:invalid_toml, message}) when is_binary(message),
+      do: String.trim_trailing(message)
+
+    def toml_reason(reason) when is_binary(reason), do: reason
+    def toml_reason(reason), do: inspect(reason)
   end
 
   @persistent_key {__MODULE__, :snapshot}
@@ -76,6 +83,20 @@ defmodule Omashiki.Config do
   @default_reload_policy %{mode: :gradual, drain_timeout_ms: 300_000}
   @reload_modes %{"gradual" => :gradual, "drain_all" => :drain_all}
 
+  # Sections the running core reads once. `runtime.exs` reads `[app]`, `[db]`
+  # and `[auth]` before boot; `[limits].max_concurrent_containers` and `[nodes]`
+  # shape this node's execution capacity row, which only `Jobs.sync_capacity/0`
+  # writes, at boot.
+  @restart_sections ~w(app db auth limits nodes)
+  @summarized_sections [
+    :environments,
+    :presets,
+    :identities,
+    :repositories,
+    :credentials,
+    :caches
+  ]
+
   @empty %{
     credentials: [],
     host_credentials: [],
@@ -89,6 +110,7 @@ defmodule Omashiki.Config do
     current_machine: nil,
     registry_digest: nil,
     limits: %{},
+    restart_sections: %{},
     reload_policy: @default_reload_policy,
     generation: 0,
     loaded_at: nil,
@@ -118,14 +140,65 @@ defmodule Omashiki.Config do
       raise Error, "omashiki.toml not found at #{path}"
     end
 
-    case Toml.decode_file(path) do
+    path |> File.read!() |> build_file!(path, %{}) |> put_snapshot!()
+  end
+
+  @doc """
+  Validate `content` as if it were the file at `path`, without applying it.
+
+  Builds the snapshot exactly as `load!/1` does — includes resolved next to
+  `path`, required sections enforced, the same messages — and never publishes
+  it. `pieces:` maps an absolute include path to content read in place of that
+  file.
+
+  Returns `{:ok, summary}` comparing the result with the live generation: the
+  names added, removed and changed per declared section, and
+  `restart_required`, the sections whose change only a restart applies. A
+  rejected file returns `{:error, message}`.
+  """
+  def check(content, path, opts \\ []) when is_binary(content) and is_binary(path) do
+    built = build_file!(content, path, Keyword.get(opts, :pieces, %{}))
+    {:ok, summarize(built, snapshot())}
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
+
+  defp build_file!(content, path, pieces) do
+    case Toml.decode(content, filename: path) do
       {:ok, map} ->
-        map = Include.expand!(map, path)
-        put_snapshot!(build_snapshot!(map, path, :toml, require_sections?: true))
+        map
+        |> Include.expand!(path, pieces)
+        |> build_snapshot!(path, :toml, require_sections?: true)
 
       {:error, reason} ->
-        raise Error, "omashiki.toml at #{path} is unreadable: #{format_reason(reason)}"
+        raise Error, "omashiki.toml at #{path} is unreadable: #{Error.toml_reason(reason)}"
     end
+  end
+
+  defp summarize(built, live) do
+    @summarized_sections
+    |> Map.new(fn section ->
+      before = Map.new(Map.fetch!(live, section), &{&1.name, &1})
+      next = Map.new(Map.fetch!(built, section), &{&1.name, &1})
+
+      changed =
+        for {name, entry} <- next, Map.has_key?(before, name), before[name] != entry, do: name
+
+      {section,
+       %{
+         added: Enum.sort(Map.keys(next) -- Map.keys(before)),
+         removed: Enum.sort(Map.keys(before) -- Map.keys(next)),
+         changed: Enum.sort(changed)
+       }}
+    end)
+    |> Map.put(
+      :restart_required,
+      for(
+        section <- @restart_sections,
+        Map.get(built.restart_sections, section) != Map.get(live.restart_sections, section),
+        do: section
+      )
+    )
   end
 
   @doc """
@@ -476,6 +549,7 @@ defmodule Omashiki.Config do
       current_machine: resolve_current_machine!(registry.nodes),
       registry_digest: registry.registry_digest,
       limits: limits,
+      restart_sections: Map.take(map, @restart_sections),
       reload_policy: reload_policy,
       path: path,
       source: source
@@ -895,8 +969,6 @@ defmodule Omashiki.Config do
   defp type_name(v) when is_atom(v), do: "atom"
   defp type_name(v) when is_map(v), do: "table"
   defp type_name(_), do: "value"
-
-  defp format_reason(reason), do: inspect(reason)
 
   defp positive_int(nil), do: nil
   defp positive_int(n) when is_integer(n) and n > 0, do: n

@@ -162,6 +162,12 @@ defmodule OmashikiWeb.ConfigLive do
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-4">
+          <.link
+            navigate={~p"/config/files"}
+            class="border border-outline-variant px-4 py-2 font-label text-label-md uppercase tracking-[0.2em] text-on-surface hover:bg-surface-container-high"
+          >
+            Edit files
+          </.link>
           <button
             type="button"
             phx-click="reload_config"
@@ -170,8 +176,8 @@ defmodule OmashikiWeb.ConfigLive do
           >
             Reload configuration
           </button>
-          <p :if={@reload_result} class={["font-mono text-xs", reload_class(@reload_result)]}>
-            {reload_message(@reload_result)}
+          <p :if={@reload_result} class={["font-mono text-xs", Ops.reload_class(@reload_result)]}>
+            {Ops.reload_message(@reload_result)}
           </p>
         </div>
       </header>
@@ -399,29 +405,6 @@ defmodule OmashikiWeb.ConfigLive do
     </div>
     """
   end
-
-  defp reload_message({:ok, :draining}),
-    do: "Drain started; admission is paused until active attempts finish."
-
-  defp reload_message({:ok, %{changed?: false, generation: generation}}),
-    do: "Reloaded as generation #{generation}; the registry digest did not change."
-
-  defp reload_message({:ok, %{changed?: true, generation: generation}}),
-    do: "Applied generation #{generation}. Newly admitted jobs use it."
-
-  defp reload_message({:error, :drain_in_progress}),
-    do: "A rollout is already draining; wait for it to finish."
-
-  defp reload_message({:error, reason}),
-    do: "Reload rejected, previous configuration still serving: #{inspect_reason(reason)}"
-
-  defp reload_message(_result), do: ""
-
-  defp inspect_reason(reason) when is_binary(reason), do: reason
-  defp inspect_reason(reason), do: inspect(reason)
-
-  defp reload_class({:error, _reason}), do: "text-status-failed"
-  defp reload_class(_result), do: "text-status-succeeded"
 
   defp token_expiry(token) do
     case Token.status(token) do

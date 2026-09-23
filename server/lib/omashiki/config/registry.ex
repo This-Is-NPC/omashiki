@@ -1098,11 +1098,13 @@ defmodule Omashiki.Config.Registry do
   defp resolve_path("~/" <> rest, _base_dir), do: Path.join(System.user_home!(), rest)
   defp resolve_path(path, base_dir), do: Path.expand(path, base_dir)
 
-  defp contained?(path, root) do
+  @doc false
+  def contained?(path, root) do
     path == root or String.starts_with?(path, root <> "/")
   end
 
-  defp symlink_in_path?(path, root) do
+  @doc false
+  def symlink_in_path?(path, root) do
     relative = Path.relative_to(path, root)
 
     relative

@@ -11,15 +11,16 @@ Use a unique manager ID for each house on the worker.
 
 ## 1. Start separate managers
 
-The manager Compose file supports separate project names and configuration paths.
+The manager Compose file supports separate project names and configuration directories.
+Each directory holds that house's `omashiki.toml`.
 For example, with the corresponding secrets already available in the shell:
 
 ```bash
-MANAGER_PORT=4010 OMASHIKI_CONFIG_HOST=/srv/ana/omashiki.toml \
+MANAGER_PORT=4010 OMASHIKI_CONFIG_DIR=/srv/ana \
   OMASHIKI_WORKER_TOKEN="$ANA_TOKEN" \
   docker compose -p ana -f examples/compose.manager.yml up -d
 
-MANAGER_PORT=4020 OMASHIKI_CONFIG_HOST=/srv/joao/omashiki.toml \
+MANAGER_PORT=4020 OMASHIKI_CONFIG_DIR=/srv/joao \
   OMASHIKI_WORKER_TOKEN="$JOAO_TOKEN" \
   docker compose -p joao -f examples/compose.manager.yml up -d
 ```

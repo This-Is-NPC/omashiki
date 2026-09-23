@@ -11,11 +11,11 @@
 # starting the worker stack; the enroll script sends the same worker token.
 #
 # Many houses, the same machines: run this file once per house under its own
-# Compose project name, port, registry and worker token, then enroll the same
-# worker into each house with a distinct --manager-id:
-#   MANAGER_PORT=4010 OMASHIKI_CONFIG_HOST=/srv/ana/omashiki.toml \
+# Compose project name, port, config directory and worker token, then enroll
+# the same worker into each house with a distinct --manager-id:
+#   MANAGER_PORT=4010 OMASHIKI_CONFIG_DIR=/srv/ana \
 #     OMASHIKI_WORKER_TOKEN=$ANA_TOKEN docker compose -p ana -f examples/compose.manager.yml up -d
-#   MANAGER_PORT=4020 OMASHIKI_CONFIG_HOST=/srv/joao/omashiki.toml \
+#   MANAGER_PORT=4020 OMASHIKI_CONFIG_DIR=/srv/joao \
 #     OMASHIKI_WORKER_TOKEN=$JOAO_TOKEN docker compose -p joao -f examples/compose.manager.yml up -d
 #   mise run worker:enroll -- --manager-id ana  --manager-url http://ana.lan:4010  --worker-token $ANA_TOKEN
 #   mise run worker:enroll -- --manager-id joao --manager-url http://joao.lan:4020 --worker-token $JOAO_TOKEN
@@ -55,13 +55,18 @@ services:
       SECRET_KEY_BASE: ${SECRET_KEY_BASE:-dev-only-change-me}
       OMASHIKI_WORKER_TOKEN: ${OMASHIKI_WORKER_TOKEN:-worker-token-change-me}
       OMASHIKI_CONFIG: /config/omashiki.toml
+      OMASHIKI_UI_CONFIG: /config/ui.toml
       PORT: ${MANAGER_PORT:-4010}
       # OMASHIKI_MANAGER_URL passed to worker:enroll must be reachable FROM the
       # worker host (LAN, Tailscale, public), not 127.0.0.1 on the laptop.
     ports:
       - "${MANAGER_PORT:-4010}:${MANAGER_PORT:-4010}"
     volumes:
-      - ${OMASHIKI_CONFIG_HOST:-../omashiki.toml}:/config/omashiki.toml:ro
+      # The directory holding omashiki.toml and ui.toml, writable: the Config
+      # screen's Files page saves by renaming a new file over the old one,
+      # which a single-file bind mount cannot take, and keeps named copies and
+      # history in .omashiki-files/ beside them.
+      - ${OMASHIKI_CONFIG_DIR:-..}:/config
 
 volumes:
   pgdata:

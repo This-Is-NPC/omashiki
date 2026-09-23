@@ -14,7 +14,6 @@ defmodule OmashikiWeb.ConfigLiveTest do
 
     text = visible_text(html)
     refute text =~ "Save"
-    refute text =~ "Edit"
     refute text =~ "Persona"
     refute text =~ "restart to change"
   end

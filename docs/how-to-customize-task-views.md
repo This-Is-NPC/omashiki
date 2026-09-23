@@ -16,11 +16,13 @@ The views file changes only the screen. It cannot change a job, the queue, or th
 3. Open the Home screen at `/` in the browser.
 
 Result: the header shows `Views from` and the file path.
-The screen reads the file again every 2 seconds. A page reload is not necessary.
+The screen reads the file again every second. A page reload is not necessary.
 
 If the screen shows `Views file rejected`, read the listed problems.
 Correct the file and save it.
 The screen keeps the last valid views until the file is correct.
+
+To create and edit the file in the browser, with history and undo, see [edit the configuration in the browser](how-to-edit-configuration.md).
 
 ## File location
 

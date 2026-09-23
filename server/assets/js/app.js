@@ -23,8 +23,24 @@ import {LiveSocket} from "phoenix_live_view"
 import topbar from "../vendor/topbar"
 import BoardHeight from "./hooks/board_height"
 
-// The operator surface has no client-side authoring or drag-and-drop state.
-let hooks = {BoardHeight}
+// A hook whose code is downloaded when an element first mounts it, so pages
+// without that element never fetch it. Events pushed to the hook before its
+// code arrives are dropped; it reads its starting state from the element.
+const lazyHook = (load) => ({
+  mounted() {
+    load().then(({default: hook}) => {
+      if (this._destroyed) return
+      Object.assign(this, hook)
+      this.mounted()
+    })
+  },
+  destroyed() {
+    this._destroyed = true
+  },
+})
+
+// CodeMirror is most of the bundle and only the config files page uses it.
+let hooks = {BoardHeight, TomlEditor: lazyHook(() => import("./hooks/toml_editor"))}
 
 let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 let liveSocket = new LiveSocket("/live", Socket, {

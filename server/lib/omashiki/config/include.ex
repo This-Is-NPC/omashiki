@@ -33,19 +33,33 @@ defmodule Omashiki.Config.Include do
   @doc """
   Merge the root map with every included piece.
 
-  `root_path` locates the pieces; `map` is the decoded root. Returns the
+  `root_path` locates the pieces; `map` is the decoded root. `overrides` maps
+  an absolute piece path to content read in place of that file. Returns the
   unified map with the `include` key removed.
   """
-  @spec expand!(map(), String.t()) :: map()
-  def expand!(%{} = map, root_path) when is_binary(root_path) do
-    {entries, map} = Map.pop(map, "include", [])
-    base_dir = root_path |> Path.expand() |> Path.dirname()
+  @spec expand!(map(), String.t(), %{String.t() => String.t()}) :: map()
+  def expand!(%{} = map, root_path, overrides \\ %{}) when is_binary(root_path) do
+    base_dir = base_dir(root_path)
 
-    entries
+    map
+    |> pieces!(root_path)
+    |> Enum.reduce(Map.delete(map, "include"), fn piece_path, acc ->
+      merge_piece!(acc, piece_path, base_dir, overrides)
+    end)
+  end
+
+  @doc "Absolute paths of the pieces the decoded root `map` includes, in merge order."
+  @spec pieces!(map(), String.t()) :: [String.t()]
+  def pieces!(%{} = map, root_path) when is_binary(root_path) do
+    base_dir = base_dir(root_path)
+
+    map
+    |> Map.get("include", [])
     |> validate_entries!()
     |> Enum.flat_map(&resolve!(&1, base_dir))
-    |> Enum.reduce(map, fn piece_path, acc -> merge_piece!(acc, piece_path, base_dir) end)
   end
+
+  defp base_dir(root_path), do: root_path |> Path.expand() |> Path.dirname()
 
   defp validate_entries!(entries) when is_list(entries) do
     Enum.each(entries, fn
@@ -99,13 +113,22 @@ defmodule Omashiki.Config.Include do
     path
   end
 
-  defp merge_piece!(acc, piece_path, base_dir) do
+  defp merge_piece!(acc, piece_path, base_dir, overrides) do
     rel = Path.relative_to(piece_path, base_dir)
 
+    decoded =
+      case Map.fetch(overrides, piece_path) do
+        {:ok, content} -> Toml.decode(content, filename: piece_path)
+        :error -> Toml.decode_file(piece_path)
+      end
+
     piece =
-      case Toml.decode_file(piece_path) do
-        {:ok, decoded} -> decoded
-        {:error, reason} -> raise Error, "include #{rel} is unreadable: #{inspect(reason)}"
+      case decoded do
+        {:ok, decoded} ->
+          decoded
+
+        {:error, reason} ->
+          raise Error, "include #{rel} is unreadable: #{Error.toml_reason(reason)}"
       end
 
     if Map.has_key?(piece, "include") do

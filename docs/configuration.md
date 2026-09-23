@@ -140,6 +140,9 @@ Infrastructure changes require a process restart.
 If the timeout expires, the reload is abandoned and admission resumes.
 A configuration reload does not cancel user work.
 
+The restart sections are `[app]`, `[db]`, `[auth]`, `[limits]`, and `[nodes]`.
+To validate, apply, and undo configuration changes from the browser, see [edit the configuration in the browser](how-to-edit-configuration.md).
+
 ## Task views file
 
 The browser Home screen reads a separate `ui.toml` file.

@@ -57,4 +57,26 @@ defmodule OmashikiWeb.OperationHelpers do
   def format_tokens(nil), do: "—"
   def format_tokens(value) when is_integer(value), do: Integer.to_string(value)
   def format_tokens(value), do: to_string(value)
+
+  # What a configuration reload (`Omashiki.Config.Rollout.reload/0`) did.
+  def reload_message({:ok, :draining}),
+    do: "Drain started; admission is paused until active attempts finish."
+
+  def reload_message({:ok, %{changed?: false, generation: generation}}),
+    do: "Reloaded as generation #{generation}; the registry digest did not change."
+
+  def reload_message({:ok, %{changed?: true, generation: generation}}),
+    do: "Applied generation #{generation}. Newly admitted jobs use it."
+
+  def reload_message({:error, :drain_in_progress}),
+    do: "A rollout is already draining; wait for it to finish."
+
+  def reload_message({:error, reason}),
+    do: "Reload rejected, previous configuration still serving: #{inspect_reason(reason)}"
+
+  def reload_class({:error, _reason}), do: "text-status-failed"
+  def reload_class(_result), do: "text-status-succeeded"
+
+  defp inspect_reason(reason) when is_binary(reason), do: reason
+  defp inspect_reason(reason), do: inspect(reason)
 end

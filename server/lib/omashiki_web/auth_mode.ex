@@ -35,7 +35,7 @@ defmodule OmashikiWeb.AuthMode do
   """
   @spec assert_boot_safe!() :: :ok
   def assert_boot_safe! do
-    if mode() == :none and not endpoint_loopback_only?() do
+    if open_to_network?() do
       require Logger
 
       Logger.warning("""
@@ -54,6 +54,13 @@ defmodule OmashikiWeb.AuthMode do
   """
   @spec disabled?() :: boolean()
   def disabled?, do: mode() == :none
+
+  @doc """
+  True when authentication is off and the Endpoint is not loopback-only:
+  every peer that reaches the address acts as the local owner.
+  """
+  @spec open_to_network?() :: boolean()
+  def open_to_network?, do: disabled?() and not endpoint_loopback_only?()
 
   @doc "True when `ip` is IPv4/IPv6 loopback."
   @spec loopback_ip?(term()) :: boolean()

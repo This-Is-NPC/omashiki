@@ -70,6 +70,7 @@ defmodule OmashikiWeb.AuthModeTest do
 
     assert log =~ "auth is disabled"
     assert log =~ "without a credential"
+    assert AuthMode.open_to_network?()
   end
 
   test "assert_boot_safe! allows :none on loopback bind" do
@@ -89,5 +90,6 @@ defmodule OmashikiWeb.AuthModeTest do
     end)
 
     assert :ok = AuthMode.assert_boot_safe!()
+    refute AuthMode.open_to_network?()
   end
 end
