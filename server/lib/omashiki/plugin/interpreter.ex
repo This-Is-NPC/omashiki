@@ -247,16 +247,15 @@ defmodule Omashiki.Plugin.Interpreter do
 
   defp prepare_opencode_host(spec, context, _manifest, options) do
     with :ok <- HostCredentials.validate_mount(context.runtime_mounts, options["config_path"]),
-         :ok <- HostCredentials.validate_mount(context.runtime_mounts, options["auth_path"]) do
+         :ok <- HostCredentials.validate_mount(context.runtime_mounts, options["auth_path"]),
+         {:ok, config} <-
+           with_tool_servers(%{"$schema" => "https://opencode.ai/config.json"}, context, spec) do
       model = Map.get(spec.options, "model")
-      schema = Jason.encode!(%{"$schema" => "https://opencode.ai/config.json"})
 
       content =
-        if is_binary(model) and model != "" do
-          Jason.encode!(%{"$schema" => "https://opencode.ai/config.json", "model" => model})
-        else
-          schema
-        end
+        if is_binary(model) and model != "",
+          do: Jason.encode!(Map.put(config, "model", model)),
+          else: Jason.encode!(config)
 
       plan = launch_plan!(spec)
 
@@ -295,6 +294,28 @@ defmodule Omashiki.Plugin.Interpreter do
       }
     }
 
+    config
+    |> merge_tool_servers(context, spec, tools_token)
+    |> Jason.encode!()
+  end
+
+  # MCP servers the environment admits (identities included) reach the agent
+  # through the tools proxy, whichever way the engine reaches its model.
+  defp with_tool_servers(config, context, spec) do
+    if Omashiki.Tools.McpConfig.server_names(context.environment || %{}) == [] do
+      {:ok, config}
+    else
+      with %Job{} = job <- context.job,
+           {:ok, tools_token} <- Claims.issue("tools", job, %{}) do
+        {:ok, merge_tool_servers(config, context, spec, tools_token)}
+      else
+        nil -> {:error, :runtime_job_required}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  defp merge_tool_servers(config, context, spec, tools_token) do
     env = context.environment || %{}
 
     if Omashiki.Tools.McpConfig.server_names(env) != [] do
@@ -308,7 +329,6 @@ defmodule Omashiki.Plugin.Interpreter do
     else
       config
     end
-    |> Jason.encode!()
   end
 
   defp build_argv(manifest, options) do

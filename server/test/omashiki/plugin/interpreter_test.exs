@@ -261,6 +261,64 @@ defmodule Omashiki.Plugin.InterpreterTest do
     end
   end
 
+  test "opencode host prepare hands the identity tools to the agent", %{plugins: plugins} do
+    tmp = Path.join(System.tmp_dir!(), "omashiki-opencode-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(tmp)
+    auth = Path.join(tmp, "auth.json")
+    config = Path.join(tmp, "opencode.json")
+    File.write!(auth, "{}")
+    File.write!(config, "{}")
+
+    try do
+      manifest = Map.fetch!(plugins, "opencode")
+      spec = preset(manifest, %{"model" => "opencode-go/glm-5.3-flash"})
+
+      environment = %{
+        "name" => "triage",
+        "capabilities" => ["github_*"],
+        "preset" => %{"identities" => [%{"name" => "triage-bot", "kind" => "github-app"}]}
+      }
+
+      job = %Omashiki.Jobs.Job{
+        id: Ecto.UUID.generate(),
+        user_id: Ecto.UUID.generate(),
+        admitted_environment_digest: "digest",
+        status: "running"
+      }
+
+      context = %Context{
+        job: job,
+        profile: spec,
+        environment: environment,
+        host_base_url: "http://house:4010",
+        runtime_mounts: [
+          {auth, "/run/omashiki/state/auth.json", false},
+          {config, "/run/omashiki/state/opencode.json", false}
+        ]
+      }
+
+      assert {:ok, plan} = Interpreter.prepare(spec, context)
+
+      content =
+        plan.environment
+        |> Enum.find_value(fn
+          "OPENCODE_CONFIG_CONTENT=" <> json -> json
+          _ -> nil
+        end)
+        |> Jason.decode!()
+
+      assert content["model"] == "opencode-go/glm-5.3-flash"
+
+      assert %{"url" => "http://house:4010/api/v1/tools-proxy/triage-bot"} =
+               content["mcp"]["triage-bot"]
+
+      assert {:error, :runtime_job_required} =
+               Interpreter.prepare(spec, %Context{context | job: nil})
+    after
+      File.rm_rf!(tmp)
+    end
+  end
+
   test "admitted snapshot keeps only path, contents, and digest", %{manifest: manifest} do
     snapshot = Manifest.admitted_snapshot(manifest)
 
