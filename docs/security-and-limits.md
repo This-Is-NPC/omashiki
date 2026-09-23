@@ -78,9 +78,17 @@ Increasing that limit does not increase physical CPU, memory, or database capaci
 
 ## Secret rotation
 
-Changing `SECRET_KEY_BASE` invalidates existing API tokens.
-Changing `OMASHIKI_CLOAK_KEY` can make encrypted data unreadable.
-Keep the relevant key material when you back up persistent state.
+The house derives these values from `SECRET_KEY_BASE`. Changing it invalidates all of them:
+
+| Value | After the change |
+| --- | --- |
+| Browser sessions | Every operator signs in again. |
+| API tokens | Every token stops working. Issue new tokens. |
+| Terminal webhook secrets | Webhooks of jobs submitted before the change are not delivered, and failed deliveries cannot be redelivered. New tokens need their webhook secret again. |
+| Runtime claims | Running agents lose the gateway, the tools proxy, and the package proxy until their attempt ends. |
+
+A worker signs runtime claims that its manager verifies, so it uses the same `SECRET_KEY_BASE` as the manager.
+Keep `SECRET_KEY_BASE` when you back up persistent state.
 
 See [known limitations](what-does-not-work.md) before you rely on an unverified integration or runtime property.
 Implementation details belong in [the internal architecture](internal/architecture.md).

@@ -30,12 +30,11 @@ See [test procedures](how-to-run-tests.md) for commands and external prerequisit
 ## Secrets
 
 Keep `.env`, credential snapshots, and encryption keys out of Git.
-Development stores its Cloak key in `.omashiki/cloak_key`.
 Standalone installations can store release secrets in `~/.omashiki/secrets.env`.
 These secret files use mode `0600`.
 
-Changing `SECRET_KEY_BASE` invalidates existing API tokens.
-Changing `OMASHIKI_CLOAK_KEY` can make stored encrypted values unreadable.
+Changing `SECRET_KEY_BASE` invalidates browser sessions, API tokens, stored webhook secrets, and runtime claims.
+See [secret rotation](../security-and-limits.md#secret-rotation).
 Document required credential rotation with the change.
 
 ## Documentation language

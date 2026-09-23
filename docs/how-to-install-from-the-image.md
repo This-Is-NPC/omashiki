@@ -57,14 +57,15 @@ For other agents and for gateway access, see [configure model access](how-to-con
 
 ## 4. Start the house
 
-Set the session secret in `.env`. Compose reads this file from the same directory.
+Set the house secret in `.env`. Compose reads this file from the same directory.
 
 ```bash
 echo "SECRET_KEY_BASE=$(openssl rand -base64 48)" > .env
 docker compose up -d
 ```
 
-Keep `.env`. A new secret signs out every browser session.
+Keep `.env`. A new secret signs out every browser session and invalidates every API token.
+See [secret rotation](security-and-limits.md#secret-rotation) for everything else that it invalidates.
 To use another port, add `OMASHIKI_PORT=4020` to `.env`.
 The house applies database migrations when it starts.
 

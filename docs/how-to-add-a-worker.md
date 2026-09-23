@@ -28,6 +28,7 @@ OMASHIKI_MANAGER_URL=http://manager.lan:4010
 OMASHIKI_WORKER_URL=http://worker.lan:4012
 ```
 
+Use the same `SECRET_KEY_BASE` for the manager and the worker.
 Use the same worker token for the manager and enrollment request.
 Use the same enrollment secret for the worker listener and enrollment request.
 Set `OMASHIKI_HOST_HOME` to the execution account's actual home path.
