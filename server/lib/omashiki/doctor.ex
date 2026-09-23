@@ -8,7 +8,7 @@ defmodule Omashiki.Doctor do
   the host goes through an `Omashiki.Doctor.Probe`.
 
   The route check starts a container, so it runs only when asked (`route:
-  true`): at boot and from `mix omashiki.doctor`. Every other check is cheap
+  true`): at boot and from `Omashiki.Cli.Doctor`. Every other check is cheap
   enough to repeat.
   """
 

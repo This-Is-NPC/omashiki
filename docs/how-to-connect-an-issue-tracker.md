@@ -54,7 +54,7 @@ Follow the returned job ID through the [job API](how-to-follow-and-retrieve-a-jo
 ## 3. Configure the return path
 
 On the house machine, set the submitting token's terminal webhook.
-Find the token ID with `mix omashiki.token list`.
+Find the token ID with `mix omashiki.token list`, or `bin/token list` in the release image.
 Run from `server/`, with `OMASHIKI_WEBHOOK_SECRET` set to the handler's value:
 
 ```bash
@@ -68,11 +68,23 @@ The destination must use the handler's reachable `/omashiki` URL.
 The house refuses loopback and private addresses by default.
 For a handler on the house machine or local network, set `allow_private_destinations = true` under `[webhooks]` in `omashiki.toml`.
 See [terminal webhook destinations](configuration.md#terminal-webhook-destinations).
-The task reads the secret from the named variable and never prints it.
+The tool reads the secret from the named variable and never prints it.
 The secret must have at least 8 bytes.
 Setting the variable in the handler alone does not configure the house.
 
-To stop notifications, run `mix omashiki.token webhook TOKEN_ID --clear`.
+In an installation from the release image, run `bin/token` in the house container.
+Pass the variable into the container by name, so its value stays out of the command line:
+
+```bash
+docker compose -f examples/compose.manager.yml exec -e OMASHIKI_WEBHOOK_SECRET manager \
+  bin/token webhook TOKEN_ID \
+  --url https://handler.example.com/omashiki \
+  --secret-env OMASHIKI_WEBHOOK_SECRET
+```
+
+With authentication enabled, add `--user` with an operator's username or email.
+
+To stop notifications, run `mix omashiki.token webhook TOKEN_ID --clear`, or `bin/token webhook TOKEN_ID --clear` in the image.
 The public API has no webhook-configuration route.
 
 The handler verifies the terminal signature before it calls `on_terminal`.

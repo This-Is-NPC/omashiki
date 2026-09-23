@@ -1,19 +1,16 @@
-defmodule Mix.Tasks.Omashiki.TokenTest do
+defmodule Omashiki.Cli.TokenTest do
   use Omashiki.DataCase, async: false
 
-  alias Mix.Tasks.Omashiki.Token, as: TokenTask
   alias Omashiki.{Accounts, ApiTokens}
   alias Omashiki.ApiTokens.Token
+  alias Omashiki.Cli.Token, as: TokenCli
 
   @secret_var "OMASHIKI_TEST_TOKEN_WEBHOOK_SECRET"
 
   setup do
-    previous_shell = Mix.shell()
     previous_mode = Application.get_env(:omashiki, :auth_mode)
-    Mix.shell(Mix.Shell.Process)
 
     on_exit(fn ->
-      Mix.shell(previous_shell)
       Application.put_env(:omashiki, :auth_mode, previous_mode)
       System.delete_env(@secret_var)
     end)
@@ -23,21 +20,19 @@ defmodule Mix.Tasks.Omashiki.TokenTest do
 
   defp auth(mode), do: Application.put_env(:omashiki, :auth_mode, mode)
 
-  defp output do
-    Stream.repeatedly(fn ->
-      receive do
-        {:mix_shell, :info, [line]} -> line
-      after
-        0 -> nil
-      end
-    end)
-    |> Enum.take_while(& &1)
+  # The lines of a run that succeeded.
+  defp ok!(argv) do
+    assert {0, output} = TokenCli.run(argv)
+    String.split(output, "\n", trim: true)
   end
 
-  defp create(args) do
-    TokenTask.run(["create" | args])
-    output()
+  # The message of a run that failed.
+  defp failed!(argv) do
+    assert {1, output} = TokenCli.run(argv)
+    output
   end
+
+  defp create(args), do: ok!(["create" | args])
 
   describe "create" do
     test "issues a token for the local operator with auth disabled" do
@@ -57,9 +52,7 @@ defmodule Mix.Tasks.Omashiki.TokenTest do
       auth(:bearer)
       user = user_fixture(%{username: "alice"})
 
-      assert_raise Mix.Error, ~r/pass --user/, fn ->
-        TokenTask.run(~w(create --name demo --env app --scopes read))
-      end
+      assert failed!(~w(create --name demo --env app --scopes read)) =~ "pass --user"
 
       [_created, _warning, plaintext] =
         create(
@@ -75,17 +68,13 @@ defmodule Mix.Tasks.Omashiki.TokenTest do
     test "reports ApiTokens validation errors" do
       auth(:none)
 
-      assert_raise Mix.Error, ~r/scopes must be read, submit, and\/or cancel/, fn ->
-        TokenTask.run(~w(create --name demo --env * --scopes admin))
-      end
+      assert failed!(~w(create --name demo --env * --scopes admin)) =~
+               "scopes must be read, submit, and/or cancel"
 
-      assert_raise Mix.Error, ~r/expiry of 1 to/, fn ->
-        TokenTask.run(~w(create --name demo --env * --scopes read --ttl-days 100000))
-      end
+      assert failed!(~w(create --name demo --env * --scopes read --ttl-days 100000)) =~
+               "expiry of 1 to"
 
-      assert_raise Mix.Error, ~r/No user/, fn ->
-        TokenTask.run(~w(create --name demo --env * --scopes read --user nobody))
-      end
+      assert failed!(~w(create --name demo --env * --scopes read --user nobody)) =~ "No user"
     end
   end
 
@@ -96,22 +85,15 @@ defmodule Mix.Tasks.Omashiki.TokenTest do
     {token, _} = api_token_fixture(alice, %{name: "alice-ci"})
     {other, _} = api_token_fixture(bob, %{name: "bob-ci"})
 
-    TokenTask.run(~w(list --user alice))
-    [line] = output()
+    [line] = ok!(~w(list --user alice))
     assert line =~ token.id
     assert line =~ "alice-ci"
     assert line =~ "webhook=none"
 
-    assert_raise Mix.Error, ~r/No token/, fn ->
-      TokenTask.run(["revoke", other.id, "--user", "alice"])
-    end
+    assert failed!(["revoke", other.id, "--user", "alice"]) =~ "No token"
+    assert failed!(~w(revoke not-a-uuid --user alice)) =~ "No token"
 
-    assert_raise Mix.Error, ~r/No token/, fn ->
-      TokenTask.run(~w(revoke not-a-uuid --user alice))
-    end
-
-    TokenTask.run(["revoke", token.id, "--user", "alice"])
-    assert ["Revoked token " <> _] = output()
+    assert ["Revoked token " <> _] = ok!(["revoke", token.id, "--user", "alice"])
     assert Token.status(Repo.get!(Token, token.id)) == :revoked
     assert is_nil(Repo.get!(Token, other.id).revoked_at)
   end
@@ -121,7 +103,7 @@ defmodule Mix.Tasks.Omashiki.TokenTest do
       auth(:none)
       {token, _} = api_token_fixture(Accounts.local_owner())
 
-      # The task reads the house policy from its file, so point it at one the
+      # The tool reads the house policy from its file, so point it at one the
       # test owns rather than whatever this checkout declares.
       config =
         Path.join(System.tmp_dir!(), "omashiki-token-#{System.unique_integer([:positive])}")
@@ -141,16 +123,16 @@ defmodule Mix.Tasks.Omashiki.TokenTest do
     test "sets the destination from an env var secret without printing it", %{token: token} do
       System.put_env(@secret_var, "very-secret-value")
 
-      TokenTask.run([
-        "webhook",
-        token.id,
-        "--url",
-        "https://client.test/omashiki",
-        "--secret-env",
-        @secret_var
-      ])
+      lines =
+        ok!([
+          "webhook",
+          token.id,
+          "--url",
+          "https://client.test/omashiki",
+          "--secret-env",
+          @secret_var
+        ])
 
-      lines = output()
       assert Enum.join(lines) =~ "https://client.test/omashiki"
       refute Enum.join(lines) =~ "very-secret-value"
 
@@ -158,29 +140,23 @@ defmodule Mix.Tasks.Omashiki.TokenTest do
       assert stored.webhook_destination == "https://client.test/omashiki"
       assert is_binary(stored.webhook_secret_ciphertext)
 
-      TokenTask.run(["list"])
-      [line] = output()
+      [line] = ok!(["list"])
       assert line =~ "webhook=https://client.test/omashiki"
       refute line =~ "very-secret-value"
     end
 
     test "refuses a missing secret variable and a private destination", %{token: token} do
-      assert_raise Mix.Error, ~r/#{@secret_var} is not set/, fn ->
-        TokenTask.run(
-          ~w(webhook #{token.id} --url https://client.test/x --secret-env #{@secret_var})
-        )
-      end
+      assert failed!(
+               ~w(webhook #{token.id} --url https://client.test/x --secret-env #{@secret_var})
+             ) =~ "#{@secret_var} is not set"
 
       System.put_env(@secret_var, "very-secret-value")
 
-      error =
-        assert_raise Mix.Error, ~r/private_destination_not_allowed/, fn ->
-          TokenTask.run(
-            ~w(webhook #{token.id} --url http://127.0.0.1/x --secret-env #{@secret_var})
-          )
-        end
+      message =
+        failed!(~w(webhook #{token.id} --url http://127.0.0.1/x --secret-env #{@secret_var}))
 
-      refute error.message =~ "very-secret-value"
+      assert message =~ "private_destination_not_allowed"
+      refute message =~ "very-secret-value"
       assert is_nil(Repo.get!(Token, token.id).webhook_destination)
     end
 
@@ -188,7 +164,7 @@ defmodule Mix.Tasks.Omashiki.TokenTest do
       File.write!(config, "[webhooks]\nallow_private_destinations = true\n")
       System.put_env(@secret_var, "very-secret-value")
 
-      TokenTask.run(
+      ok!(
         ~w(webhook #{token.id} --url http://127.0.0.1:8090/omashiki --secret-env #{@secret_var})
       )
 
@@ -202,8 +178,7 @@ defmodule Mix.Tasks.Omashiki.TokenTest do
           secret: "client-secret"
         })
 
-      TokenTask.run(["webhook", token.id, "--clear"])
-      assert ["Cleared the webhook" <> _] = output()
+      assert ["Cleared the webhook" <> _] = ok!(["webhook", token.id, "--clear"])
 
       stored = Repo.get!(Token, token.id)
       assert is_nil(stored.webhook_destination)
@@ -212,12 +187,12 @@ defmodule Mix.Tasks.Omashiki.TokenTest do
     end
 
     test "needs either a url or --clear", %{token: token} do
-      assert_raise Mix.Error, ~r/--clear/, fn -> TokenTask.run(["webhook", token.id]) end
+      assert failed!(["webhook", token.id]) =~ "--clear"
     end
   end
 
   test "rejects unknown commands and options" do
-    assert_raise Mix.Error, ~r/Usage/, fn -> TokenTask.run(["rotate"]) end
-    assert_raise Mix.Error, ~r/Invalid option/, fn -> TokenTask.run(~w(list --secret s)) end
+    assert failed!(["rotate"]) =~ "Usage"
+    assert failed!(~w(list --secret s)) =~ "Invalid option"
   end
 end

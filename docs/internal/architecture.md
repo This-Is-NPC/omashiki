@@ -121,6 +121,7 @@ The delivery window is 24 hours before dead-letter state.
 
 The destination and signing material belong to the API token.
 `mix omashiki.token webhook` sets or clears them on the house machine.
+The release runs the same tool as `bin/token webhook`.
 It calls `Omashiki.ApiTokens.configure_webhook/2` and `Omashiki.ApiTokens.clear_webhook/1`.
 There is no public route for this operation.
 

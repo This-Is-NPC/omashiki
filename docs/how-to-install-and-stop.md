@@ -75,6 +75,16 @@ When the house runs, it starts a short-lived container to check that containers 
 Each check prints `ok`, `warn`, or `error`. Each problem has a fix.
 The task exits with a non-zero status when a check reports an error.
 
+An installation from the release image runs the same doctor as `bin/doctor` in the house container.
+With the [manager Compose file](../examples/compose.manager.yml):
+
+```bash
+docker compose -f examples/compose.manager.yml exec manager bin/doctor
+```
+
+The doctor checks Docker from inside that container.
+The manager container has no Docker access, so its Docker check reports an error.
+
 The house runs the same checks in the background when it starts, and logs each warning and error.
 The System screen at `/system` shows the latest results.
 It repeats the checks every minute. The container check runs only at startup.

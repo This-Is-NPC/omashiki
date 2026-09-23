@@ -76,6 +76,8 @@ mise run doctor
 ```
 
 The doctor loads `omashiki.toml` itself, so it needs the key variable too.
+In an installation from the release image, run `bin/doctor` in the house container.
+See [check the installation](../../docs/how-to-install-and-stop.md#4-check-the-installation).
 
 The doctor checks the network of the `triage` environment and the GitHub App identity.
 Correct each `error` with its fix before you continue.
@@ -91,6 +93,8 @@ cd ..
 ```
 
 The task prints the token once. Keep it for step 6.
+In an installation from the release image, run `bin/token` with the same arguments in the house container.
+See [API authentication](../../docs/api.md#authentication).
 
 GitHub must reach the handler.
 On a machine without a public address, use a relay such as [smee.io](https://smee.io).

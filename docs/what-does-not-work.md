@@ -7,7 +7,7 @@ It does not describe proposed features as available behavior.
 | --- | --- |
 | No built-in Jira, Azure DevOps, or ServiceNow connector. | Write a handler that maps events to the public job API. |
 | The GitHub example does not post its terminal result back to the issue. | Implement `on_terminal` with your integration credentials. |
-| No public webhook-configuration endpoint. | Run `mix omashiki.token webhook` on the house machine. |
+| No public webhook-configuration endpoint. | Run `mix omashiki.token webhook`, or `bin/token webhook` in the release image, on the house machine. |
 | No public archive-download endpoint for the `files` sink. | Retrieve the archive from manager storage through an operator-controlled channel. |
 | No public client MCP endpoint. | Use the HTTP API or bundled Agent Skill. |
 | Identity MCP configuration currently reaches OpenCode only. | Use an OpenCode preset for GitHub identity operations. |
