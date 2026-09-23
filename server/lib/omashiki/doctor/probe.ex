@@ -21,8 +21,11 @@ defmodule Omashiki.Doctor.Probe do
   @callback house(port :: pos_integer()) :: result()
 
   @doc """
-  A short-lived container from `image` on `network` fetches `url`. The image is
-  never pulled. `{:error, :no_http_client}` when it has neither curl nor python3.
+  A short-lived container from `image` on `network` and the house reach each
+  other: the house connects to the container, and the container fetches `url`.
+  The image is never pulled. `{:error, {:blocked, [{direction, reason}]}}`
+  names each direction that fails, `:to_house` or `:from_house`;
+  `{:error, :no_python}` when the image has no python3.
   """
   @callback route(image :: String.t(), network :: String.t(), url :: String.t()) :: result()
 

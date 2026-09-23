@@ -4,7 +4,7 @@ defmodule Omashiki.Tools.Proxy do
   require Logger
 
   alias Omashiki.Identities.Broker
-  alias Omashiki.Runtime.Claims
+  alias Omashiki.Runtime.{Claims, HouseUrl}
   alias Omashiki.Security.Network
 
   @doc "Mint a short-lived token for the internal tool data plane."
@@ -27,7 +27,7 @@ defmodule Omashiki.Tools.Proxy do
   def base_url do
     Application.get_env(:omashiki, :tools_proxy_base_url) ||
       System.get_env("OMASHIKI_TOOLS_PROXY_BASE_URL") ||
-      default_base_url()
+      HouseUrl.base_url()
   end
 
   @doc "Allow an exact capability or a trailing-star prefix."
@@ -196,15 +196,5 @@ defmodule Omashiki.Tools.Proxy do
         Mint.HTTP.close(conn)
         {:error, %{code: -32020, message: "upstream_unreachable", detail: inspect(reason)}}
     end
-  end
-
-  defp default_base_url do
-    port =
-      case Application.get_env(:omashiki, OmashikiWeb.Endpoint) do
-        opts when is_list(opts) -> Keyword.get(Keyword.get(opts, :http, []), :port, 4000)
-        _ -> 4000
-      end
-
-    "http://host.docker.internal:#{port}"
   end
 end

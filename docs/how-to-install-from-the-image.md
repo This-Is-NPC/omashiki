@@ -84,9 +84,11 @@ docker compose exec omashiki bin/doctor
 The doctor checks Docker, the agent image, the network, and the host credential files.
 Each check prints `ok`, `warn`, or `error`, and each problem has a fix.
 
-Agent containers reach the house on its port on the host.
-A host firewall such as `ufw` can block that route. The doctor then names the port and the fix.
-Without that route, an agent runs until its timeout without its tools.
+The house and its agent containers share a Docker network that `compose.yml` creates.
+Its name is the Compose project name followed by `-agents`, for example `omashiki-agents`.
+The house reaches each agent on that network, and the agents reach the house at `http://omashiki:4000`.
+This traffic does not pass through the host, so a host firewall does not block it.
+The doctor starts a container on that network and checks both directions.
 
 ## 7. Issue an API token
 

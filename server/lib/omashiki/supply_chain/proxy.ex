@@ -12,7 +12,7 @@ defmodule Omashiki.SupplyChain.Proxy do
   """
 
   alias Omashiki.Config
-  alias Omashiki.Runtime.Claims
+  alias Omashiki.Runtime.{Claims, HouseUrl}
   alias Omashiki.SupplyChain.{Policy, Registry}
 
   @default_timeout_ms 15_000
@@ -43,7 +43,7 @@ defmodule Omashiki.SupplyChain.Proxy do
   def base_url do
     Application.get_env(:omashiki, :supply_chain_proxy_base_url) ||
       System.get_env("OMASHIKI_SUPPLY_CHAIN_PROXY_BASE_URL") ||
-      default_base_url()
+      HouseUrl.base_url()
   end
 
   @doc "Build a package-manager URL carrying a job-bound proxy token."
@@ -692,20 +692,4 @@ defmodule Omashiki.SupplyChain.Proxy do
       Enum.reject(headers, fn {key, _} ->
         String.downcase(key) in ["content-length", "transfer-encoding"]
       end)
-
-  defp default_base_url do
-    port = Application.get_env(:omashiki, OmashikiWeb.Endpoint) |> endpoint_port()
-
-    host =
-      if Application.get_env(:omashiki, :agent_network_mode) == "host",
-        do: "127.0.0.1",
-        else: "host.docker.internal"
-
-    "http://#{host}:#{port}"
-  end
-
-  defp endpoint_port(opts) when is_list(opts),
-    do: Keyword.get(Keyword.get(opts, :http, []), :port, 4000)
-
-  defp endpoint_port(_), do: 4000
 end

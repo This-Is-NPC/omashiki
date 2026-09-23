@@ -120,28 +120,65 @@ defmodule Omashiki.DoctorTest do
     refute find(run(environments: environments), "route:omashiki-agents")
     refute_received {:route, _, _, _}
 
-    checks = run(environments: environments, route: true, port: 4321)
+    checks =
+      run(environments: environments, route: true, house_url: "http://omashiki:4000")
 
     assert %{status: :ok} = find(checks, "route:omashiki-agents")
 
-    assert_received {:route, "agent:1", "omashiki-agents",
-                     "http://host.docker.internal:4321/api/v1/health"}
+    assert_received {:route, "agent:1", "omashiki-agents", "http://omashiki:4000/api/v1/health"}
   end
 
-  test "a blocked route names the port and the host firewall" do
-    FakeProbe.set(%{route: {:error, {:exit, 7}}})
+  test "a route blocked through the host names the port and the host firewall" do
+    FakeProbe.set(%{route: {:error, {:blocked, [to_house: {:exit, 1}]}}})
 
     checks =
       run(
         environments: [environment("opencode", "restricted", "agent:1")],
         route: true,
-        port: 4010
+        house_url: "http://host.docker.internal:4010"
       )
 
     assert %{status: :error, summary: summary, fix: fix} = find(checks, "route:omashiki-agents")
     assert summary =~ "timeout without tools"
     assert fix =~ "port 4010"
     assert fix =~ "ufw"
+  end
+
+  test "a route blocked on a shared network names the house URL setting" do
+    FakeProbe.set(%{route: {:error, {:blocked, [to_house: {:exit, 1}]}}})
+
+    checks =
+      run(
+        environments: [environment("opencode", "restricted", "agent:1")],
+        route: true,
+        house_url: "http://omashiki:4000"
+      )
+
+    assert %{status: :error, fix: fix} = find(checks, "route:omashiki-agents")
+    assert fix =~ "OMASHIKI_HOUSE_URL"
+    refute fix =~ "ufw"
+  end
+
+  test "a house that cannot reach the agent network says jobs fail and how to attach it" do
+    FakeProbe.set(%{route: {:error, {:blocked, [from_house: :etimedout]}}})
+
+    checks =
+      run(environments: [environment("opencode", "restricted", "agent:1")], route: true)
+
+    assert %{status: :error, summary: summary, fix: fix} = find(checks, "route:omashiki-agents")
+    assert summary =~ "The house cannot reach containers on network omashiki-agents"
+    assert summary =~ "harness_not_ready"
+    assert fix =~ "Attach the house container to network omashiki-agents"
+  end
+
+  test "an image without python3 leaves the route unchecked" do
+    FakeProbe.set(%{route: {:error, :no_python}})
+
+    checks =
+      run(environments: [environment("opencode", "restricted", "agent:1")], route: true)
+
+    assert %{status: :warn, summary: summary} = find(checks, "route:omashiki-agents")
+    assert summary =~ "no python3"
   end
 
   test "the route is not blamed while the house itself does not answer" do
@@ -228,7 +265,7 @@ defmodule Omashiki.DoctorTest do
 
   describe "Monitor" do
     test "runs the full doctor at boot, logs only problems, and keeps the route" do
-      FakeProbe.set(%{route: {:error, {:exit, 7}}})
+      FakeProbe.set(%{route: {:error, {:blocked, [to_house: {:exit, 1}]}}})
       doctor = [probe: FakeProbe, environments: [environment("opencode", "restricted", "a:1")]]
 
       log =

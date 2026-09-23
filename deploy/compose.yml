@@ -30,8 +30,6 @@ services:
 
   omashiki:
     image: ghcr.io/this-is-npc/omashiki:${OMASHIKI_VERSION:-latest}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
@@ -44,13 +42,19 @@ services:
       SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set SECRET_KEY_BASE to a long random value}
       OMASHIKI_CONFIG: /config/omashiki.toml
       OMASHIKI_UI_CONFIG: /config/ui.toml
-      # Agent containers reach the house on this port of the host, so the
-      # house listens on the port it is published on.
-      PORT: ${OMASHIKI_PORT:-4010}
+      # The port inside the container, which the published port and
+      # OMASHIKI_HOUSE_URL name.
+      PORT: "4000"
       OMASHIKI_DOCKER_SOCKET_PATH: /var/run/docker.sock
-      OMASHIKI_AGENT_NETWORK_MODE: bridge
+      # Agent containers join the agents network below, where the house
+      # reaches each one and they reach the house by its service name.
+      OMASHIKI_AGENT_NETWORK_MODE: ${COMPOSE_PROJECT_NAME}-agents
+      OMASHIKI_HOUSE_URL: http://omashiki:4000
     ports:
-      - "${OMASHIKI_PORT:-4010}:${OMASHIKI_PORT:-4010}"
+      - "${OMASHIKI_PORT:-4010}:4000"
+    networks:
+      - default
+      - agents
     volumes:
       # The directory holding omashiki.toml and ui.toml, writable: the Config
       # screen's Files page saves by renaming a new file over the old one,
@@ -63,6 +67,12 @@ services:
       # daemon can bind-mount them into job containers.
       - /dev/shm:/dev/shm
     restart: unless-stopped
+
+networks:
+  # Named after the Compose project, so houses on one Docker daemon keep
+  # their agents apart. The database stays off it.
+  agents:
+    name: ${COMPOSE_PROJECT_NAME}-agents
 
 volumes:
   pgdata:

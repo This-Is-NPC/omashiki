@@ -16,7 +16,7 @@ defmodule Omashiki.Doctor do
   """
 
   alias Omashiki.Config
-  alias Omashiki.Runtime.ContainerManager
+  alias Omashiki.Runtime.{ContainerManager, HouseUrl}
   alias Omashiki.Runtimes
 
   @type status :: :ok | :warn | :error
@@ -27,10 +27,13 @@ defmodule Omashiki.Doctor do
 
     * `:probe` — an `Omashiki.Doctor.Probe`; defaults to `:doctor_probe`, else
       `Omashiki.Doctor.HostProbe`
-    * `:route` — also check that containers reach the house (default false)
+    * `:route` — also check that containers and the house reach each other
+      (default false)
     * `:environments`, `:host_credentials`, `:identities` — default to the
       live configuration
     * `:port` — the house HTTP port; defaults to the endpoint's
+    * `:house_url` — where containers reach the house; defaults to
+      `Omashiki.Runtime.HouseUrl.base_url/0`
     * `:install` — `:checkout` or `:release`, which commands a fix names;
       defaults to the `:install` the runtime configuration resolved
   """
@@ -77,7 +80,8 @@ defmodule Omashiki.Doctor do
             else: []
 
         [ok("docker", "Docker answers.")] ++
-          image_checks(images, opts[:install]) ++ network_checks(environments, networks) ++ routes
+          image_checks(images, opts[:install]) ++
+          network_checks(environments, networks, opts[:install]) ++ routes
 
       {:error, reason} ->
         [
@@ -135,7 +139,7 @@ defmodule Omashiki.Doctor do
     |> Map.new(&{&1, probe.network(&1)})
   end
 
-  defp network_checks(environments, networks) do
+  defp network_checks(environments, networks, install) do
     for environment <- Enum.sort_by(environments, & &1.name), restricted?(environment) do
       id = "network:#{environment.name}"
       name = environment.name
@@ -146,8 +150,7 @@ defmodule Omashiki.Doctor do
             id,
             "Environment #{name} is restricted but has no agent network. " <>
               "Its jobs fail with harness_unreachable_no_network.",
-            "Set OMASHIKI_AGENT_NETWORK_MODE to a Docker network, such as `bridge` " <>
-              "on a single machine, and restart the house."
+            agent_network_fix(install)
           )
 
         "host" ->
@@ -185,15 +188,16 @@ defmodule Omashiki.Doctor do
       []
     else
       house = probe.house(port)
+      url = Keyword.get_lazy(opts, :house_url, &HouseUrl.base_url/0)
 
       Enum.map(networks, fn network ->
         image = probe_image(network, environments, images)
-        route_check(probe, network, house, image, port, opts[:install])
+        route_check(probe, network, house, image, {port, url}, opts[:install])
       end)
     end
   end
 
-  defp route_check(_probe, network, {:error, _reason}, _image, port, install) do
+  defp route_check(_probe, network, {:error, _reason}, _image, {port, _url}, install) do
     warn(
       "route:#{network}",
       "The house does not answer on port #{port}, so the route from network #{network} was not checked.",
@@ -201,7 +205,7 @@ defmodule Omashiki.Doctor do
     )
   end
 
-  defp route_check(_probe, network, :ok, nil, _port, _install) do
+  defp route_check(_probe, network, :ok, nil, _house, _install) do
     warn(
       "route:#{network}",
       "No agent image is present to check the route from network #{network}.",
@@ -209,33 +213,66 @@ defmodule Omashiki.Doctor do
     )
   end
 
-  defp route_check(probe, network, :ok, image, port, _install) do
+  defp route_check(probe, network, :ok, image, {_port, url}, _install) do
     id = "route:#{network}"
 
-    case probe.route(image, network, "http://host.docker.internal:#{port}/api/v1/health") do
+    case probe.route(image, network, String.trim_trailing(url, "/") <> "/api/v1/health") do
       :ok ->
-        ok(id, "Containers on network #{network} reach the house on port #{port}.")
+        ok(
+          id,
+          "Containers on network #{network} reach the house at #{url}, and the house reaches them."
+        )
 
-      {:error, :no_http_client} ->
+      {:error, :no_python} ->
         warn(
           id,
-          "Image #{image} has neither curl nor python3, so the route from network #{network} was not checked.",
-          "Run the doctor with an agent image that ships curl or python3."
+          "Image #{image} has no python3, so the route between the house and network #{network} was not checked.",
+          "Run the doctor with an agent image that ships python3."
+        )
+
+      {:error, {:blocked, blocked}} ->
+        error(
+          id,
+          Enum.map_join(blocked, " ", &blocked_summary(&1, network, url)),
+          Enum.map_join(blocked, " ", &blocked_fix(&1, network, url))
         )
 
       {:error, reason} ->
         error(
           id,
-          "Containers on network #{network} cannot reach the house at " <>
-            "host.docker.internal:#{port} (#{inspect(reason)}). " <>
-            "Agents would run until their timeout without tools.",
-          "Allow the agent network to reach port #{port} on the host. A host firewall " <>
-            "such as ufw can block it, for example: " <>
-            "`sudo ufw allow from 172.16.0.0/12 to any port #{port} proto tcp`. " <>
-            "`[app].host` must not be 127.0.0.1."
+          "The route between the house and network #{network} could not be checked (#{inspect(reason)}).",
+          "Check the Docker daemon, then run the doctor again."
         )
     end
   end
+
+  defp blocked_summary({:to_house, reason}, network, url),
+    do:
+      "Containers on network #{network} cannot reach the house at #{url} (#{inspect(reason)}). " <>
+        "Agents would run until their timeout without tools."
+
+  defp blocked_summary({:from_house, reason}, network, _url),
+    do:
+      "The house cannot reach containers on network #{network} (#{inspect(reason)}). " <>
+        "Jobs would fail with harness_not_ready."
+
+  defp blocked_fix({:to_house, _reason}, network, url) do
+    case URI.parse(url) do
+      %URI{host: "host.docker.internal", port: port} ->
+        "Allow the agent network to reach port #{port} on the host. A host firewall " <>
+          "such as ufw can block it, for example: " <>
+          "`sudo ufw allow from 172.16.0.0/12 to any port #{port} proto tcp`. " <>
+          "`[app].host` must not be 127.0.0.1."
+
+      _uri ->
+        "Set OMASHIKI_HOUSE_URL to the address of the house on network #{network}."
+    end
+  end
+
+  defp blocked_fix({:from_house, _reason}, network, _url),
+    do:
+      "Attach the house container to network #{network}, or set " <>
+        "OMASHIKI_AGENT_NETWORK_MODE to a network it is attached to, and restart the house."
 
   # An image already present locally: one the network's own environments use
   # first, then any. The doctor never pulls.
@@ -249,6 +286,16 @@ defmodule Omashiki.Doctor do
 
     Enum.find(present, &(&1 in own)) || List.first(present)
   end
+
+  defp agent_network_fix(:checkout),
+    do:
+      "Set OMASHIKI_AGENT_NETWORK_MODE to a Docker network, such as `bridge` " <>
+        "on a single machine, and restart the house."
+
+  defp agent_network_fix(:release),
+    do:
+      "Set OMASHIKI_AGENT_NETWORK_MODE to a Docker network the house container " <>
+        "is attached to, and restart the house."
 
   defp start_fix(:checkout),
     do: "Start the house with `mise run up`, then run `mise run doctor` again."

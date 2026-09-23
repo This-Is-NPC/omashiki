@@ -84,7 +84,12 @@ A job payload cannot add registry declarations.
 A `restricted` environment runs on the Docker network named by `OMASHIKI_AGENT_NETWORK_MODE`.
 Without that variable it has no network, and an HTTP harness such as OpenCode cannot start.
 The job then fails with `harness_unreachable_no_network`.
-A single-machine install can use `OMASHIKI_AGENT_NETWORK_MODE=bridge`.
+The house must reach the containers on that network.
+A house that runs on the host can use `OMASHIKI_AGENT_NETWORK_MODE=bridge`.
+A house in a container must be attached to the network. [`deploy/compose.yml`](../deploy/compose.yml) creates one for its agents and attaches the house.
+
+Agent containers reach the house gateway, tools proxy, and package proxy at `OMASHIKI_HOUSE_URL`, such as `http://omashiki:4000` on a network they share.
+Without it, they reach the house through the host, at `host.docker.internal` on the house port.
 
 A lifecycle step uses `argv`, `condition`, and `timeout_ms`.
 Commands must use declared executables.

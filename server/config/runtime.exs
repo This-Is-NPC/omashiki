@@ -4,6 +4,10 @@ if network = System.get_env("OMASHIKI_AGENT_NETWORK_MODE") do
   config :omashiki, :agent_network_mode, network
 end
 
+if url = System.get_env("OMASHIKI_HOUSE_URL") do
+  config :omashiki, :house_url, url
+end
+
 if network = System.get_env("OMASHIKI_SUPPLY_CHAIN_NETWORK") do
   config :omashiki, :supply_chain_network, network
 end

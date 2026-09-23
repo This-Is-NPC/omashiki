@@ -39,7 +39,7 @@ defmodule Omashiki.Gateway do
   alias Omashiki.Gateway.Provider
   alias Omashiki.Gateway.Providers.OpenaiCompat
   alias Omashiki.Repo
-  alias Omashiki.Runtime.Claims
+  alias Omashiki.Runtime.{Claims, HouseUrl}
   alias Omashiki.UsageLedger
 
   # ---------------------------------------------------------------------------
@@ -68,25 +68,7 @@ defmodule Omashiki.Gateway do
   def base_url do
     Application.get_env(:omashiki, :llm_gateway_base_url) ||
       System.get_env("OMASHIKI_LLM_GATEWAY_BASE_URL") ||
-      default_base_url()
-  end
-
-  defp default_base_url do
-    port =
-      case Application.get_env(:omashiki, OmashikiWeb.Endpoint) do
-        opts when is_list(opts) ->
-          Keyword.get(Keyword.get(opts, :http, []), :port, 4000)
-
-        _ ->
-          4000
-      end
-
-    host =
-      if Application.get_env(:omashiki, :agent_network_mode) == "host",
-        do: "127.0.0.1",
-        else: "host.docker.internal"
-
-    "http://#{host}:#{port}"
+      HouseUrl.base_url()
   end
 
   @doc "OpenAI-compatible baseURL injected into the engine (`…/api/v1/gateway/v1`)."

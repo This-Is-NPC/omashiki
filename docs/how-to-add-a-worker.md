@@ -63,6 +63,10 @@ From the worker checkout:
 docker compose -f examples/compose.worker.yml up -d --build
 ```
 
+The worker and its job containers share a Docker network that `compose.worker.yml` creates.
+Its name is the Compose project name followed by `-agents`.
+The worker reaches each job container on that network.
+
 The worker reads [worker.toml](../examples/worker.toml).
 This file contains machine limits and Docker settings.
 It does not contain the house registry or provider credentials.

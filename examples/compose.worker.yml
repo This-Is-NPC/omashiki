@@ -31,7 +31,9 @@ services:
       OMASHIKI_ENROLL_PORT: ${OMASHIKI_ENROLL_PORT:-4012}
       OMASHIKI_WORKER_STATE_PATH: /cache/worker-state.json
       OMASHIKI_DOCKER_SOCKET_PATH: /var/run/docker.sock
-      OMASHIKI_AGENT_NETWORK_MODE: bridge
+      # Job containers join the agents network below, where the worker
+      # reaches each one.
+      OMASHIKI_AGENT_NETWORK_MODE: ${COMPOSE_PROJECT_NAME}-agents
     ports:
       - "${OMASHIKI_ENROLL_PORT:-4012}:${OMASHIKI_ENROLL_PORT:-4012}"
     volumes:
@@ -42,5 +44,14 @@ services:
       # daemon can bind-mount them into job containers.
       - /dev/shm:/dev/shm
       - worker-cache:/cache
+    networks:
+      - agents
+
+networks:
+  # Named after the Compose project, so workers on one Docker daemon keep
+  # their job containers apart.
+  agents:
+    name: ${COMPOSE_PROJECT_NAME}-agents
+
 volumes:
   worker-cache:

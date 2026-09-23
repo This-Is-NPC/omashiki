@@ -14,16 +14,33 @@ defmodule Omashiki.Doctor.HostProbe do
   alias Omashiki.Runtime.ContainerManager
   alias Omashiki.Runtime.HostCredentials
 
-  # Exit status the probe script uses when the image has no HTTP client.
-  @no_http_client 127
+  # The port the probe container listens on for the house.
+  @listen_port 7000
+  # How long the house tries to reach the probe container; the container
+  # listens a little longer, then fetches the house.
+  @reach_ms 8_000
 
-  # `$1` is the URL. curl first; python3 covers the images that ship no curl.
+  # Exit status the probe script uses when the image has no python3.
+  @no_python 127
+
+  # `$1` is the house URL, `$2` the port to listen on. The container first
+  # waits for the house to connect, then fetches the house, and exits non-zero
+  # when that fails.
   @route_script """
-  if command -v curl >/dev/null 2>&1; then exec curl -fsS -m 5 -o /dev/null "$1"; fi
-  if command -v python3 >/dev/null 2>&1; then
-    exec python3 -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=5)' "$1"
-  fi
-  exit 127
+  command -v python3 >/dev/null 2>&1 || exit 127
+  exec python3 -c '
+  import socket, sys, urllib.request
+  server = socket.create_server(("", int(sys.argv[2])))
+  server.settimeout(10)
+  try:
+      server.accept()[0].close()
+  except OSError:
+      pass
+  try:
+      urllib.request.urlopen(sys.argv[1], timeout=5)
+  except Exception:
+      sys.exit(3)
+  ' "$1" "$2"
   """
 
   @impl true
@@ -50,7 +67,7 @@ defmodule Omashiki.Doctor.HostProbe do
     config = %{
       "Image" => image,
       "Entrypoint" => ["sh", "-c"],
-      "Cmd" => [@route_script, "omashiki-doctor", url],
+      "Cmd" => [@route_script, "omashiki-doctor", url, Integer.to_string(@listen_port)],
       "HostConfig" => %{
         "NetworkMode" => network,
         "ExtraHosts" => ["host.docker.internal:host-gateway"]
@@ -64,13 +81,13 @@ defmodule Omashiki.Doctor.HostProbe do
     case ContainerManager.docker_post("/containers/create?name=#{name}", config) do
       {:ok, %{"Id" => id}} ->
         try do
-          with :ok <- ContainerManager.docker_post_no_body("/containers/#{id}/start"),
-               {:ok, %{"StatusCode" => code}} <-
-                 ContainerManager.docker_post("/containers/#{id}/wait", %{}) do
-            case code do
-              0 -> :ok
-              @no_http_client -> {:error, :no_http_client}
-              code -> {:error, {:exit, code}}
+          with :ok <- ContainerManager.docker_post_no_body("/containers/#{id}/start") do
+            from_house = reach(id, network)
+
+            case ContainerManager.docker_post("/containers/#{id}/wait", %{}) do
+              {:ok, %{"StatusCode" => @no_python}} -> {:error, :no_python}
+              {:ok, %{"StatusCode" => code}} -> directions(code, from_house)
+              {:error, reason} -> {:error, reason}
             end
           end
         after
@@ -82,6 +99,42 @@ defmodule Omashiki.Doctor.HostProbe do
     end
   rescue
     error -> {:error, error}
+  end
+
+  # The house reaches the probe container the way it reaches a harness.
+  defp reach(id, network) do
+    case ContainerManager.harness_endpoint(id, nil, @listen_port, network) do
+      {:ok, {address, port}} -> connect(address, port, deadline(@reach_ms))
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp connect(address, port, deadline) do
+    case :gen_tcp.connect(String.to_charlist(address), port, [], 1_000) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        :ok
+
+      {:error, reason} ->
+        if System.monotonic_time(:millisecond) < deadline do
+          Process.sleep(200)
+          connect(address, port, deadline)
+        else
+          {:error, reason}
+        end
+    end
+  end
+
+  defp deadline(ms), do: System.monotonic_time(:millisecond) + ms
+
+  defp directions(code, from_house) do
+    to_house = if code == 0, do: :ok, else: {:error, {:exit, code}}
+
+    blocked =
+      for {direction, {:error, reason}} <- [to_house: to_house, from_house: from_house],
+          do: {direction, reason}
+
+    if blocked == [], do: :ok, else: {:error, {:blocked, blocked}}
   end
 
   @impl true

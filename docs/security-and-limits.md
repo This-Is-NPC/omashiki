@@ -28,6 +28,8 @@ Declared mounts and network settings remain part of the environment policy.
 A host-network environment has different isolation properties from a restricted environment.
 Omashiki never pulls an image. It runs only images already on the machine, and a missing image is an error that names it.
 
+In an [image install](how-to-install-from-the-image.md), agent containers share a Docker network with the house only. The database is not on it.
+
 The sandbox does not receive the host Docker socket.
 The worker controls Docker and is therefore a trusted execution component.
 Do not treat worker enrollment as permission to run an untrusted worker operator.

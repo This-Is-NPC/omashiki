@@ -31,20 +31,27 @@ if [ -z "${JCODE_GATEWAY_BASE_URL:-}" ] || [ -z "${JCODE_GATEWAY_MODEL:-}" ]; th
   exit 78
 fi
 
-# jcode rejects host.docker.internal as a "local" base URL (https, loopback, or
-# RFC1918 only). ExtraHosts maps that name to the host-gateway IP; rewrite so
+# jcode accepts only an https, loopback, or RFC1918 base URL, so it rejects a
+# host name such as host.docker.internal or the house's name on a shared
+# network. Rewrite the host to the address it resolves to here, so
 # `provider add` stores an address jcode will actually call.
-case "${JCODE_GATEWAY_BASE_URL}" in
-  *host.docker.internal*)
-    host_ip="$(awk '$1 !~ /^#/ { for (i = 2; i <= NF; i++) if ($i == "host.docker.internal") { print $1; exit } }' /etc/hosts)"
-    if [ -z "${host_ip}" ]; then
-      printf '%s\n' "host.docker.internal is not in /etc/hosts" >&2
-      exit 78
-    fi
-    JCODE_GATEWAY_BASE_URL="${JCODE_GATEWAY_BASE_URL//host.docker.internal/${host_ip}}"
-    export JCODE_GATEWAY_BASE_URL
+gateway_host="$(printf '%s' "${JCODE_GATEWAY_BASE_URL}" | sed -E 's#^http://([^/:]+).*#\1#;t;d')"
+case "${gateway_host}" in
+  "" | *[!0-9.]*)
+    ;;
+  *)
+    gateway_host=""
     ;;
 esac
+if [ -n "${gateway_host}" ]; then
+  host_ip="$(getent ahostsv4 "${gateway_host}" | awk '{ print $1; exit }')"
+  if [ -z "${host_ip}" ]; then
+    printf '%s\n' "${gateway_host} does not resolve" >&2
+    exit 78
+  fi
+  JCODE_GATEWAY_BASE_URL="${JCODE_GATEWAY_BASE_URL/${gateway_host}/${host_ip}}"
+  export JCODE_GATEWAY_BASE_URL
+fi
 
 # --api-key-env stores only the variable *name*, so the token never lands on
 # disk and every `docker exec` turn resolves it fresh from the environment.

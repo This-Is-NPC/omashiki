@@ -24,12 +24,14 @@ defmodule Omashiki.GatewayTest do
     previous_base = Application.get_env(:omashiki, :llm_gateway_base_url)
     previous_mode = Application.get_env(:omashiki, :agent_network_mode)
     previous_global = Application.get_env(:omashiki, :global_budget_tokens)
+    previous_house = Application.get_env(:omashiki, :house_url)
 
     on_exit(fn ->
       CircuitBreaker.reset()
       restore(:llm_gateway_base_url, previous_base)
       restore(:agent_network_mode, previous_mode)
       restore(:global_budget_tokens, previous_global)
+      restore(:house_url, previous_house)
     end)
 
     Application.delete_env(:omashiki, :global_budget_tokens)
@@ -142,6 +144,13 @@ defmodule Omashiki.GatewayTest do
       Application.delete_env(:omashiki, :agent_network_mode)
 
       assert Gateway.base_url() == "http://host.docker.internal:4002"
+    end
+
+    test "the house URL of a shared network replaces the route through the host" do
+      Application.delete_env(:omashiki, :llm_gateway_base_url)
+      Application.put_env(:omashiki, :house_url, "http://omashiki:4000")
+
+      assert Gateway.openai_base_url() == "http://omashiki:4000/api/v1/gateway/v1"
     end
 
     test "host networking targets the loopback instead" do
