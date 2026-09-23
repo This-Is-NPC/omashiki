@@ -10,6 +10,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import time
 import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -107,6 +108,31 @@ def run(cmd: list, cwd: pathlib.Path = SERVER, check: bool = True,
 
 def compose(*args: str, check: bool = True) -> int:
     return run(["docker", "compose", *args], cwd=SERVER, check=check)
+
+
+def wait_for_db(attempts: int = 30, interval: float = 0.5) -> None:
+    """Exit unless Postgres accepts connections within about fifteen seconds.
+
+    The compose healthcheck is pg_isready, but the container reports healthy a
+    moment before the socket accepts our first pool connection. A database
+    restarted from another terminal is in the same state, so every task that
+    opens the first connection waits here rather than failing on it.
+    """
+    print("\n⏳ Waiting for Postgres to accept connections...", flush=True)
+    for _ in range(attempts):
+        probe = subprocess.run(
+            ["docker", "compose", "exec", "-T", "db",
+             "pg_isready", "-U", "postgres", "-d", "omashiki_dev"],
+            cwd=SERVER, capture_output=True, env=task_env(),
+        )
+        if probe.returncode == 0:
+            print("✔ Postgres is ready", flush=True)
+            return
+        time.sleep(interval)
+
+    print(f"✖ Postgres did not accept connections within {attempts * interval:g}s. "
+          "Check it with `docker compose ps db` in server/.", file=sys.stderr)
+    sys.exit(1)
 
 
 NODE_NAME = "omashiki@127.0.0.1"

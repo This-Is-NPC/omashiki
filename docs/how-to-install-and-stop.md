@@ -43,6 +43,7 @@ mise run up
 ```
 
 The task starts PostgreSQL, applies migrations, prepares assets, and builds missing agent images.
+It waits up to 15 seconds for PostgreSQL to accept connections before it applies migrations.
 It then starts Phoenix in the foreground.
 Open <http://127.0.0.1:4010>.
 
@@ -64,6 +65,7 @@ It does not show that an agent credential works.
 ## 4. Stop the installation
 
 Press `Ctrl+C` in the foreground terminal.
+This stops Phoenix. The database container keeps running.
 Stop the database container:
 
 ```bash

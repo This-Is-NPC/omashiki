@@ -7,7 +7,7 @@ import sys
 import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / ".scripts"))
-from omashiki import compose, config, mix, node_cookie, node_name
+from omashiki import config, mix, node_cookie, node_name
 
 
 def already_listening(host: str, port: int) -> bool:
@@ -21,17 +21,15 @@ host = cfg.get("app", {}).get("host", "127.0.0.1")
 port = int(cfg.get("app", {}).get("port", 4000))
 
 # Running `up` against an app that is already up has to be harmless. Without
-# this the endpoint fails with :eaddrinuse, and — worse — the cleanup below
-# used to run anyway and stop the database out from under the instance that
-# was serving fine.
+# this the endpoint fails with :eaddrinuse.
 if already_listening(host, port):
     print(f"✔ already running at http://{host}:{port} — nothing to do", flush=True)
     sys.exit(0)
 
-# Only past that check do we own the lifecycle, so stopping the database on
-# exit is safe: clean shutdown, Ctrl-C or crash all belong to this process.
-# A failure in one of the dependencies leaves the database up, which is what
-# you want while debugging the failure.
+# The database outlives this process: it stops only with `mise run stop`.
+# Stopping it on exit raced a quick restart, where the old process's cleanup
+# took the database down while the new one was migrating.
+#
 # Print the attach line rather than leaving it to be rediscovered. The whole
 # point of naming the node is that someone can reach a wedged process without
 # first working out what the node is called.
@@ -50,7 +48,4 @@ if os.environ.get("OMASHIKI_ROLE") == "manager":
         print("⚠ OMASHIKI_WORKER_TOKEN is not set: no worker can poll this manager. "
               "Put it in .env.", flush=True)
 
-try:
-    mix("phx.server", distributed=True)
-finally:
-    compose("stop", "db", check=False)
+mix("phx.server", distributed=True)

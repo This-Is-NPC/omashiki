@@ -3,6 +3,9 @@
 #MISE depends=["deps", "db-up"]
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / ".scripts"))
-from omashiki import mix
+from omashiki import mix, wait_for_db
 
+# db-up has waited once already, but mise runs it alongside `deps`, and the
+# database can be restarted from another terminal before migrate starts.
+wait_for_db()
 mix("ecto.migrate")
