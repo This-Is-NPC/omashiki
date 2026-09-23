@@ -30,10 +30,15 @@ defmodule Omashiki.DoctorTest do
   test "a Docker that does not answer skips every Docker check" do
     FakeProbe.set(%{runtime: {:error, :econnrefused}})
 
-    assert [%{id: "docker", status: :error, fix: fix}] =
-             run(environments: [environment("opencode", "restricted", "agent:1")], route: true)
+    checks = run(environments: [environment("opencode", "restricted", "agent:1")], route: true)
 
+    assert [%{status: :error, fix: fix}] = Enum.filter(checks, &(&1.id == "docker"))
     assert fix =~ "Start Docker"
+
+    refute Enum.any?(
+             checks,
+             &String.starts_with?(&1.id, ["image:", "network:", "route:"])
+           )
   end
 
   test "a missing image names the environments it stops and how to build it" do
@@ -390,6 +395,21 @@ defmodule Omashiki.DoctorTest do
     assert %{status: :ok} = find(checks, "identity:ana-bot")
     assert %{status: :error, fix: fix} = find(checks, "identity:old-bot")
     assert fix =~ "[identities.old-bot]"
+  end
+
+  test "gitleaks must run, or output that needs scanning is refused" do
+    assert %{status: :ok} = find(run([]), "gitleaks")
+
+    FakeProbe.set(%{secret_scanner: {:error, :not_found}})
+
+    assert %{status: :error, summary: summary, fix: fix} =
+             find(run(install: :checkout), "gitleaks")
+
+    assert summary =~ "secret_scan_unavailable"
+    assert fix =~ "mise install"
+
+    assert %{fix: fix} = find(run(install: :release), "gitleaks")
+    assert fix =~ "Omashiki image"
   end
 
   test "worst/1 ranks error over warn over ok" do

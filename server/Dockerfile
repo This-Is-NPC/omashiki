@@ -36,6 +36,11 @@ WORKDIR /app
 
 COPY --from=builder /app/_build/prod/rel/omashiki ./
 
+# gitleaks scans job output for secrets before it is published. The official
+# image, pinned by digest, ships a static binary for each architecture.
+COPY --from=ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+     /usr/bin/gitleaks /usr/local/bin/gitleaks
+
 # The release writes its runtime configuration under RELEASE_TMP at each
 # start. /tmp is writable by whichever user runs the container.
 ENV HOME=/app \

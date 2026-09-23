@@ -67,6 +67,7 @@ defmodule Omashiki.Doctor do
     docker_checks(probe, environments, opts) ++
       directory_checks(probe, directories, opts[:install]) ++
       host_credential_checks(probe, host_credentials, environments, opts[:install]) ++
+      [secret_scanner_check(probe, opts[:install])] ++
       identity_checks(probe, identities)
   end
 
@@ -459,6 +460,27 @@ defmodule Omashiki.Doctor do
     do:
       "https://github.com/This-Is-NPC/omashiki/blob/v#{Application.spec(:omashiki, :vsn)}/docs/" <>
         page
+
+  defp secret_scanner_check(probe, install) do
+    case probe.secret_scanner() do
+      :ok ->
+        ok("gitleaks", "gitleaks runs, so job output is scanned for secrets.")
+
+      {:error, reason} ->
+        error(
+          "gitleaks",
+          "gitleaks does not run (#{inspect(reason)}). Jobs that produce output fail " <>
+            "with secret_scan_unavailable.",
+          secret_scanner_fix(install)
+        )
+    end
+  end
+
+  defp secret_scanner_fix(:checkout),
+    do: "Run `mise install` in the checkout, then restart the house."
+
+  defp secret_scanner_fix(:release),
+    do: "Run the house from the Omashiki image, which ships gitleaks."
 
   defp identity_checks(probe, identities) do
     Enum.map(identities, fn identity ->

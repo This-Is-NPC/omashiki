@@ -39,6 +39,9 @@ defmodule Omashiki.Doctor.Probe do
   """
   @callback directory(path :: String.t()) :: result()
 
+  @doc "The secret scanner that checks job output is installed and runs."
+  @callback secret_scanner() :: result()
+
   @doc "The identity can mint an installation token."
   @callback identity(identity :: Omashiki.Config.Identity.t()) :: result()
 end

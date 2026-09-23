@@ -47,7 +47,21 @@ If an OpenCode session or one of its subagents still asks for a permission, the 
 
 ## Output checks
 
-Git finalization checks paths, likely secrets, output size, and worktree state.
+Before any sink publishes a result, the house checks the files the job wrote or changed.
+It refuses the output when:
+
+- a changed path is a symbolic link;
+- the changes add up to more than 100 MiB;
+- a file is under `.git/`, `.ssh/`, or `.aws/`, whatever it contains;
+- [gitleaks](https://github.com/gitleaks/gitleaks), with its default rules, finds a secret such as an API token or a private key in a changed file;
+- gitleaks is missing or fails, so the files could not be scanned.
+
+The secret scan judges content, not file names.
+It reads only the changed files, never Git history.
+It ignores `.gitleaks.toml`, `.gitleaksignore`, and `gitleaks:allow` comments in the output.
+The doctor checks that gitleaks runs.
+
+Git finalization also checks worktree state.
 A successful Git result identifies a committed branch with base and head revisions.
 The machine publishes to the configured remote after validation.
 The agent does not receive the canonical remote's push credentials.
@@ -71,7 +85,7 @@ A terminal webhook refuses loopback and private addresses, so a token holder can
 | Concurrent containers | The execution machine's configured capacity. |
 | CPU, memory, PIDs | The environment and machine resource settings. |
 | Attempt duration | The environment's `timeout_ms`. |
-| Git output | 100 MiB maximum change size. |
+| Job output | 100 MiB maximum change size. |
 | Terminal webhook retries | 24-hour retry window. |
 | Event and queue retention | Configured retention; the documented default is 30 days. |
 | Git run branches | Default 30-day pruning horizon. Current successful task pointers have separate preservation rules. |

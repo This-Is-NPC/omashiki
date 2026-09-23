@@ -36,4 +36,8 @@ defmodule Omashiki.Doctor.HostProbeTest do
 
     assert HostProbe.directory(root) == {:error, :eacces}
   end
+
+  test "the installed gitleaks runs" do
+    assert HostProbe.secret_scanner() == :ok
+  end
 end

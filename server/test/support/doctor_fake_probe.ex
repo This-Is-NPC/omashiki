@@ -27,6 +27,8 @@ defmodule Omashiki.Doctor.FakeProbe do
   @impl true
   def directory(path), do: answer(:directory, [path])
   @impl true
+  def secret_scanner, do: answer(:secret_scanner, [])
+  @impl true
   def identity(identity), do: answer(:identity, [identity])
 
   defp answer(callback, args) do

@@ -1,8 +1,8 @@
 defmodule Omashiki.Doctor.HostProbe do
   @moduledoc """
   `Omashiki.Doctor.Probe` against the real host: the Docker socket the
-  container manager uses, the house endpoint, host files and directories, and
-  GitHub.
+  container manager uses, the house endpoint, host files and directories, the
+  secret scanner, and GitHub.
 
   Docker calls consume the caller's mailbox while in flight (see
   `Omashiki.Runtime.ContainerManager`), so run this from a dedicated process.
@@ -11,6 +11,7 @@ defmodule Omashiki.Doctor.HostProbe do
   @behaviour Omashiki.Doctor.Probe
 
   alias Omashiki.Identities.GithubApp
+  alias Omashiki.Jobs.SecretScan
   alias Omashiki.Identities.Http
   alias Omashiki.Runtime.ContainerManager
   alias Omashiki.Runtime.HostCredentials
@@ -151,6 +152,14 @@ defmodule Omashiki.Doctor.HostProbe do
       File.dir?(path) -> with :ok <- File.write(probe, ""), do: File.rm(probe)
       File.exists?(path) -> {:error, :enotdir}
       true -> {:error, :enoent}
+    end
+  end
+
+  @impl true
+  def secret_scanner do
+    case SecretScan.version() do
+      {:ok, _version} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 

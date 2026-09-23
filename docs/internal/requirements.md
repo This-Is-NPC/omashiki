@@ -58,7 +58,7 @@ Clients retain responsibility for tracker integration, review, and merge decisio
 | NFR-002 | Fence active attempts with expiring leases. Recover stale attempts and release capacity once. |
 | NFR-003 | Drop container capabilities, disable privilege escalation, and enforce filesystem and resource policy. |
 | NFR-004 | Reject path escapes and unsafe symlink components in repositories, caches, mounts, and results. |
-| NFR-005 | Reject protected paths, likely secrets, symlinks, and oversized Git changes before publication. |
+| NFR-005 | Reject protected paths, secrets found by gitleaks, symlinks, and oversized changes before publication, and refuse output when the scan cannot run. |
 | NFR-006 | Apply upstream validation to restricted gateways and proxies. Do not extend this claim to explicit host networking. |
 | NFR-007 | Keep gateway API keys in the house. Restrict and clean temporary credential copies. |
 | NFR-008 | Preserve event ordering and bounded replay. Fail on missing retained sequences. |

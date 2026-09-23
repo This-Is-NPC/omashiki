@@ -132,9 +132,10 @@ defmodule Omashiki.Jobs.SinkTest do
     {:ok, %{artifact: artifact}} =
       WorkArtifact.provision(job, "files", [], fn _artifact -> {:ok, %{}} end)
 
-    File.write!(Path.join(artifact.path, "leak.txt"), "api_key=super-secret-value\n")
+    token = "ghp_" <> "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+    File.write!(Path.join(artifact.path, "leak.txt"), "export GH=#{token}\n")
 
-    assert {:error, {:likely_secret, "leak.txt"}} = WorkArtifact.finalize(artifact, job)
+    assert {:error, {:secret_found, [%{file: "leak.txt"}]}} = WorkArtifact.finalize(artifact, job)
     assert :ok = WorkArtifact.cleanup(artifact)
   end
 

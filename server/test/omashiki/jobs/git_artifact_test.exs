@@ -102,14 +102,15 @@ defmodule Omashiki.Jobs.GitArtifactTest do
     assert :ok = GitArtifact.cleanup(artifact)
   end
 
-  test "rejects protected paths and likely secrets without committing", %{
+  test "rejects protected paths and secrets without committing", %{
     job: job,
     attempt: attempt
   } do
     {:ok, protected} = GitArtifact.provision_worktree(job, attempt)
-    File.write!(Path.join(protected.path, ".env"), "SAFE=not-a-secret\n")
+    File.mkdir_p!(Path.join(protected.path, ".ssh"))
+    File.write!(Path.join(protected.path, ".ssh/config"), "Host example\n")
 
-    assert {:error, {:protected_path, ".env"}} =
+    assert {:error, {:protected_path, ".ssh/config"}} =
              GitArtifact.finalize(protected, job, update_task_branch: true)
 
     assert :ok = GitArtifact.cleanup(protected)
@@ -121,10 +122,13 @@ defmodule Omashiki.Jobs.GitArtifactTest do
     }
 
     {:ok, secret} = GitArtifact.provision_worktree(secret_job, attempt)
-    File.write!(Path.join(secret.path, "notes.txt"), "api_key=sk-live-1234567890\n")
+    token = "ghp_" <> "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+    File.write!(Path.join(secret.path, "notes.txt"), "export GH=#{token}\n")
 
-    assert {:error, {:likely_secret, "notes.txt"}} =
+    assert {:error, {:secret_found, [%{file: "notes.txt", rule_id: "github-pat"}]}} =
              GitArtifact.finalize(secret, secret_job, update_task_branch: true)
+
+    assert git!(secret.path, ["rev-parse", "HEAD"]) == secret.base_sha
 
     assert :ok = GitArtifact.cleanup(secret)
   end
