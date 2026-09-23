@@ -544,12 +544,13 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
       )
 
       previous_socket = Application.get_env(:omashiki, :docker_socket_path)
+      previous_credential_root = Application.get_env(:omashiki, :host_credential_root)
       Application.put_env(:omashiki, :docker_socket_path, socket)
       Application.put_env(:omashiki, :host_credential_root, Path.join(root, "credentials"))
 
       on_exit(fn ->
         Application.put_env(:omashiki, :docker_socket_path, previous_socket)
-        Application.delete_env(:omashiki, :host_credential_root)
+        Application.put_env(:omashiki, :host_credential_root, previous_credential_root)
         File.rm_rf!(root)
       end)
 

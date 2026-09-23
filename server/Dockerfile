@@ -36,7 +36,10 @@ WORKDIR /app
 
 COPY --from=builder /app/_build/prod/rel/omashiki ./
 
-ENV HOME=/app
+# The release writes its runtime configuration under RELEASE_TMP at each
+# start. /tmp is writable by whichever user runs the container.
+ENV HOME=/app \
+    RELEASE_TMP=/tmp
 EXPOSE 4000
 
 CMD ["bin/entrypoint"]

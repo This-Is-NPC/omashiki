@@ -138,10 +138,15 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
     assert {:ok, _} = HostCredentials.materialize(active, environment(ctx.auth))
     assert {:ok, _} = HostCredentials.materialize(stale, environment(ctx.auth))
 
+    # The root is shared with everything else in /dev/shm.
+    foreign = Path.join(HostCredentials.root(), "not-omashiki")
+    File.mkdir_p!(foreign)
+
     HostCredentials.sweep([active])
 
     assert File.dir?(HostCredentials.scope_dir(active))
     refute File.exists?(HostCredentials.scope_dir(stale))
+    assert File.dir?(foreign)
 
     HostCredentials.discard(active)
     refute File.exists?(HostCredentials.scope_dir(active))

@@ -25,10 +25,10 @@ curl -LO https://github.com/This-Is-NPC/omashiki/releases/latest/download/omashi
 `omashiki.toml` is the house configuration. It declares one OpenCode environment, `opencode`.
 The house also saves configuration history in this directory.
 
-Create the cache directory, so that it belongs to your account:
+Create the cache and state directories, so that they belong to your account:
 
 ```bash
-mkdir -p ~/.cache/omashiki
+mkdir -p ~/.cache/omashiki ~/.local/state/omashiki
 ```
 
 ## 2. Prepare the agent image
@@ -57,12 +57,22 @@ For other agents and for gateway access, see [configure model access](how-to-con
 
 ## 4. Start the house
 
-Set the house secret in `.env`. Compose reads this file from the same directory.
+Write `.env`. Compose reads this file from the same directory.
 
 ```bash
-echo "SECRET_KEY_BASE=$(openssl rand -base64 48)" > .env
+cat > .env <<EOF
+SECRET_KEY_BASE=$(openssl rand -base64 48)
+OMASHIKI_UID=$(id -u)
+OMASHIKI_GID=$(id -g)
+OMASHIKI_DOCKER_GID=$(stat -c %g /var/run/docker.sock)
+EOF
 docker compose up -d
 ```
+
+`SECRET_KEY_BASE` is the house secret.
+The house runs as the user and group that `OMASHIKI_UID` and `OMASHIKI_GID` name.
+The files that it writes in this directory, in `~/.cache/omashiki`, and in `~/.local/state/omashiki` belong to your account.
+`OMASHIKI_DOCKER_GID` is the group of the Docker socket. It lets the house start the agent containers.
 
 Keep `.env`. A new secret signs out every browser session and invalidates every API token.
 See [secret rotation](security-and-limits.md#secret-rotation) for everything else that it invalidates.

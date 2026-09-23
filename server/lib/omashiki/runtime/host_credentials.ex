@@ -19,11 +19,15 @@ defmodule Omashiki.Runtime.HostCredentials do
   @container_dir HostCredential.container_dir()
   @empty %{dir: nil, binds: [], mounts: []}
   @scope ~r/^[A-Za-z0-9._-]+$/
+  @prefix "omashiki-credentials-"
 
-  @doc "Host root holding every per-attempt credential directory."
+  @doc """
+  Host root holding every per-attempt credential directory. The directories
+  sit in it side by side, with no shared parent of their own, so each belongs
+  to the user whose house created it and no other user's house can block it.
+  """
   def root do
-    Application.get_env(:omashiki, :host_credential_root) ||
-      Path.join(default_base(), "omashiki-credentials")
+    Application.get_env(:omashiki, :host_credential_root) || default_base()
   end
 
   @doc "Private host directory for one attempt scope."
@@ -32,7 +36,7 @@ defmodule Omashiki.Runtime.HostCredentials do
       raise ArgumentError, "unsafe attempt scope #{inspect(scope_id)}"
     end
 
-    Path.join(root(), scope_id)
+    Path.join(root(), @prefix <> scope_id)
   end
 
   @doc """
@@ -64,9 +68,9 @@ defmodule Omashiki.Runtime.HostCredentials do
 
     case File.ls(root()) do
       {:ok, entries} ->
-        entries
-        |> Enum.reject(&MapSet.member?(active, &1))
-        |> Enum.each(&discard/1)
+        for @prefix <> scope_id <- entries,
+            not MapSet.member?(active, scope_id),
+            do: discard(scope_id)
 
       _ ->
         :ok

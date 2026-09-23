@@ -2,7 +2,12 @@
 # role, which serves the UI and the API and runs the agent containers.
 #
 # Keep this file next to omashiki.toml, then:
-#   echo "SECRET_KEY_BASE=$(openssl rand -base64 48)" > .env
+#   cat > .env <<EOF
+#   SECRET_KEY_BASE=$(openssl rand -base64 48)
+#   OMASHIKI_UID=$(id -u)
+#   OMASHIKI_GID=$(id -g)
+#   OMASHIKI_DOCKER_GID=$(stat -c %g /var/run/docker.sock)
+#   EOF
 #   docker compose up -d
 #
 # .env may also set OMASHIKI_VERSION (default latest) and OMASHIKI_PORT
@@ -30,6 +35,12 @@ services:
 
   omashiki:
     image: ghcr.io/this-is-npc/omashiki:${OMASHIKI_VERSION:-latest}
+    # The house runs as the operator, so what it writes in the mounted host
+    # directories belongs to them, and in the Docker socket's group, so it
+    # can start the agent containers.
+    user: "${OMASHIKI_UID:?set OMASHIKI_UID to your user id}:${OMASHIKI_GID:?set OMASHIKI_GID to your group id}"
+    group_add:
+      - "${OMASHIKI_DOCKER_GID:?set OMASHIKI_DOCKER_GID to the group of /var/run/docker.sock}"
     depends_on:
       db:
         condition: service_healthy
@@ -63,6 +74,8 @@ services:
       - ${OMASHIKI_CONFIG_DIR:-.}:/config
       - /var/run/docker.sock:/var/run/docker.sock
       - ${OMASHIKI_HOST_HOME:-${HOME}}/.cache/omashiki:${OMASHIKI_HOST_HOME:-${HOME}}/.cache/omashiki
+      # Cache use records, which the house keeps beside the caches.
+      - ${OMASHIKI_HOST_HOME:-${HOME}}/.local/state/omashiki:${OMASHIKI_HOST_HOME:-${HOME}}/.local/state/omashiki
       # Agent secret files land in /dev/shm; share the host path so the
       # daemon can bind-mount them into job containers.
       - /dev/shm:/dev/shm
