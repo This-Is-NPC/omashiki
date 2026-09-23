@@ -63,7 +63,23 @@ A successful response shows that the service answers.
 It does not show that an agent credential works.
 [Submit a job](how-to-submit-a-job.md) to check execution.
 
-## 4. Stop the installation
+## 4. Check the installation
+
+```bash
+mise run doctor
+```
+
+The doctor checks Docker, the agent images, and the network of each `restricted` environment.
+It also checks the host credential files and each GitHub App identity.
+When the house runs, it starts a short-lived container to check that containers reach `[app].port` on the host.
+Each check prints `ok`, `warn`, or `error`. Each problem has a fix.
+The task exits with a non-zero status when a check reports an error.
+
+The house runs the same checks in the background when it starts, and logs each warning and error.
+The System screen at `/system` shows the latest results.
+It repeats the checks every minute. The container check runs only at startup.
+
+## 5. Stop the installation
 
 Press `Ctrl+C` in the foreground terminal.
 This stops Phoenix. The database container keeps running.
@@ -78,6 +94,8 @@ Use `mise run up` to start the installation again.
 The `up:fresh` task deletes local state. Do not use it for a normal restart.
 
 ## If startup fails
+
+Run `mise run doctor` first. It reports most of these conditions with a fix.
 
 | Condition | Action |
 | --- | --- |

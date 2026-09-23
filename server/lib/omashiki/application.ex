@@ -71,7 +71,9 @@ defmodule Omashiki.Application do
       {Oban, Application.fetch_env!(:omashiki, Oban)},
       Omashiki.Gateway.CircuitBreaker,
       OmashikiWeb.Endpoint,
-      Omashiki.SupplyChain.SocketBridge
+      Omashiki.SupplyChain.SocketBridge,
+      # After the endpoint: the doctor's route check calls the house back.
+      Omashiki.Doctor.Monitor
     ] ++ recovery_children()
   end
 

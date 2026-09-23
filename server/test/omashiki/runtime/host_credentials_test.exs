@@ -104,6 +104,16 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
     refute File.exists?(HostCredentials.scope_dir(scope))
   end
 
+  test "readable/1 checks an origin the way an attempt would copy it", ctx do
+    assert :ok = HostCredentials.readable(ctx.auth)
+    assert {:error, :enoent} = HostCredentials.readable(ctx.origins)
+
+    with_home(ctx.origins, fn ->
+      assert :ok = HostCredentials.readable("~/auth.json")
+      assert {:error, :enoent} = HostCredentials.readable("~/.harness/login.json")
+    end)
+  end
+
   test "rejects two credentials fighting for one container file", ctx do
     environment = %{
       host_credentials: [

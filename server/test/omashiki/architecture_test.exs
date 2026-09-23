@@ -37,6 +37,7 @@ defmodule Omashiki.ArchitectureTest do
   # The ports we know about today. Discovery is what actually drives INV5 —
   # this list exists so a discovery bug cannot make the check vacuously green.
   @known_contracts [
+    Omashiki.Doctor.Probe,
     Omashiki.Gateway.Provider,
     Omashiki.Harness.Adapter,
     Omashiki.Jobs.Runner.Container,

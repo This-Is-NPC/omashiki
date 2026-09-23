@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+#MISE description="Diagnose the installation: Docker, images, agent network, credentials, identities"
+#MISE depends=["deps"]
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / ".scripts"))
+from omashiki import mix
+
+sys.exit(mix("omashiki.doctor", check=False))

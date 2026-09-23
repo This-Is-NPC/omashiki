@@ -59,6 +59,10 @@ config :omashiki, :api_token_use_write, :inline
 # Skip on-boot orphan cleanup (no Docker socket / repo dirs in unit tests).
 config :omashiki, :run_orphan_cleanup_on_boot, false
 
+# The doctor probes Docker, the house, and GitHub. Tests run it on demand with
+# a fake probe instead of at boot against the developer's machine.
+config :omashiki, :doctor_on_boot, false
+
 # The runtime graph joins a container census onto processes and attempt rows.
 # Tests drive the container half explicitly; without this the shared inspector
 # would reach for whatever Docker daemon the developer happens to be running and

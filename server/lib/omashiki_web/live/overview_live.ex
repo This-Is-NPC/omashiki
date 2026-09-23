@@ -4,6 +4,7 @@ defmodule OmashikiWeb.OverviewLive do
   use OmashikiWeb, :live_view
 
   alias Omashiki.Config
+  alias Omashiki.Doctor.Monitor
   alias Omashiki.Jobs
   alias Omashiki.Jobs.Api
   alias Omashiki.Runtimes.CacheMaintenance
@@ -53,6 +54,7 @@ defmodule OmashikiWeb.OverviewLive do
     |> assign(:expiring_tokens, Omashiki.ApiTokens.expiring_soon(user))
     |> assign(:workers, Omashiki.Worker.Presence.list())
     |> assign(:cache, cache)
+    |> assign(:doctor, Monitor.latest())
   end
 
   # The ceiling is the sum of every node's capacity row, not this host's
@@ -122,6 +124,28 @@ defmodule OmashikiWeb.OverviewLive do
       </div>
 
       <div class="grid gap-6 lg:grid-cols-2">
+        <.panel
+          title="Installation checks"
+          meta={
+            if @doctor.checked_at,
+              do: "checked #{Ops.age(@doctor.checked_at)} ago",
+              else: "not run yet"
+          }
+        >
+          <ul :if={@doctor.checks != []} class="divide-y divide-outline-variant/40">
+            <li :for={check <- @doctor.checks} class="flex flex-col gap-1 py-3">
+              <div class="flex flex-wrap items-baseline gap-3">
+                <span class={["font-mono text-xs uppercase", doctor_status_class(check.status)]}>{check.status}</span>
+                <span class="font-mono text-xs text-on-surface">{check.summary}</span>
+              </div>
+              <p :if={check.fix} class="font-mono text-xs text-on-surface-variant">{check.fix}</p>
+            </li>
+          </ul>
+          <p :if={@doctor.checks == []} class="font-mono text-xs text-on-surface-variant">
+            No installation check has run on this house.
+          </p>
+        </.panel>
+
         <.panel title="Cache health" meta={"#{@cache.groups} configured"}>
           <div class="flex items-center justify-between gap-4">
             <span class={[
@@ -252,6 +276,10 @@ defmodule OmashikiWeb.OverviewLive do
     </div>
     """
   end
+
+  defp doctor_status_class(:ok), do: "text-status-succeeded"
+  defp doctor_status_class(:warn), do: "text-status-awaiting"
+  defp doctor_status_class(:error), do: "text-status-failed"
 
   defp format_bytes(bytes) when is_integer(bytes) and bytes >= 1_073_741_824,
     do: "#{Float.round(bytes / 1_073_741_824, 1)} GiB"

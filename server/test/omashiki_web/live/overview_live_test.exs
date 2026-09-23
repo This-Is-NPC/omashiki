@@ -53,6 +53,26 @@ defmodule OmashikiWeb.OverviewLiveTest do
     assert text =~ "live"
   end
 
+  test "installation checks show each status, summary, and fix", %{conn: conn} do
+    Application.put_env(:omashiki, :doctor_probe, Omashiki.Doctor.FakeProbe)
+    Omashiki.Doctor.FakeProbe.set(%{runtime: {:error, :econnrefused}})
+
+    on_exit(fn ->
+      Application.delete_env(:omashiki, :doctor_probe)
+      Omashiki.Doctor.FakeProbe.reset()
+    end)
+
+    Omashiki.Doctor.Monitor.refresh()
+
+    {:ok, _lv, html} = live(conn, ~p"/system")
+    text = visible_text(html)
+
+    assert text =~ "Installation checks"
+    assert text =~ "error"
+    assert text =~ "Docker does not answer"
+    assert text =~ "Start Docker"
+  end
+
   test "primary nav is Home, System, and Config", %{conn: conn} do
     {:ok, _lv, html} = live(conn, ~p"/system")
 

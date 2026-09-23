@@ -75,6 +75,20 @@ defmodule Omashiki.Runtime.HostCredentials do
     :ok
   end
 
+  @doc """
+  Whether a declared origin can be copied on this machine, as an attempt would
+  copy it. `:ok`, or `{:error, reason}` when it is not a readable file.
+  """
+  def readable(declared) when is_binary(declared) do
+    origin = expand_host_path(declared)
+
+    if File.regular?(origin) do
+      with {:ok, file} <- File.open(origin, [:read]), do: File.close(file)
+    else
+      {:error, :enoent}
+    end
+  end
+
   defp copy_all(scope_id, credentials, owner) do
     dir = scope_dir(scope_id)
 

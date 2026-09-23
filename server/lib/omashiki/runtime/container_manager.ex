@@ -920,7 +920,10 @@ defmodule Omashiki.Runtime.ContainerManager do
     }
   end
 
-  defp network_mode(environment) do
+  @doc false
+  # The Docker network an environment's container is created on. Omashiki.Doctor
+  # resolves `restricted` through the same function so it checks what runs.
+  def network_mode(environment) do
     case Map.get(environment, :network, Map.get(environment, "network", "none")) do
       "host" ->
         "host"
@@ -2048,9 +2051,14 @@ defmodule Omashiki.Runtime.ContainerManager do
 
   # ---------------------------------------------------------------------------
   # Docker HTTP plumbing
+  #
+  # Public for Omashiki.Doctor.HostProbe only. These run in the caller and
+  # consume every message it receives while a request is in flight: call them
+  # from a process that owns no other mailbox traffic.
   # ---------------------------------------------------------------------------
 
-  defp docker_ping do
+  @doc false
+  def docker_ping do
     case mint_request("GET", "/_ping", [], nil) do
       {:ok, %{status: 200}} -> :ok
       {:ok, %{status: status}} -> {:error, {:unexpected_status, status}}
@@ -2098,7 +2106,8 @@ defmodule Omashiki.Runtime.ContainerManager do
     end
   end
 
-  defp docker_get(path) do
+  @doc false
+  def docker_get(path) do
     case mint_request("GET", path, [], nil) do
       {:ok, %{status: status, body: body}} when status in [200, 201] -> Jason.decode(body)
       {:ok, %{status: 404}} -> {:error, :not_found}
@@ -2107,7 +2116,8 @@ defmodule Omashiki.Runtime.ContainerManager do
     end
   end
 
-  defp docker_post(path, body) do
+  @doc false
+  def docker_post(path, body) do
     json_body = Jason.encode!(body)
     headers = [{"content-type", "application/json"}]
 
@@ -2126,7 +2136,8 @@ defmodule Omashiki.Runtime.ContainerManager do
     end
   end
 
-  defp docker_post_no_body(path) do
+  @doc false
+  def docker_post_no_body(path) do
     headers = [{"content-type", "application/json"}]
 
     case mint_request("POST", path, headers, "") do
@@ -2137,7 +2148,8 @@ defmodule Omashiki.Runtime.ContainerManager do
     end
   end
 
-  defp docker_delete(path) do
+  @doc false
+  def docker_delete(path) do
     case mint_request("DELETE", path, [], nil) do
       {:ok, %{status: status}} when status in [200, 204] -> :ok
       {:ok, %{status: 404}} -> {:error, :not_found}
