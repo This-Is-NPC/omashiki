@@ -58,7 +58,9 @@ defmodule Omashiki.Integration.QueueLoadTest do
     )
 
     user = user_fixture()
-    {token, _plaintext} = api_token_fixture(user)
+    # The whole load is admitted before any of it runs, so the token must
+    # allow every job to be active at once.
+    {token, _plaintext} = api_token_fixture(user, %{max_active_jobs: @job_count})
 
     jobs =
       1..@job_count
