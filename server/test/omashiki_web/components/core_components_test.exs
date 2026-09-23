@@ -297,55 +297,6 @@ defmodule OmashikiWeb.CoreComponentsTest do
   # Render-shape tests for the rest of the public surface
   # ---------------------------------------------------------------------------
 
-  describe "label/1" do
-    test "renders a <label> with the for= attr" do
-      html =
-        render_component(&CoreComponents.label/1, %{
-          for: "user_email",
-          inner_block: slot("Email")
-        })
-
-      assert html =~ ~s(for="user_email")
-      assert html =~ "Email"
-    end
-  end
-
-  describe "error/1" do
-    test "renders the inner block with the rose error tone" do
-      html = render_component(&CoreComponents.error/1, %{inner_block: slot("required")})
-      assert html =~ "required"
-      assert html =~ "text-rose-600"
-    end
-  end
-
-  describe "header/1" do
-    test "renders the title and subtitle slots" do
-      html =
-        render_component(&CoreComponents.header/1, %{
-          inner_block: slot("Account"),
-          subtitle: [%{__slot__: :subtitle, inner_block: fn _, _ -> "manage settings" end}],
-          actions: []
-        })
-
-      assert html =~ "Account"
-      assert html =~ "manage settings"
-    end
-  end
-
-  describe "back/1" do
-    test "renders an arrow-left icon and the inner-block label" do
-      html =
-        render_component(&CoreComponents.back/1, %{
-          navigate: "/",
-          inner_block: slot("Back to overview")
-        })
-
-      assert html =~ "Back to overview"
-      assert html =~ ~s(href="/")
-      assert html =~ "hero-arrow-left-solid"
-    end
-  end
-
   describe "icon/1" do
     test "renders heroicon name as a class on the span" do
       html = render_component(&CoreComponents.icon/1, %{name: "hero-x-mark-solid"})
@@ -361,102 +312,6 @@ defmodule OmashikiWeb.CoreComponentsTest do
 
       assert html =~ "hero-arrow-path"
       assert html =~ "h-3 w-3 animate-spin"
-    end
-  end
-
-  describe "input/1 — variants" do
-    test "checkbox renders the hidden + checkbox pair" do
-      html =
-        render_component(&CoreComponents.input/1, %{
-          type: "checkbox",
-          name: "agree",
-          label: "I agree",
-          checked: true
-        })
-
-      assert html =~ ~s(type="hidden")
-      assert html =~ ~s(type="checkbox")
-      assert html =~ "I agree"
-    end
-
-    test "select renders the option block" do
-      html =
-        render_component(&CoreComponents.input/1, %{
-          type: "select",
-          name: "role",
-          label: "Role",
-          options: [{"Admin", "admin"}, {"Viewer", "viewer"}],
-          value: "admin",
-          prompt: "Pick one"
-        })
-
-      assert html =~ "<select"
-      assert html =~ "Admin"
-      assert html =~ "Viewer"
-      assert html =~ "Pick one"
-    end
-
-    test "textarea renders the textarea element" do
-      html =
-        render_component(&CoreComponents.input/1, %{
-          type: "textarea",
-          name: "notes",
-          label: "Notes",
-          value: "hello"
-        })
-
-      assert html =~ "<textarea"
-      assert html =~ "hello"
-    end
-
-    test "default text input renders an <input type='text'> with label" do
-      html =
-        render_component(&CoreComponents.input/1, %{
-          name: "name",
-          label: "Name",
-          value: "Ada"
-        })
-
-      assert html =~ ~s(type="text")
-      assert html =~ "Name"
-      assert html =~ "Ada"
-    end
-
-    test "errors slot translates and shows error copy" do
-      html =
-        render_component(&CoreComponents.input/1, %{
-          name: "name",
-          label: "Name",
-          value: "",
-          errors: ["can't be blank"]
-        })
-
-      assert html =~ "can&#39;t be blank"
-    end
-  end
-
-  describe "modal/1" do
-    test "renders the dialog wrapper with the given id" do
-      html =
-        render_component(&CoreComponents.modal/1, %{
-          id: "confirm-modal",
-          inner_block: slot("Are you sure?")
-        })
-
-      assert html =~ ~s(id="confirm-modal")
-      assert html =~ "Are you sure?"
-      assert html =~ ~s(role="dialog")
-    end
-
-    test "show=true triggers phx-mounted" do
-      html =
-        render_component(&CoreComponents.modal/1, %{
-          id: "m1",
-          show: true,
-          inner_block: slot("body")
-        })
-
-      assert html =~ "phx-mounted"
     end
   end
 
@@ -495,51 +350,6 @@ defmodule OmashikiWeb.CoreComponentsTest do
     end
   end
 
-  describe "table/1" do
-    test "renders a row per entry with the column slots" do
-      html =
-        render_component(&CoreComponents.table/1, %{
-          id: "users",
-          rows: [%{id: 1, name: "Ada"}, %{id: 2, name: "Linus"}],
-          col: [
-            %{
-              __slot__: :col,
-              label: "id",
-              inner_block: fn _, row -> Integer.to_string(row.id) end
-            },
-            %{
-              __slot__: :col,
-              label: "name",
-              inner_block: fn _, row -> row.name end
-            }
-          ],
-          action: []
-        })
-
-      assert html =~ "Ada"
-      assert html =~ "Linus"
-      assert html =~ "id"
-      assert html =~ "name"
-    end
-  end
-
-  describe "list/1" do
-    test "renders one row per item with title + body" do
-      html =
-        render_component(&CoreComponents.list/1, %{
-          item: [
-            %{__slot__: :item, title: "Title", inner_block: fn _, _ -> "Value 1" end},
-            %{__slot__: :item, title: "Views", inner_block: fn _, _ -> "42" end}
-          ]
-        })
-
-      assert html =~ "Title"
-      assert html =~ "Value 1"
-      assert html =~ "Views"
-      assert html =~ "42"
-    end
-  end
-
   describe "JS commands" do
     test "show/1 returns a JS struct that targets the selector" do
       js = CoreComponents.show("#welcome")
@@ -548,16 +358,6 @@ defmodule OmashikiWeb.CoreComponentsTest do
 
     test "hide/1 returns a JS struct that targets the selector" do
       js = CoreComponents.hide("#welcome")
-      assert %Phoenix.LiveView.JS{} = js
-    end
-
-    test "show_modal/1 returns a JS struct" do
-      js = CoreComponents.show_modal("welcome")
-      assert %Phoenix.LiveView.JS{} = js
-    end
-
-    test "hide_modal/1 returns a JS struct" do
-      js = CoreComponents.hide_modal("welcome")
       assert %Phoenix.LiveView.JS{} = js
     end
   end

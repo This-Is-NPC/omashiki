@@ -11,8 +11,6 @@
 
 /* Design tokens — must precede Tailwind so utilities resolve via CSS vars. */
 @import "./tokens.css";
-@import "./type-styles.css";
-@import "./container-queries.css";
 
 @import "tailwindcss/base";
 @import "tailwindcss/components";

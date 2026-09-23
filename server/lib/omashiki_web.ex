@@ -84,7 +84,6 @@ defmodule OmashikiWeb do
       import Phoenix.HTML
       # Core UI components
       import OmashikiWeb.CoreComponents
-      import OmashikiWeb.DataComponents
 
       # Shortcut for generating JS commands
       alias Phoenix.LiveView.JS
