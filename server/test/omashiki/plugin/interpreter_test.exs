@@ -8,6 +8,8 @@ defmodule Omashiki.Plugin.InterpreterTest do
   alias Omashiki.Runtime.Spec
 
   @plugins_dir Path.expand("../../../../plugins", __DIR__)
+  @minimal "transport = \"cli\"\n[output]\nshape = \"object\"\ntext = \"text\"\n"
+  @approvals "[approvals]\nmechanism = \"non_interactive\"\nenforced_by = \"tool --print\"\n"
 
   setup do
     plugins = Loader.load!(@plugins_dir)
@@ -40,7 +42,8 @@ defmodule Omashiki.Plugin.InterpreterTest do
 
     File.write!(
       path,
-      "transport = \"cli\"\n[[option_argv]]\nappend = [\"{{not_allowed}}\"]\n[output]\nshape = \"object\"\ntext = \"text\"\n"
+      "transport = \"cli\"\n[[option_argv]]\nappend = [\"{{not_allowed}}\"]\n" <>
+        "[output]\nshape = \"object\"\ntext = \"text\"\n" <> @approvals
     )
 
     try do
@@ -49,6 +52,42 @@ defmodule Omashiki.Plugin.InterpreterTest do
       end
     after
       File.rm(path)
+    end
+  end
+
+  test "a manifest must declare how its harness avoids approvals" do
+    assert %Manifest{
+             approvals: %{"mechanism" => "non_interactive", "enforced_by" => "tool --print"}
+           } = Manifest.parse!("ok", "ok.toml", @minimal <> @approvals)
+
+    assert_raise Omashiki.Config.Error, ~r/ok\.toml\.approvals required/, fn ->
+      Manifest.parse!("ok", "ok.toml", @minimal)
+    end
+
+    assert_raise Omashiki.Config.Error, ~r/approvals\.mechanism invalid: "ask"/, fn ->
+      Manifest.parse!(
+        "ok",
+        "ok.toml",
+        @minimal <> String.replace(@approvals, "non_interactive", "ask")
+      )
+    end
+
+    assert_raise Omashiki.Config.Error, ~r/approvals\.enforced_by required/, fn ->
+      Manifest.parse!("ok", "ok.toml", @minimal <> "[approvals]\nmechanism = \"bypassed\"\n")
+    end
+  end
+
+  test "shipped plugins declare how they avoid approvals", %{plugins: plugins} do
+    expected = %{
+      "opencode" => "permission_policy",
+      "claude-code" => "non_interactive",
+      "codex" => "bypassed",
+      "jcode" => "non_interactive",
+      "pi" => "non_interactive"
+    }
+
+    for {name, mechanism} <- expected do
+      assert %{"mechanism" => ^mechanism} = Map.fetch!(plugins, name).approvals
     end
   end
 
@@ -256,9 +295,52 @@ defmodule Omashiki.Plugin.InterpreterTest do
         |> Jason.decode!()
 
       assert content["model"] == "opencode-go/glm-5.3-flash"
+      assert_no_approvals(content)
     after
       File.rm_rf!(tmp)
     end
+  end
+
+  test "opencode gateway prepare writes the permission policy", %{plugins: plugins} do
+    manifest = Map.fetch!(plugins, "opencode")
+    spec = preset(manifest, %{})
+
+    job = %Omashiki.Jobs.Job{
+      id: Ecto.UUID.generate(),
+      user_id: Ecto.UUID.generate(),
+      admitted_environment_digest: "digest",
+      status: "running"
+    }
+
+    context = %Context{
+      job: job,
+      profile: spec,
+      host_base_url: "http://house:4010",
+      credential: %Credential{
+        name: "openrouter",
+        provider: "openrouter",
+        model: "z-ai/glm-5.3-flash",
+        base_url: "https://openrouter.ai/api/v1",
+        api_key: "sk-test",
+        fallback_chain: [],
+        model_aliases: %{}
+      },
+      runtime_mounts: []
+    }
+
+    assert {:ok, plan} = Interpreter.prepare(spec, context)
+    assert plan.llm_egress == :gateway
+
+    content =
+      plan.environment
+      |> Enum.find_value(fn
+        "OPENCODE_CONFIG_CONTENT=" <> json -> json
+        _ -> nil
+      end)
+      |> Jason.decode!()
+
+    assert content["model"] == "gateway/z-ai/glm-5.3-flash"
+    assert_no_approvals(content)
   end
 
   test "opencode host prepare hands the identity tools to the agent", %{plugins: plugins} do
@@ -326,6 +408,16 @@ defmodule Omashiki.Plugin.InterpreterTest do
     assert snapshot["path"] == manifest.path
     assert snapshot["contents"] == manifest.contents
     assert snapshot["digest"] == manifest.digest
+  end
+
+  # Every permission OpenCode 1.18 asks for by default is answered in advance.
+  defp assert_no_approvals(content) do
+    assert content["permission"] == %{
+             "read" => "allow",
+             "external_directory" => "deny",
+             "doom_loop" => "deny",
+             "question" => "deny"
+           }
   end
 
   defp preset(manifest, options) do

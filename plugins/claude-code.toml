@@ -58,3 +58,9 @@ default = ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git *)", "Bash(python3
 
 [requires]
 binaries = ["claude"]
+
+# Print mode never prompts: a tool call that acceptEdits and the allowed
+# tools do not permit is denied (agent/claude_code_runner.mjs).
+[approvals]
+mechanism = "non_interactive"
+enforced_by = "claude --print --permission-mode acceptEdits"

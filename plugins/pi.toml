@@ -48,3 +48,8 @@ default = "/tmp/omashiki-pi-invocation.txt"
 
 [requires]
 binaries = ["pi"]
+
+# One-shot print mode with no approval dialog (agent/pi_runner.sh).
+[approvals]
+mechanism = "non_interactive"
+enforced_by = "pi --print --mode json"

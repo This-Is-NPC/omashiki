@@ -115,6 +115,14 @@ defmodule Omashiki.Jobs.Failure do
   defp describe({:finalization_failed, reason}),
     do: {"finalization_failed", "The attempt output could not be saved: #{cause(reason)}", %{}}
 
+  defp describe({:agent_waiting_for_permission, permission, patterns}) do
+    on = if patterns == [], do: "", else: " on #{Enum.join(patterns, ", ")}"
+
+    {"agent_waiting_for_permission",
+     "The agent asked for the #{permission} permission#{on}. Nobody can approve it in a " <>
+       "container, so the attempt failed.", %{"permission" => permission, "patterns" => patterns}}
+  end
+
   # Harness adapters report a non-zero exit as `{:<harness>_exit, code, output}`.
   defp describe({tag, exit_code, output}) when is_atom(tag) and is_integer(exit_code) do
     if String.ends_with?(Atom.to_string(tag), "_exit"),

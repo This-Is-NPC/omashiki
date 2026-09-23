@@ -122,6 +122,7 @@ The object has a stable `code`, a readable `message`, and structured `details`.
 | `harness_not_ready` | The agent harness did not pass its readiness check in time. |
 | `harness_unreachable_no_network` | An HTTP harness runs in a container without a network. |
 | `harness_exit` | The agent harness exited with a non-zero code. |
+| `agent_waiting_for_permission` | The agent asked for an approval. `details` has the permission and its patterns. |
 | `timeout` | A call to Docker or to the harness did not finish in time. |
 | `stale_attempt` | The attempt stopped renewing its lease. |
 | `cancelled` | An operator or a client cancelled the job. |

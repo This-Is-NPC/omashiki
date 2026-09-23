@@ -8,6 +8,10 @@ defmodule Omashiki.Plugin.Manifest do
   @shapes ~w(object jsonl_agent_end result_envelope)
   @transports ~w(cli http)
   @prepare_modes ~w(gateway_prompt invocation_json opencode_gateway opencode_host none)
+  # How the harness avoids an interactive approval nobody can answer in a
+  # container: it runs in a mode without prompts, has them bypassed by a flag,
+  # or gets a permission policy with no `ask` rule.
+  @approval_mechanisms ~w(non_interactive bypassed permission_policy)
 
   defstruct [
     :name,
@@ -24,6 +28,7 @@ defmodule Omashiki.Plugin.Manifest do
     :options,
     :requires,
     :llm_egress,
+    :approvals,
     http: nil,
     option_argv: []
   ]
@@ -51,6 +56,7 @@ defmodule Omashiki.Plugin.Manifest do
       {"options", m.options},
       {"requires", m.requires},
       {"llm_egress", m.llm_egress && Atom.to_string(m.llm_egress)},
+      {"approvals", m.approvals},
       {"http", m.http},
       {"option_argv", m.option_argv}
     ])
@@ -72,6 +78,7 @@ defmodule Omashiki.Plugin.Manifest do
       options: Map.get(map, "options", %{}),
       requires: Map.get(map, "requires", %{}),
       llm_egress: egress(Map.get(map, "llm_egress")),
+      approvals: Map.fetch!(map, "approvals"),
       http: Map.get(map, "http"),
       option_argv: Map.get(map, "option_argv", [])
     })
@@ -116,6 +123,7 @@ defmodule Omashiki.Plugin.Manifest do
         "binaries" => Map.get(stringify(Map.get(attrs, "requires", %{})), "binaries", [])
       },
       llm_egress: egress(Map.get(attrs, "llm_egress")),
+      approvals: approvals!(Map.get(attrs, "approvals"), where),
       http: if(transport == "http", do: stringify(Map.get(attrs, "http", %{}))),
       option_argv: option_argv!(Map.get(attrs, "option_argv", []), where)
     }
@@ -167,6 +175,27 @@ defmodule Omashiki.Plugin.Manifest do
     if shape not in @shapes, do: raise(Error, "#{w}.output.shape invalid")
     Map.update(table, "usage", %{}, &stringify/1)
   end
+
+  defp approvals!(table, w) when is_map(table) do
+    table = stringify(table)
+    mechanism = req!(table, "mechanism", w <> ".approvals")
+
+    if mechanism not in @approval_mechanisms do
+      raise Error,
+            "#{w}.approvals.mechanism invalid: #{inspect(mechanism)} " <>
+              "(expected one of #{Enum.join(@approval_mechanisms, ", ")})"
+    end
+
+    %{"mechanism" => mechanism, "enforced_by" => req!(table, "enforced_by", w <> ".approvals")}
+  end
+
+  defp approvals!(_, w),
+    do:
+      raise(
+        Error,
+        "#{w}.approvals required: declare how the harness avoids interactive approvals " <>
+          "(mechanism and enforced_by)"
+      )
 
   defp readiness!("none", _), do: %{"kind" => "none"}
   defp readiness!(bin, w) when is_binary(bin), do: readiness!(%{"kind" => bin}, w)

@@ -248,8 +248,7 @@ defmodule Omashiki.Plugin.Interpreter do
   defp prepare_opencode_host(spec, context, _manifest, options) do
     with :ok <- HostCredentials.validate_mount(context.runtime_mounts, options["config_path"]),
          :ok <- HostCredentials.validate_mount(context.runtime_mounts, options["auth_path"]),
-         {:ok, config} <-
-           with_tool_servers(%{"$schema" => "https://opencode.ai/config.json"}, context, spec) do
+         {:ok, config} <- with_tool_servers(opencode_base_config(), context, spec) do
       model = Map.get(spec.options, "model")
 
       content =
@@ -281,8 +280,8 @@ defmodule Omashiki.Plugin.Interpreter do
         _ -> Omashiki.Gateway.openai_base_url()
       end
 
-    config = %{
-      "$schema" => "https://opencode.ai/config.json",
+    opencode_base_config()
+    |> Map.merge(%{
       "model" => "gateway/#{model}",
       "provider" => %{
         "gateway" => %{
@@ -292,11 +291,25 @@ defmodule Omashiki.Plugin.Interpreter do
           "models" => %{model => %{}}
         }
       }
-    }
-
-    config
+    })
     |> merge_tool_servers(context, spec, tools_token)
     |> Jason.encode!()
+  end
+
+  # `opencode serve` parks a session on an `ask` rule until someone answers,
+  # and nobody can in a container. OpenCode 1.18 allows everything by default
+  # and asks only for these: reading `.env` files, paths outside the workdir,
+  # a repeated identical tool call, and (for the build agent) questions to the
+  # user. Reads inside the workdir are allowed; the rest is denied.
+  @opencode_permission %{
+    "read" => "allow",
+    "external_directory" => "deny",
+    "doom_loop" => "deny",
+    "question" => "deny"
+  }
+
+  defp opencode_base_config do
+    %{"$schema" => "https://opencode.ai/config.json", "permission" => @opencode_permission}
   end
 
   # MCP servers the environment admits (identities included) reach the agent

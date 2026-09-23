@@ -44,3 +44,10 @@ text = "text"
 
 [requires]
 binaries = ["opencode"]
+
+# `opencode serve` parks a session on an `ask` rule until someone answers.
+# The config Omashiki generates allows work in the workdir and denies the
+# rest, and a pending permission request fails the attempt.
+[approvals]
+mechanism = "permission_policy"
+enforced_by = "OPENCODE_CONFIG_CONTENT permission without ask rules"

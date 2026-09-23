@@ -69,6 +69,61 @@ defmodule Omashiki.Plugin.HttpTest do
       assert response.provider == "anthropic"
     end
 
+    test "fails the turn when the session waits for a permission", %{
+      capability: capability,
+      bypass: bypass
+    } do
+      # A parked session never answers the turn.
+      Bypass.stub(bypass, "POST", "/session/sess_1/message", fn conn ->
+        Process.sleep(:infinity)
+        conn
+      end)
+
+      Bypass.stub(bypass, "GET", "/permission", fn conn ->
+        body = ~s([
+          {"id": "per_other", "sessionID": "sess_2", "permission": "bash",
+           "patterns": ["rm *"], "metadata": {}, "always": []},
+          {"id": "per_1", "sessionID": "sess_1", "permission": "external_directory",
+           "patterns": ["/etc/*"], "metadata": {}, "always": ["/etc/*"]}
+        ])
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, body)
+      end)
+
+      assert {:error, {:agent_waiting_for_permission, "external_directory", ["/etc/*"]}} =
+               Http.send_turn(capability, "sess_1", %{parts: []}, permission_poll_ms: 20)
+
+      # Dropping the turn ends its request handler with :shutdown.
+      Bypass.pass(bypass)
+    end
+
+    test "keeps waiting while no permission is pending for the session", %{
+      capability: capability,
+      bypass: bypass
+    } do
+      Bypass.expect_once(bypass, "POST", "/session/sess_1/message", fn conn ->
+        Process.sleep(200)
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"info": {}, "parts": [{"type": "text", "text": "done"}]}))
+      end)
+
+      Bypass.stub(bypass, "GET", "/permission", fn conn ->
+        body = ~s([{"id": "per_other", "sessionID": "sess_2", "permission": "bash",
+                    "patterns": ["rm *"], "metadata": {}, "always": []}])
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, body)
+      end)
+
+      assert {:ok, %{assistant_text: "done"}} =
+               Http.send_turn(capability, "sess_1", %{parts: []}, permission_poll_ms: 20)
+    end
+
     test "returns http_error on 422", %{capability: capability, bypass: bypass} do
       Bypass.expect_once(bypass, "POST", "/session/sess_1/message", fn conn ->
         Plug.Conn.resp(conn, 422, ~s({"error":"bad input"}))

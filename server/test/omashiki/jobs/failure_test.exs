@@ -28,7 +28,9 @@ defmodule Omashiki.Jobs.FailureTest do
     {{:runner_throw, :exit, :shutdown}, "runner_crash", "crashed: exit :shutdown"},
     {{:finalization_failed, :harness_not_ready}, "finalization_failed",
      "could not be saved: The agent harness did not pass"},
-    {{:claude_exit, 1, "rate limited"}, "harness_exit", "exited with code 1"}
+    {{:claude_exit, 1, "rate limited"}, "harness_exit", "exited with code 1"},
+    {{:agent_waiting_for_permission, "external_directory", ["/etc/*"]},
+     "agent_waiting_for_permission", "asked for the external_directory permission on /etc/*"}
   ]
 
   for {reason, code, message} <- @known do
@@ -50,6 +52,9 @@ defmodule Omashiki.Jobs.FailureTest do
              Failure.error({:claude_exit, 1, "rate limited"})
 
     assert %{"details" => %{"attempt" => 3}} = Failure.error({:stale_attempt, 3})
+
+    assert %{"details" => %{"permission" => "external_directory", "patterns" => ["/etc/*"]}} =
+             Failure.error({:agent_waiting_for_permission, "external_directory", ["/etc/*"]})
   end
 
   test "records the step that failed" do

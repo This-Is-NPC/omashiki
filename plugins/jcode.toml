@@ -55,3 +55,8 @@ default = "/tmp/omashiki-jcode-invocation.txt"
 
 [requires]
 binaries = ["jcode"]
+
+# One-shot run with no approval dialog (agent/jcode_runner.sh).
+[approvals]
+mechanism = "non_interactive"
+enforced_by = "jcode run --json"

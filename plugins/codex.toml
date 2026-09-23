@@ -69,3 +69,8 @@ default = false
 
 [requires]
 binaries = ["codex"]
+
+# Approvals are switched off; Docker is the sandbox (agent/codex_runner.mjs).
+[approvals]
+mechanism = "bypassed"
+enforced_by = "codex exec --dangerously-bypass-approvals-and-sandbox"

@@ -31,6 +31,14 @@ The sandbox does not receive the host Docker socket.
 The worker controls Docker and is therefore a trusted execution component.
 Do not treat worker enrollment as permission to run an untrusted worker operator.
 
+## Approvals
+
+An agent never waits for an approval.
+Nobody can answer one inside a container.
+Each harness runs in a mode that does not ask.
+OpenCode may work inside the job directory and is denied paths outside it.
+If an OpenCode session still asks for a permission, the attempt fails with `agent_waiting_for_permission`.
+
 ## Output checks
 
 Git finalization checks paths, likely secrets, output size, and worktree state.

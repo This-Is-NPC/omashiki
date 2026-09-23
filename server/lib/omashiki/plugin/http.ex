@@ -3,8 +3,8 @@ defmodule Omashiki.Plugin.Http do
   HTTP/SSE transport client for declarative plugin manifests (opencode serve API).
 
   Wraps the small subset of the OpenCode HTTP API the orchestrator drives:
-  `POST /session`, `POST /session/:id/message`, `GET /event` (SSE),
-  `DELETE /session/:id`.
+  `POST /session`, `POST /session/:id/message`, `GET /permission`,
+  `GET /event` (SSE), `DELETE /session/:id`.
 
   ## Ctx
 
@@ -22,6 +22,8 @@ defmodule Omashiki.Plugin.Http do
   require Logger
 
   @default_timeout_ms 10 * 60 * 1_000
+  @permission_poll_ms 2_000
+  @permission_poll_timeout_ms 5_000
 
   def start_session(ctx, opts \\ []) do
     endpoint = endpoint!(ctx)
@@ -56,16 +58,23 @@ defmodule Omashiki.Plugin.Http do
     result
   end
 
-  def send_turn(ctx, session_id, payload) when is_map(payload) do
+  def send_turn(ctx, session_id, payload, opts \\ []) when is_map(payload) do
     endpoint = endpoint!(ctx)
     body = Jason.encode!(payload)
     headers = [{"content-type", "application/json"}]
     path = "/session/#{URI.encode_www_form(session_id)}/message"
+    poll_ms = Keyword.get(opts, :permission_poll_ms, @permission_poll_ms)
     started_at = System.monotonic_time(:millisecond)
     Logger.info("[OpenCode] Sending turn session=#{session_id}")
 
+    turn =
+      Task.async(fn -> request(endpoint, "POST", path, headers, body, @default_timeout_ms) end)
+
     result =
-      case request(endpoint, "POST", path, headers, body, @default_timeout_ms) do
+      case await_turn(turn, endpoint, session_id, poll_ms) do
+        {:error, {:agent_waiting_for_permission, _, _}} = waiting ->
+          waiting
+
         {:ok, %{status: status, body: resp}} when status in 200..299 ->
           case Jason.decode(resp) do
             {:ok, decoded} -> {:ok, normalize_turn_result(decoded)}
@@ -92,6 +101,46 @@ defmodule Omashiki.Plugin.Http do
     end
 
     result
+  end
+
+  # A turn blocks until the session goes idle, and a session with a pending
+  # permission request never does: nobody can answer it in a container. The
+  # pending list is polled while the turn runs, and a request for this session
+  # ends the turn instead of waiting for the job timeout.
+  defp await_turn(turn, endpoint, session_id, poll_ms) do
+    case Task.yield(turn, poll_ms) do
+      {:ok, response} ->
+        response
+
+      {:exit, reason} ->
+        {:error, reason}
+
+      nil ->
+        case pending_permission(endpoint, session_id) do
+          %{} = asked ->
+            Task.shutdown(turn, :brutal_kill)
+
+            Logger.warning(
+              "[OpenCode] Permission requested session=#{session_id} permission=#{asked["permission"]}"
+            )
+
+            {:error,
+             {:agent_waiting_for_permission, asked["permission"], List.wrap(asked["patterns"])}}
+
+          nil ->
+            await_turn(turn, endpoint, session_id, poll_ms)
+        end
+    end
+  end
+
+  defp pending_permission(endpoint, session_id) do
+    with {:ok, %{status: 200, body: resp}} <-
+           request(endpoint, "GET", "/permission", [], nil, @permission_poll_timeout_ms),
+         {:ok, pending} when is_list(pending) <- Jason.decode(resp) do
+      Enum.find(pending, &(is_map(&1) and &1["sessionID"] == session_id))
+    else
+      _ -> nil
+    end
   end
 
   def subscribe(ctx, _session, receiver) when is_pid(receiver) do
