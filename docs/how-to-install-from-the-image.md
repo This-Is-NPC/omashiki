@@ -81,6 +81,7 @@ The files that it writes in this directory, in `~/.cache/omashiki`, and in `~/.l
 Keep `.env`. A new secret signs out every browser session and invalidates every API token.
 See [secret rotation](security-and-limits.md#secret-rotation) for everything else that it invalidates.
 To use another port, add `OMASHIKI_PORT=4020` to `.env`.
+The board names the house's machine `omashiki`. To use another name, add `OMASHIKI_NODE=NAME` to `.env`.
 The house applies database migrations when it starts.
 
 ## 5. Create the operator account

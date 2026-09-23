@@ -10,8 +10,9 @@
 #   EOF
 #   docker compose up -d
 #
-# .env may also set OMASHIKI_VERSION (default latest) and OMASHIKI_PORT
-# (default 4010). See docs/how-to-install-from-the-image.md.
+# .env may also set OMASHIKI_VERSION (default latest), OMASHIKI_PORT
+# (default 4010) and OMASHIKI_NODE, the house's machine id on the board
+# (default omashiki). See docs/how-to-install-from-the-image.md.
 #
 # Mount host credential origins read-only with a compose.override.yml:
 # see docs/how-to-configure-model-access.md.
@@ -53,6 +54,9 @@ services:
       # path, so it sits in the mounted cache, one per house.
       TMPDIR: ${OMASHIKI_HOST_HOME:-${HOME}}/.cache/omashiki/tmp/${COMPOSE_PROJECT_NAME}
       OMASHIKI_ROLE: embedded
+      # The machine id, which survives recreating the container, unlike its
+      # hostname.
+      OMASHIKI_NODE: ${OMASHIKI_NODE:-omashiki}
       DATABASE_URL: ecto://postgres:postgres@db/omashiki
       SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set SECRET_KEY_BASE to a long random value}
       OMASHIKI_CONFIG: /config/omashiki.toml
