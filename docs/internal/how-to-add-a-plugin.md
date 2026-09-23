@@ -42,7 +42,7 @@ An agent never waits for an approval, because nobody can answer one in a contain
 
 `approvals.enforced_by` cites the flag or config that enforces it.
 The loader rejects a manifest without both fields.
-A pending permission request in an OpenCode session fails the attempt with `agent_waiting_for_permission`.
+A pending permission request in an OpenCode session, or in a subagent session under it, fails the attempt with `agent_waiting_for_permission`.
 
 Use literal template substitution only.
 Do not add shell execution or expressions to a template.

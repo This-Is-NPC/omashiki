@@ -73,29 +73,65 @@ defmodule Omashiki.Plugin.HttpTest do
       capability: capability,
       bypass: bypass
     } do
-      # A parked session never answers the turn.
-      Bypass.stub(bypass, "POST", "/session/sess_1/message", fn conn ->
-        Process.sleep(:infinity)
-        conn
-      end)
+      park_turn(bypass)
 
-      Bypass.stub(bypass, "GET", "/permission", fn conn ->
-        body = ~s([
-          {"id": "per_other", "sessionID": "sess_2", "permission": "bash",
-           "patterns": ["rm *"], "metadata": {}, "always": []},
-          {"id": "per_1", "sessionID": "sess_1", "permission": "external_directory",
-           "patterns": ["/etc/*"], "metadata": {}, "always": ["/etc/*"]}
-        ])
+      stub_json(bypass, "/permission", ~s([
+        {"id": "per_other", "sessionID": "sess_2", "permission": "bash",
+         "patterns": ["rm *"], "metadata": {}, "always": []},
+        {"id": "per_1", "sessionID": "sess_1", "permission": "external_directory",
+         "patterns": ["/etc/*"], "metadata": {}, "always": ["/etc/*"]}
+      ]))
 
-        conn
-        |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, body)
-      end)
+      stub_json(bypass, "/session/sess_2", ~s({"id": "sess_2"}))
 
-      assert {:error, {:agent_waiting_for_permission, "external_directory", ["/etc/*"]}} =
+      assert {:error, {:agent_waiting_for_permission, "external_directory", ["/etc/*"], false}} =
                Http.send_turn(capability, "sess_1", %{parts: []}, permission_poll_ms: 20)
 
       # Dropping the turn ends its request handler with :shutdown.
+      Bypass.pass(bypass)
+    end
+
+    test "fails the turn when a subagent waits for a permission", %{
+      capability: capability,
+      bypass: bypass
+    } do
+      park_turn(bypass)
+
+      stub_json(bypass, "/permission", ~s([
+        {"id": "per_1", "sessionID": "sess_child", "permission": "read",
+         "patterns": [".env"], "metadata": {}, "always": [".env"]}
+      ]))
+
+      stub_json(bypass, "/session/sess_child", ~s({"id": "sess_child", "parentID": "sess_1"}))
+
+      assert {:error, {:agent_waiting_for_permission, "read", [".env"], true}} =
+               Http.send_turn(capability, "sess_1", %{parts: []}, permission_poll_ms: 20)
+
+      Bypass.pass(bypass)
+    end
+
+    test "fails the turn when a nested subagent waits for a permission", %{
+      capability: capability,
+      bypass: bypass
+    } do
+      park_turn(bypass)
+
+      stub_json(bypass, "/permission", ~s([
+        {"id": "per_1", "sessionID": "sess_grandchild", "permission": "read",
+         "patterns": [".env"], "metadata": {}, "always": [".env"]}
+      ]))
+
+      stub_json(
+        bypass,
+        "/session/sess_grandchild",
+        ~s({"id": "sess_grandchild", "parentID": "sess_child"})
+      )
+
+      stub_json(bypass, "/session/sess_child", ~s({"id": "sess_child", "parentID": "sess_1"}))
+
+      assert {:error, {:agent_waiting_for_permission, "read", [".env"], true}} =
+               Http.send_turn(capability, "sess_1", %{parts: []}, permission_poll_ms: 20)
+
       Bypass.pass(bypass)
     end
 
@@ -103,22 +139,74 @@ defmodule Omashiki.Plugin.HttpTest do
       capability: capability,
       bypass: bypass
     } do
-      Bypass.expect_once(bypass, "POST", "/session/sess_1/message", fn conn ->
-        Process.sleep(200)
+      answer_turn_late(bypass)
 
-        conn
-        |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, ~s({"info": {}, "parts": [{"type": "text", "text": "done"}]}))
+      stub_json(bypass, "/permission", ~s([
+        {"id": "per_other", "sessionID": "sess_3", "permission": "bash",
+         "patterns": ["rm *"], "metadata": {}, "always": []}
+      ]))
+
+      # sess_3 is a subagent of another root session.
+      stub_json(bypass, "/session/sess_3", ~s({"id": "sess_3", "parentID": "sess_2"}))
+      stub_json(bypass, "/session/sess_2", ~s({"id": "sess_2"}))
+
+      assert {:ok, %{assistant_text: "done"}} =
+               Http.send_turn(capability, "sess_1", %{parts: []}, permission_poll_ms: 20)
+    end
+
+    test "keeps waiting when the asking session cannot be read", %{
+      capability: capability,
+      bypass: bypass
+    } do
+      answer_turn_late(bypass)
+
+      stub_json(bypass, "/permission", ~s([
+        {"id": "per_1", "sessionID": "sess_child", "permission": "read",
+         "patterns": [".env"], "metadata": {}, "always": [".env"]}
+      ]))
+
+      Bypass.stub(bypass, "GET", "/session/sess_child", fn conn ->
+        Plug.Conn.resp(conn, 500, ~s({"error":"boom"}))
       end)
 
-      Bypass.stub(bypass, "GET", "/permission", fn conn ->
-        body = ~s([{"id": "per_other", "sessionID": "sess_2", "permission": "bash",
-                    "patterns": ["rm *"], "metadata": {}, "always": []}])
+      assert {:ok, %{assistant_text: "done"}} =
+               Http.send_turn(capability, "sess_1", %{parts: []}, permission_poll_ms: 20)
+    end
 
-        conn
-        |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, body)
-      end)
+    test "keeps waiting when the parent chain loops", %{
+      capability: capability,
+      bypass: bypass
+    } do
+      answer_turn_late(bypass)
+
+      stub_json(bypass, "/permission", ~s([
+        {"id": "per_1", "sessionID": "sess_a", "permission": "read",
+         "patterns": [".env"], "metadata": {}, "always": [".env"]}
+      ]))
+
+      stub_json(bypass, "/session/sess_a", ~s({"id": "sess_a", "parentID": "sess_b"}))
+      stub_json(bypass, "/session/sess_b", ~s({"id": "sess_b", "parentID": "sess_a"}))
+
+      assert {:ok, %{assistant_text: "done"}} =
+               Http.send_turn(capability, "sess_1", %{parts: []}, permission_poll_ms: 20)
+    end
+
+    test "keeps waiting when the parent chain is deeper than any subagent nesting", %{
+      capability: capability,
+      bypass: bypass
+    } do
+      answer_turn_late(bypass)
+
+      stub_json(bypass, "/permission", ~s([
+        {"id": "per_1", "sessionID": "sess_d0", "permission": "read",
+         "patterns": [".env"], "metadata": {}, "always": [".env"]}
+      ]))
+
+      # sess_d0 -> sess_d1 -> ... -> sess_d19 -> sess_1
+      for depth <- 0..19 do
+        parent = if depth == 19, do: "sess_1", else: "sess_d#{depth + 1}"
+        stub_json(bypass, "/session/sess_d#{depth}", ~s({"parentID": "#{parent}"}))
+      end
 
       assert {:ok, %{assistant_text: "done"}} =
                Http.send_turn(capability, "sess_1", %{parts: []}, permission_poll_ms: 20)
@@ -150,5 +238,31 @@ defmodule Omashiki.Plugin.HttpTest do
 
       assert :ok = Http.finish(capability, "sess_1")
     end
+  end
+
+  # A parked session never answers the turn.
+  defp park_turn(bypass) do
+    Bypass.stub(bypass, "POST", "/session/sess_1/message", fn conn ->
+      Process.sleep(:infinity)
+      conn
+    end)
+  end
+
+  defp answer_turn_late(bypass) do
+    Bypass.expect_once(bypass, "POST", "/session/sess_1/message", fn conn ->
+      Process.sleep(200)
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, ~s({"info": {}, "parts": [{"type": "text", "text": "done"}]}))
+    end)
+  end
+
+  defp stub_json(bypass, path, body) do
+    Bypass.stub(bypass, "GET", path, fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, body)
+    end)
   end
 end

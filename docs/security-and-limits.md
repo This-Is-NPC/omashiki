@@ -37,7 +37,7 @@ An agent never waits for an approval.
 Nobody can answer one inside a container.
 Each harness runs in a mode that does not ask.
 OpenCode may work inside the job directory and is denied paths outside it.
-If an OpenCode session still asks for a permission, the attempt fails with `agent_waiting_for_permission`.
+If an OpenCode session or one of its subagents still asks for a permission, the attempt fails with `agent_waiting_for_permission`.
 
 ## Output checks
 

@@ -4,7 +4,7 @@ defmodule Omashiki.Plugin.Http do
 
   Wraps the small subset of the OpenCode HTTP API the orchestrator drives:
   `POST /session`, `POST /session/:id/message`, `GET /permission`,
-  `GET /event` (SSE), `DELETE /session/:id`.
+  `GET /session/:id`, `GET /event` (SSE), `DELETE /session/:id`.
 
   ## Ctx
 
@@ -24,6 +24,8 @@ defmodule Omashiki.Plugin.Http do
   @default_timeout_ms 10 * 60 * 1_000
   @permission_poll_ms 2_000
   @permission_poll_timeout_ms 5_000
+  # Subagents nest a few levels at most; a longer parentID chain is not real.
+  @max_session_depth 16
 
   def start_session(ctx, opts \\ []) do
     endpoint = endpoint!(ctx)
@@ -72,7 +74,7 @@ defmodule Omashiki.Plugin.Http do
 
     result =
       case await_turn(turn, endpoint, session_id, poll_ms) do
-        {:error, {:agent_waiting_for_permission, _, _}} = waiting ->
+        {:error, {:agent_waiting_for_permission, _, _, _}} = waiting ->
           waiting
 
         {:ok, %{status: status, body: resp}} when status in 200..299 ->
@@ -106,7 +108,8 @@ defmodule Omashiki.Plugin.Http do
   # A turn blocks until the session goes idle, and a session with a pending
   # permission request never does: nobody can answer it in a container. The
   # pending list is polled while the turn runs, and a request for this session
-  # ends the turn instead of waiting for the job timeout.
+  # or one of its subagents ends the turn instead of waiting for the job
+  # timeout.
   defp await_turn(turn, endpoint, session_id, poll_ms) do
     case Task.yield(turn, poll_ms) do
       {:ok, response} ->
@@ -121,11 +124,13 @@ defmodule Omashiki.Plugin.Http do
             Task.shutdown(turn, :brutal_kill)
 
             Logger.warning(
-              "[OpenCode] Permission requested session=#{session_id} permission=#{asked["permission"]}"
+              "[OpenCode] Permission requested session=#{session_id} " <>
+                "asker=#{asked["sessionID"]} permission=#{asked["permission"]}"
             )
 
             {:error,
-             {:agent_waiting_for_permission, asked["permission"], List.wrap(asked["patterns"])}}
+             {:agent_waiting_for_permission, asked["permission"], List.wrap(asked["patterns"]),
+              asked["sessionID"] != session_id}}
 
           nil ->
             await_turn(turn, endpoint, session_id, poll_ms)
@@ -137,11 +142,41 @@ defmodule Omashiki.Plugin.Http do
     with {:ok, %{status: 200, body: resp}} <-
            request(endpoint, "GET", "/permission", [], nil, @permission_poll_timeout_ms),
          {:ok, pending} when is_list(pending) <- Jason.decode(resp) do
-      Enum.find(pending, &(is_map(&1) and &1["sessionID"] == session_id))
+      Enum.find(
+        pending,
+        &(is_map(&1) and descends_from?(endpoint, &1["sessionID"], session_id, []))
+      )
     else
       _ -> nil
     end
   end
+
+  # A subagent runs in a child session, and its requests carry the child's
+  # id. Following `parentID` up from the asking session reaches the turn's
+  # session at any depth. A session that cannot be read, a session already
+  # seen, or a chain longer than @max_session_depth ends the walk.
+  defp descends_from?(_endpoint, session_id, session_id, _seen), do: true
+
+  defp descends_from?(endpoint, asking, session_id, seen)
+       when is_binary(asking) and length(seen) < @max_session_depth do
+    with false <- asking in seen,
+         {:ok, %{status: 200, body: resp}} <-
+           request(
+             endpoint,
+             "GET",
+             "/session/#{URI.encode_www_form(asking)}",
+             [],
+             nil,
+             @permission_poll_timeout_ms
+           ),
+         {:ok, %{"parentID" => parent}} <- Jason.decode(resp) do
+      descends_from?(endpoint, parent, session_id, [asking | seen])
+    else
+      _ -> false
+    end
+  end
+
+  defp descends_from?(_endpoint, _asking, _session_id, _seen), do: false
 
   def subscribe(ctx, _session, receiver) when is_pid(receiver) do
     endpoint = endpoint!(ctx)
