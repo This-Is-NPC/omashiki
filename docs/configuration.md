@@ -39,6 +39,9 @@ Use these terms consistently in requests and documentation.
 | `[caches.<name>]` | Cache path, size, environment variables, and package policy. |
 | `[runtimes.docker.<handler>.debian.images]` | Plugin keys mapped to Docker image tags. |
 
+`[repositories]` is required only when an environment uses the `git` sink.
+A house with only `files` or `none` environments can omit it.
+
 For infrastructure values, process environment overrides take precedence over TOML values.
 Execution declarations come from the registry.
 A job payload cannot add registry declarations.
@@ -70,6 +73,7 @@ A single-machine install can use `OMASHIKI_AGENT_NETWORK_MODE=bridge`.
 
 A lifecycle step uses `argv`, `condition`, and `timeout_ms`.
 Commands must use declared executables.
+An environment without lifecycle steps can declare `executables = []`.
 Do not put shell command strings in place of argument arrays.
 
 ## Result sinks
@@ -91,8 +95,10 @@ Check the external system when that action matters.
 ## Paths and secrets
 
 A repository path must be inside the configuration root or the managed mirror root.
+This rule also applies to absolute paths.
 It must be a real Git repository without symlink components.
-Use a remote declaration for other repositories.
+For a checkout elsewhere, declare its `remote` instead of `path`.
+You can also move `omashiki.toml` to a directory that contains the checkout.
 
 Credential origins must be absolute paths or start with `~/`.
 The execution machine expands `~/` against its process home.

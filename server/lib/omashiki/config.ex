@@ -39,8 +39,9 @@ defmodule Omashiki.Config do
   `load!/1` raises `Omashiki.Config.Error` (never a raw `KeyError`) when:
 
     * the file is missing
-    * a required top-level section is missing (`repositories`, `environments`, `presets`, `runtimes`,
-      or `limits`; `credentials`, `host_credentials`, and `caches` are optional)
+    * a required top-level section is missing (`environments`, `presets`, `runtimes`, or `limits`;
+      `repositories` is required only when an environment uses `sink = "git"`;
+      `credentials`, `host_credentials`, and `caches` are optional)
     * a required field on an entry is missing
   """
 
@@ -65,8 +66,9 @@ defmodule Omashiki.Config do
     UV_CACHE_DIR PIP_CACHE_DIR MIX_HOME HEX_HOME
   )
   # Domain sections that must appear in a real TOML file. `credentials` is
-  # optional when jobs use host-authenticated providers.
-  @required_sections ~w(repositories environments presets runtimes limits)
+  # optional when jobs use host-authenticated providers. `repositories` is
+  # required only by a `git` sink; files and none jobs carry no repository.
+  @required_sections ~w(environments presets runtimes limits)
 
   # How a hot reload lands. `[limits]` is per-container resource budget and
   # `HostSettings` takes exactly four keys out of it; a rollout strategy is not
@@ -454,6 +456,10 @@ defmodule Omashiki.Config do
         identities
       )
 
+    if Keyword.get(opts, :require_sections?, false) do
+      require_repositories_for_git!(map, registry.environments)
+    end
+
     limits = build_limits(section_map(map, "limits"))
     reload_policy = build_reload_policy!(section_map(map, "reload"))
 
@@ -474,6 +480,17 @@ defmodule Omashiki.Config do
       path: path,
       source: source
     }
+  end
+
+  defp require_repositories_for_git!(map, environments) do
+    git_environments = for %{sink: "git", name: name} <- environments, do: name
+
+    if git_environments != [] and not Map.has_key?(map, "repositories") do
+      raise Error,
+            "omashiki.toml missing required section [repositories]: environments " <>
+              "#{inspect(git_environments)} use sink = \"git\", which publishes to a " <>
+              "declared repository; add [repositories.<name>] or use sink = \"files\" or \"none\""
+    end
   end
 
   defp build_reload_policy!(section) when map_size(section) == 0, do: @default_reload_policy

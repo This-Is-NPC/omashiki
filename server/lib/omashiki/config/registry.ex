@@ -276,10 +276,15 @@ defmodule Omashiki.Config.Registry do
   defp mirror_root,
     do: Path.join([System.user_home!(), ".cache", "omashiki", "mirrors"])
 
+  # NFR-004: a declared path stays inside the configuration root or the mirror
+  # root, so a registry entry cannot point jobs at an arbitrary host checkout.
   defp validate_declared_path!(path, remote, base_dir, where) do
     unless contained?(path, base_dir) or contained?(path, mirror_root()) do
       raise Error,
-            "#{where}.path must stay inside the configuration root or #{mirror_root()}"
+            "#{where}.path must stay inside the configuration root #{base_dir} or " <>
+              "#{mirror_root()}; move omashiki.toml to a directory that contains " <>
+              "the checkout, replace path with remote so Omashiki keeps its own mirror, or " <>
+              "place the checkout under #{mirror_root()}"
     end
 
     if symlink_in_absolute_path?(path) do
@@ -576,7 +581,14 @@ defmodule Omashiki.Config.Registry do
 
       executables = string_list!(attrs, "executables", where)
 
-      if executables == [], do: raise(Error, "#{where}.executables must not be empty")
+      # Executables only gate lifecycle steps, so an environment without steps
+      # may declare none; one with steps must name each step's command.
+      if executables == [] and
+           (Map.get(attrs, "pre_steps", []) != [] or Map.get(attrs, "post_steps", []) != []) do
+        raise Error,
+              "#{where}.executables is empty but pre_steps or post_steps run commands; " <>
+                "add each step's argv[0] to executables"
+      end
 
       if Enum.any?(executables, &(Path.basename(&1) in @unsafe_executables)) do
         raise Error, "#{where}.executables contains an unsafe executable"
@@ -693,7 +705,9 @@ defmodule Omashiki.Config.Registry do
       end
 
       unless hd(argv) in executables do
-        raise Error, "#{step_where}.argv executable #{inspect(hd(argv))} is not declared"
+        raise Error,
+              "#{step_where}.argv executable #{inspect(hd(argv))} is not declared; " <>
+                "add it to #{where}.executables"
       end
 
       condition = Map.get(attrs, "condition", "always")
@@ -990,7 +1004,7 @@ defmodule Omashiki.Config.Registry do
   defp string_list!(attrs, key, where) do
     case Map.get(attrs, key) do
       values when is_list(values) ->
-        if values != [] and Enum.all?(values, &(is_binary(&1) and &1 != "")) and
+        if Enum.all?(values, &(is_binary(&1) and &1 != "")) and
              length(values) == length(Enum.uniq(values)) do
           values
         else

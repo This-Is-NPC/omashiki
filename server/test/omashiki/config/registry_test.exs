@@ -385,6 +385,58 @@ defmodule Omashiki.Config.RegistryTest do
     end
   end
 
+  test "rejects an absolute path to a checkout outside the configuration root", ctx do
+    outside = "#{ctx.root}-outside"
+    assert {_output, 0} = System.cmd("git", ["init", "--quiet", outside], stderr_to_stdout: true)
+    on_exit(fn -> File.rm_rf!(outside) end)
+
+    invalid = put_in(fixture(ctx), ["repositories", "app", "path"], outside)
+
+    assert_raise Error,
+                 ~r/must stay inside the configuration root .*replace path with remote/,
+                 fn ->
+                   Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+                 end
+  end
+
+  test "a house without git sinks loads without [repositories]", ctx do
+    house = Map.put(fixture(ctx), "limits", %{})
+
+    no_git =
+      house
+      |> Map.delete("repositories")
+      |> put_in(["environments", "opencode", "sink"], "none")
+
+    Config.load_map!(no_git, path: Path.join(ctx.root, "omashiki.toml"), require_sections?: true)
+    assert Config.repositories() == []
+
+    assert_raise Error, ~r/missing required section \[repositories\].*sink = "git"/, fn ->
+      Config.load_map!(Map.delete(house, "repositories"),
+        path: Path.join(ctx.root, "omashiki.toml"),
+        require_sections?: true
+      )
+    end
+  end
+
+  test "accepts empty executables only without lifecycle steps", ctx do
+    no_steps =
+      update_in(fixture(ctx), ["environments", "opencode"], fn environment ->
+        environment
+        |> Map.put("executables", [])
+        |> Map.delete("pre_steps")
+        |> Map.delete("post_steps")
+      end)
+
+    Config.load_map!(no_steps, path: Path.join(ctx.root, "omashiki.toml"))
+    assert [%Environment{executables: []}] = Config.environments()
+
+    with_steps = put_in(fixture(ctx), ["environments", "opencode", "executables"], [])
+
+    assert_raise Error, ~r/executables is empty but pre_steps or post_steps run commands/, fn ->
+      Config.load_map!(with_steps, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+  end
+
   test "rejects a symlinked configuration root", ctx do
     linked_root = "#{ctx.root}-linked"
     File.ln_s!(ctx.root, linked_root)
@@ -765,9 +817,11 @@ defmodule Omashiki.Config.RegistryTest do
         [%{"argv" => ["cargo", "build"], "condition" => "always"}]
       )
 
-    assert_raise Error, ~r/executable "cargo" is not declared/, fn ->
-      Config.load_map!(undeclared, path: Path.join(ctx.root, "omashiki.toml"))
-    end
+    assert_raise Error,
+                 ~r/executable "cargo" is not declared; add it to environments.opencode.executables/,
+                 fn ->
+                   Config.load_map!(undeclared, path: Path.join(ctx.root, "omashiki.toml"))
+                 end
 
     duplicates =
       put_in(
