@@ -149,28 +149,13 @@ module.exports = {
         full: "9999px",
       },
       keyframes: {
-        "agent-pulse": {
-          "0%, 100%": { borderLeftColor: "rgba(57, 255, 20, 0.4)" },
-          "50%": { borderLeftColor: "rgba(57, 255, 20, 1)" },
-        },
-        "needs-context-pulse": {
-          "0%, 100%": { borderLeftColor: "rgba(160, 232, 122, 0.5)" },
-          "50%": { borderLeftColor: "rgba(160, 232, 122, 1)" },
-        },
         "status-pulse": {
           "0%, 100%": { opacity: "0.6" },
           "50%": { opacity: "1" },
         },
-        "status-flash": {
-          "0%": { backgroundColor: "rgba(57, 255, 20, 0.25)" },
-          "100%": { backgroundColor: "transparent" },
-        },
       },
       animation: {
-        "agent-pulse": "agent-pulse 2s ease-in-out infinite",
-        "needs-context-pulse": "needs-context-pulse 2.4s ease-in-out infinite",
         "status-pulse": "status-pulse 1.6s ease-in-out infinite",
-        "status-flash": "status-flash 900ms ease-out 1",
       },
     },
   },
