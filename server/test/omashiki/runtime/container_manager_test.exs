@@ -127,6 +127,128 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
            ]
   end
 
+  test "a caller whose operation dies without answering gets an error at once" do
+    owner = self()
+
+    {:ok, manager} =
+      ContainerManager.start_link(
+        name: nil,
+        availability: true,
+        operations: __MODULE__.BlockingOperations
+      )
+
+    call =
+      Task.async(fn ->
+        GenServer.call(
+          manager,
+          {:provision_for_job, %{id: "job"}, %{id: "attempt"}, %{owner: owner}, []},
+          2_000
+        )
+      end)
+
+    assert_receive {:docker_operation_started, "attempt", worker}
+    Process.exit(worker, :kill)
+
+    assert Task.await(call, 1_000) == {:error, {:container_operation_exit, :killed}}
+  end
+
+  describe "a provision that checks the Docker runtime handlers" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "cm-info-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      socket = Path.join(root, "docker.sock")
+
+      start_supervised!(
+        {Bandit,
+         plug: {__MODULE__.HeldInfo, owner: self()},
+         ip: {:local, socket},
+         port: 0,
+         startup_log: false}
+      )
+
+      previous_socket = Application.get_env(:omashiki, :docker_socket_path)
+      Application.put_env(:omashiki, :docker_socket_path, socket)
+
+      on_exit(fn ->
+        Application.put_env(:omashiki, :docker_socket_path, previous_socket)
+        File.rm_rf!(root)
+      end)
+
+      :ok
+    end
+
+    # The manager asks the daemon for its runtime handlers inside the call
+    # itself; a provision that arrives meanwhile must still be answered.
+    test "answers the provisions that arrive while it asks the daemon" do
+      {:ok, manager} =
+        ContainerManager.start_link(
+          name: nil,
+          availability: true,
+          operations: __MODULE__.ImmediateOperations
+        )
+
+      provision = fn id ->
+        Task.async(fn ->
+          GenServer.call(
+            manager,
+            {:provision_for_job, %{id: id}, %{id: id}, %{runtime: runtime("runc")}, []},
+            2_000
+          )
+        end)
+      end
+
+      first = provision.(1)
+      assert_receive {:docker_info, held}, 1_000
+
+      second = provision.(2)
+      wait_until_calling(second.pid)
+      send(held, :respond)
+
+      assert_receive {:docker_info, next}, 1_000
+      send(next, :respond)
+
+      assert Task.await(first, 3_000) == {:ok, %{sandbox_id: 1}}
+      assert Task.await(second, 3_000) == {:ok, %{sandbox_id: 2}}
+    end
+  end
+
+  defp wait_until_calling(pid) do
+    case Process.info(pid, :current_function) do
+      {:current_function, {:gen, :do_call, 4}} ->
+        :ok
+
+      _ ->
+        Process.sleep(5)
+        wait_until_calling(pid)
+    end
+  end
+
+  defmodule ImmediateOperations do
+    def op_provision(_job, attempt, _environment, _opts), do: {:ok, %{sandbox_id: attempt.id}}
+  end
+
+  # A daemon whose `/info` answers only when the test says so.
+  defmodule HeldInfo do
+    @behaviour Plug
+
+    import Plug.Conn
+
+    @impl true
+    def init(opts), do: opts
+
+    @impl true
+    def call(%{method: "GET", path_info: [_version, "info"]} = conn, opts) do
+      send(opts[:owner], {:docker_info, self()})
+
+      receive do
+        :respond ->
+          conn
+          |> put_resp_content_type("application/json")
+          |> send_resp(200, Jason.encode!(%{"Runtimes" => %{"runc" => %{}}}))
+      end
+    end
+  end
+
   test "a work directory that is its own mount root mounts only itself, never /tmp" do
     work = "/tmp/omashiki-work/job-1"
 
@@ -532,8 +654,6 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
         docker_row("cccccccccccc", nil)
       ]
 
-      # The Docker client reads its reply from the calling process's mailbox,
-      # so the fake daemon records calls in an agent instead of sending them.
       calls = start_supervised!({Agent, fn -> [] end})
 
       start_supervised!(

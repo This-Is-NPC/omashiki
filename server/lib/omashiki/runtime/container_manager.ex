@@ -142,7 +142,7 @@ defmodule Omashiki.Runtime.ContainerManager do
         case handler_checker.(required_handlers) do
           :ok ->
             Logger.info("[ContainerManager] Docker Engine API is reachable")
-            {:ok, %{available: true, operations: operations, handler_checker: handler_checker}}
+            {:ok, state(true, operations, handler_checker)}
 
           {:error, reason} ->
             Logger.error(
@@ -157,20 +157,29 @@ defmodule Omashiki.Runtime.ContainerManager do
           "[ContainerManager] Docker not available: #{inspect(reason)}. Running in degraded mode."
         )
 
-        {:ok, %{available: false, operations: operations, handler_checker: handler_checker}}
+        {:ok, state(false, operations, handler_checker)}
 
       false ->
-        {:ok, %{available: false, operations: operations, handler_checker: handler_checker}}
+        {:ok, state(false, operations, handler_checker)}
     end
   end
+
+  # `tasks` maps the ref of each in-flight operation task to the caller
+  # waiting for its result.
+  defp state(available, operations, handler_checker),
+    do: %{
+      available: available,
+      operations: operations,
+      handler_checker: handler_checker,
+      tasks: %{}
+    }
 
   @impl true
   def handle_call(:cleanup_orphans, _from, %{available: false} = state),
     do: {:reply, {:ok, []}, state}
 
   def handle_call(:cleanup_orphans, from, state) do
-    async_reply(from, fn -> state.operations.op_cleanup_orphans() end)
-    {:noreply, state}
+    {:noreply, async_reply(state, from, fn -> state.operations.op_cleanup_orphans() end)}
   end
 
   # `{:error, :docker_unavailable}`, not `{:ok, []}`: an empty census and an
@@ -181,8 +190,7 @@ defmodule Omashiki.Runtime.ContainerManager do
     do: {:reply, {:error, :docker_unavailable}, state}
 
   def handle_call(:census, from, state) do
-    async_reply(from, fn -> state.operations.op_census() end)
-    {:noreply, state}
+    {:noreply, async_reply(state, from, fn -> state.operations.op_census() end)}
   end
 
   def handle_call({:cancel_scope, _scope_id}, _from, %{available: false} = state),
@@ -191,8 +199,7 @@ defmodule Omashiki.Runtime.ContainerManager do
   def handle_call({:cancel_scope, scope_id}, from, state) do
     ensure_cancellation_table()
     :ets.insert(@cancellation_table, {scope_id})
-    async_reply(from, fn -> state.operations.op_cancel_scope(scope_id) end)
-    {:noreply, state}
+    {:noreply, async_reply(state, from, fn -> state.operations.op_cancel_scope(scope_id) end)}
   end
 
   def handle_call(
@@ -210,9 +217,10 @@ defmodule Omashiki.Runtime.ContainerManager do
       ) do
     case handler_checker.(runtime_handlers_for(environment)) do
       :ok ->
-        async_reply(from, fn -> state.operations.op_provision(job, attempt, environment, opts) end)
-
-        {:noreply, state}
+        {:noreply,
+         async_reply(state, from, fn ->
+           state.operations.op_provision(job, attempt, environment, opts)
+         end)}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -223,43 +231,52 @@ defmodule Omashiki.Runtime.ContainerManager do
     do: {:reply, {:error, :docker_unavailable}, state}
 
   def handle_call({:fetch_logs, container_id, opts}, from, state) do
-    async_reply(from, fn -> state.operations.op_fetch_logs(container_id, opts) end)
-    {:noreply, state}
+    {:noreply,
+     async_reply(state, from, fn -> state.operations.op_fetch_logs(container_id, opts) end)}
   end
 
   def handle_call({:exec, _container_id, _argv, _timeout_ms}, _from, %{available: false} = state),
     do: {:reply, {:error, :docker_unavailable}, state}
 
   def handle_call({:exec, container_id, argv, timeout_ms}, from, state) do
-    async_reply(from, fn -> state.operations.op_execute(container_id, argv, timeout_ms) end)
-    {:noreply, state}
+    {:noreply,
+     async_reply(state, from, fn ->
+       state.operations.op_execute(container_id, argv, timeout_ms)
+     end)}
   end
 
   def handle_call({:destroy, _container_id}, _from, %{available: false} = state),
     do: {:reply, :ok, state}
 
   def handle_call({:destroy, container_id}, from, state) do
-    async_reply(from, fn -> state.operations.op_remove(container_id) end)
-    {:noreply, state}
+    {:noreply, async_reply(state, from, fn -> state.operations.op_remove(container_id) end)}
   end
 
-  defp async_reply(from, fun) do
-    case Task.Supervisor.start_child(Omashiki.Runtime.TaskSupervisor, fn ->
-           result =
-             try do
-               fun.()
-             rescue
-               error -> {:error, {:container_operation_exception, error}}
-             catch
-               kind, reason -> {:error, {:container_operation_throw, kind, reason}}
-             end
-
-           GenServer.reply(from, result)
-         end) do
-      {:ok, _pid} -> :ok
-      {:error, reason} -> GenServer.reply(from, {:error, {:operation_start_failed, reason}})
-    end
+  # Each operation runs in its own task so a slow Docker call never blocks
+  # the others. The task is monitored, not linked: whatever ends it, raise,
+  # throw, exit or kill, the caller gets an answer here instead of waiting
+  # out its call timeout.
+  defp async_reply(state, from, fun) do
+    %Task{ref: ref} = Task.Supervisor.async_nolink(Omashiki.Runtime.TaskSupervisor, fun)
+    put_in(state, [:tasks, ref], from)
   end
+
+  @impl true
+  def handle_info({ref, result}, %{tasks: tasks} = state) when is_map_key(tasks, ref) do
+    Process.demonitor(ref, [:flush])
+    {from, tasks} = Map.pop!(tasks, ref)
+    GenServer.reply(from, result)
+    {:noreply, %{state | tasks: tasks}}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{tasks: tasks} = state)
+      when is_map_key(tasks, ref) do
+    {from, tasks} = Map.pop!(tasks, ref)
+    GenServer.reply(from, {:error, {:container_operation_exit, reason}})
+    {:noreply, %{state | tasks: tasks}}
+  end
+
+  def handle_info(_message, state), do: {:noreply, state}
 
   # --- Provision ---
 
@@ -2102,8 +2119,9 @@ defmodule Omashiki.Runtime.ContainerManager do
   # Docker HTTP plumbing
   #
   # Public for Omashiki.Doctor.HostProbe only. These run in the caller and
-  # consume every message it receives while a request is in flight: call them
-  # from a process that owns no other mailbox traffic.
+  # read the daemon socket in passive mode, so they never touch the caller's
+  # mailbox: a request made by the manager itself leaves the calls queued
+  # behind it in place.
   # ---------------------------------------------------------------------------
 
   @doc false
@@ -2302,7 +2320,10 @@ defmodule Omashiki.Runtime.ContainerManager do
     full_path = "/#{@docker_api_version}#{path}"
     deadline = System.monotonic_time(:millisecond) + timeout_ms
 
-    case Mint.HTTP.connect(:http, {:local, socket_path()}, 0, hostname: "localhost") do
+    case Mint.HTTP.connect(:http, {:local, socket_path()}, 0,
+           hostname: "localhost",
+           mode: :passive
+         ) do
       {:ok, conn} ->
         case Mint.HTTP.request(conn, method, full_path, headers, body) do
           {:ok, conn, req_ref} ->
@@ -2321,33 +2342,28 @@ defmodule Omashiki.Runtime.ContainerManager do
   defp receive_response(conn, req_ref, acc, deadline) do
     timeout_ms = max(deadline - System.monotonic_time(:millisecond), 0)
 
-    receive do
-      message ->
-        case Mint.HTTP.stream(conn, message) do
-          {:ok, conn, responses} ->
-            case process_responses(responses, req_ref, acc) do
-              {:done, acc} ->
-                Mint.HTTP.close(conn)
-                {:ok, acc}
+    case Mint.HTTP.recv(conn, 0, timeout_ms) do
+      {:ok, conn, responses} ->
+        case process_responses(responses, req_ref, acc) do
+          {:done, acc} ->
+            Mint.HTTP.close(conn)
+            {:ok, acc}
 
-              {:error, reason} ->
-                Mint.HTTP.close(conn)
-                {:error, reason}
-
-              {:cont, acc} ->
-                receive_response(conn, req_ref, acc, deadline)
-            end
-
-          {:error, _conn, reason, _responses} ->
+          {:error, reason} ->
+            Mint.HTTP.close(conn)
             {:error, reason}
 
-          :unknown ->
+          {:cont, acc} ->
             receive_response(conn, req_ref, acc, deadline)
         end
-    after
-      timeout_ms ->
+
+      {:error, conn, %Mint.TransportError{reason: :timeout}, _responses} ->
         Mint.HTTP.close(conn)
         {:error, :timeout}
+
+      {:error, conn, reason, _responses} ->
+        Mint.HTTP.close(conn)
+        {:error, reason}
     end
   end
 

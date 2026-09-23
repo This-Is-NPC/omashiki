@@ -3,9 +3,6 @@ defmodule Omashiki.Doctor.HostProbe do
   `Omashiki.Doctor.Probe` against the real host: the Docker socket the
   container manager uses, the house endpoint, host files and directories, the
   secret scanner, and GitHub.
-
-  Docker calls consume the caller's mailbox while in flight (see
-  `Omashiki.Runtime.ContainerManager`), so run this from a dedicated process.
   """
 
   @behaviour Omashiki.Doctor.Probe
