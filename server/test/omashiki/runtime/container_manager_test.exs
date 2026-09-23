@@ -140,6 +140,18 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
     assert Map.has_key?(config["Tmpfs"], "/tmp")
   end
 
+  test "a container without a network is reported unreachable instead of probed" do
+    assert {:error, :harness_unreachable_no_network} =
+             ContainerManager.harness_endpoint("c1", 14_096, 4096, "none")
+  end
+
+  test "default and host networks reach the harness through the host port" do
+    for network <- [nil, "", "host"] do
+      assert {:ok, {_host, 14_096}} =
+               ContainerManager.harness_endpoint("c1", 14_096, 4096, network)
+    end
+  end
+
   test "CLI transport does not create an HTTP port binding" do
     config =
       ContainerManager.build_host_config(

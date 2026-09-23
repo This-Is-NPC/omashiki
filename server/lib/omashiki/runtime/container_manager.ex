@@ -572,7 +572,7 @@ defmodule Omashiki.Runtime.ContainerManager do
               else
                 finalize_provision(
                   container_id,
-                  host_port,
+                  {host_port, Keyword.get(opts, :network_mode, agent_network_mode())},
                   protocol,
                   launch,
                   {container_workdir, repo_root},
@@ -954,7 +954,7 @@ defmodule Omashiki.Runtime.ContainerManager do
 
   defp finalize_provision(
          container_id,
-         host_port,
+         {host_port, network_mode},
          protocol,
          launch_plan,
          {worktree_path, mount_root},
@@ -978,7 +978,12 @@ defmodule Omashiki.Runtime.ContainerManager do
             result =
               with :ok <- bootstrap_result,
                    {:ok, info} <-
-                     finalize_transport(protocol, container_id, host_port, launch_plan) do
+                     finalize_transport(
+                       protocol,
+                       container_id,
+                       {host_port, network_mode},
+                       launch_plan
+                     ) do
                 {:ok, info}
               end
 
@@ -1182,9 +1187,9 @@ defmodule Omashiki.Runtime.ContainerManager do
     end
   end
 
-  defp finalize_transport("http", container_id, host_port, launch_plan) do
+  defp finalize_transport("http", container_id, {host_port, network_mode}, launch_plan) do
     with {:ok, {host, port}} <-
-           harness_endpoint(container_id, host_port, transport_port(launch_plan)),
+           harness_endpoint(container_id, host_port, transport_port(launch_plan), network_mode),
          :ok <-
            wait_for_harness(
              host,
@@ -1202,7 +1207,7 @@ defmodule Omashiki.Runtime.ContainerManager do
     end
   end
 
-  defp finalize_transport("cli", container_id, _host_port, launch_plan) do
+  defp finalize_transport("cli", container_id, _endpoint, launch_plan) do
     case readiness_command(launch_plan) do
       nil ->
         {:ok, %{sandbox_id: container_id, transport: launch_plan.transport}}
@@ -1966,8 +1971,21 @@ defmodule Omashiki.Runtime.ContainerManager do
 
   defp agent_network_mode, do: Application.get_env(:omashiki, :agent_network_mode)
 
-  defp harness_endpoint(container_id, host_port, internal_port) do
-    case agent_network_mode() do
+  @doc false
+  # Where the house reaches the harness, from the network *this* container was
+  # created on. A container without a network cannot be reached at all: say so
+  # now instead of probing a port binding Docker never wires up.
+  def harness_endpoint(container_id, host_port, internal_port, network_mode) do
+    case network_mode do
+      "none" ->
+        Logger.error(
+          "[ContainerManager] #{container_id} has no network, so its HTTP harness is " <>
+            "unreachable. Use a CLI harness with network \"none\", or give a restricted " <>
+            "environment a network through OMASHIKI_AGENT_NETWORK_MODE."
+        )
+
+        {:error, :harness_unreachable_no_network}
+
       network when is_binary(network) and network not in ["", "host"] ->
         with {:ok, payload} <- docker_get("/containers/#{container_id}/json"),
              address when is_binary(address) and address != "" <-

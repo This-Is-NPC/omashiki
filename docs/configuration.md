@@ -63,6 +63,11 @@ A job payload cannot add registry declarations.
 | `policy` | Package policy mode and related settings. |
 | `mcp_servers` | Declared tool server URLs and headers. |
 
+A `restricted` environment runs on the Docker network named by `OMASHIKI_AGENT_NETWORK_MODE`.
+Without that variable it has no network, and an HTTP harness such as OpenCode cannot start.
+The job then fails with `harness_unreachable_no_network`.
+A single-machine install can use `OMASHIKI_AGENT_NETWORK_MODE=bridge`.
+
 A lifecycle step uses `argv`, `condition`, and `timeout_ms`.
 Commands must use declared executables.
 Do not put shell command strings in place of argument arrays.

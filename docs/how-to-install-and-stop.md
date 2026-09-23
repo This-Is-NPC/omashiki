@@ -82,5 +82,7 @@ The `up:fresh` task deletes local state. Do not use it for a normal restart.
 | A port is occupied | Check `[app].port` and `[db].port`. The examples use `4010` and `5442`. |
 | A variable is missing | Set the named variable in `.env`. Restart the process. |
 | The registry is invalid | Correct the reported field in `omashiki.toml`. |
+| A job fails with `harness_unreachable_no_network` | Set `OMASHIKI_AGENT_NETWORK_MODE` for `restricted` environments. See [configuration](configuration.md#environment-settings). |
+| An agent runs until its timeout without its tools | Allow the agent network to reach `[app].port` on the host. A host firewall such as `ufw` can block it. |
 
 Next, [register a repository](how-to-register-a-repository.md), or [add a worker](how-to-add-a-worker.md).
