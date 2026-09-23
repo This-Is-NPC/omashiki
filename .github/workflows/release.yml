@@ -3,7 +3,9 @@
 # picks manager, worker or embedded at run time.
 #
 #   push to master  -> edge, sha-<short>
-#   tag vX.Y.Z      -> X.Y.Z, X.Y, latest (the tag must match server/mix.exs)
+#   tag vX.Y.Z      -> X.Y.Z, X.Y, latest (the tag must match server/mix.exs),
+#                      and a GitHub Release with deploy/compose.yml and
+#                      deploy/omashiki.toml attached
 name: Release
 
 on:
@@ -77,3 +79,24 @@ jobs:
           annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # The install files, so an install downloads them from the latest release.
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Attach deploy/compose.yml and deploy/omashiki.toml
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" deploy/compose.yml deploy/omashiki.toml --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" deploy/compose.yml deploy/omashiki.toml \
+              --verify-tag --generate-notes
+          fi

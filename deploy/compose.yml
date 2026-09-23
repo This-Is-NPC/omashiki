@@ -1,0 +1,65 @@
+# Omashiki on one machine: PostgreSQL + the published image in the embedded
+# role, which serves the UI and the API and runs the agent containers.
+#
+# Keep this file next to omashiki.toml, then:
+#   echo "SECRET_KEY_BASE=$(openssl rand -base64 48)" > .env
+#   docker compose up -d
+#
+# .env may also set OMASHIKI_VERSION (default latest) and OMASHIKI_PORT
+# (default 4010). See docs/how-to-install-from-the-image.md.
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: omashiki
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omashiki"]
+      interval: 1s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  omashiki:
+    image: ghcr.io/this-is-npc/omashiki:${OMASHIKI_VERSION:-latest}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # The host Docker daemon starts the agent containers and mounts paths
+      # the house names, so the house uses the host's home directory.
+      HOME: ${OMASHIKI_HOST_HOME:-${HOME}}
+      OMASHIKI_ROLE: embedded
+      DATABASE_URL: ecto://postgres:postgres@db/omashiki
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set SECRET_KEY_BASE to a long random value}
+      OMASHIKI_CONFIG: /config/omashiki.toml
+      OMASHIKI_UI_CONFIG: /config/ui.toml
+      # Agent containers reach the house on this port of the host, so the
+      # house listens on the port it is published on.
+      PORT: ${OMASHIKI_PORT:-4010}
+      OMASHIKI_DOCKER_SOCKET_PATH: /var/run/docker.sock
+      OMASHIKI_AGENT_NETWORK_MODE: bridge
+    ports:
+      - "${OMASHIKI_PORT:-4010}:${OMASHIKI_PORT:-4010}"
+    volumes:
+      # The directory holding omashiki.toml and ui.toml, writable: the Config
+      # screen's Files page saves by renaming a new file over the old one,
+      # which a single-file bind mount cannot take, and keeps named copies and
+      # history in .omashiki-files/ beside them.
+      - ${OMASHIKI_CONFIG_DIR:-.}:/config
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${OMASHIKI_HOST_HOME:-${HOME}}/.cache/omashiki:${OMASHIKI_HOST_HOME:-${HOME}}/.cache/omashiki
+      # Agent secret files land in /dev/shm; share the host path so the
+      # daemon can bind-mount them into job containers.
+      - /dev/shm:/dev/shm
+    restart: unless-stopped
+
+volumes:
+  pgdata:

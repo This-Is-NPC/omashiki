@@ -18,6 +18,7 @@ Replace example paths, registered names, and secrets with your installation valu
 ## Select a deployment
 
 For one machine, follow [install and stop](../docs/how-to-install-and-stop.md).
+Without a checkout, follow [install from the image](../docs/how-to-install-from-the-image.md), which uses [deploy/compose.yml](../deploy/compose.yml).
 For separate roles, follow [worker setup](../docs/how-to-add-a-worker.md).
 For shared execution, follow [multiple houses](../docs/how-to-share-workers-between-houses.md).
 

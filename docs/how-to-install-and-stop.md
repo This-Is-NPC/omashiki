@@ -10,6 +10,7 @@ Your account must have access to the Docker daemon.
 Run the commands from the repository root.
 
 This procedure starts a checkout. It does not install a system service.
+To install without a checkout, [install from the image](how-to-install-from-the-image.md).
 For source development, use [development setup](internal/how-to-set-up-development.md).
 
 ## 1. Prepare the configuration

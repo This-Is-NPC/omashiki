@@ -5,7 +5,7 @@ This index identifies the procedure or reference for each task.
 
 ## Start here
 
-1. [Install and stop Omashiki](how-to-install-and-stop.md).
+1. [Install and stop Omashiki](how-to-install-and-stop.md), or [install from the image](how-to-install-from-the-image.md) without a checkout.
 2. [Register a repository](how-to-register-a-repository.md).
 3. [Configure an agent](how-to-configure-an-agent.md).
 4. [Configure model access](how-to-configure-model-access.md).
