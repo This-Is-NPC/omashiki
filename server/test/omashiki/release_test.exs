@@ -5,7 +5,7 @@ defmodule Omashiki.ReleaseTest do
   # conflicts with Ecto.Adapters.SQL.Sandbox (Ecto.Migrator.with_repo starts
   # its own connection, which is not in the sandbox's allow list). The
   # migrate path is exercised end-to-end when the prod image boots
-  # (CMD ["bin/migrate"]) and gated by the release workflow. This unit
+  # (CMD ["bin/entrypoint"]) in the manager or embedded role. This unit
   # spec only verifies the module surface so a rename / accidental removal
   # is caught fast.
 

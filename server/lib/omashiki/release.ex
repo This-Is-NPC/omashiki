@@ -2,8 +2,9 @@ defmodule Omashiki.Release do
   @moduledoc """
   Release tasks invoked from the production binary, where Mix is unavailable.
 
-  Used by `bin/migrate` (the prod release entrypoint) to bring the database
-  schema up to date before `bin/omashiki start` boots the supervision tree.
+  Used by `bin/entrypoint` (the prod release entrypoint) to bring the
+  database schema up to date before `bin/omashiki start` boots the
+  supervision tree in the manager and embedded roles.
   """
 
   @app :omashiki
