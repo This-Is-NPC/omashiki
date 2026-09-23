@@ -1,0 +1,79 @@
+# Builds the release image from server/Dockerfile and pushes it to
+# ghcr.io/this-is-npc/omashiki. One image serves every role; OMASHIKI_ROLE
+# picks manager, worker or embedded at run time.
+#
+#   push to master  -> edge, sha-<short>
+#   tag vX.Y.Z      -> X.Y.Z, X.Y, latest (the tag must match server/mix.exs)
+name: Release
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+
+permissions: {}
+
+env:
+  IMAGE: ghcr.io/this-is-npc/omashiki
+  # Image labels and annotations beyond the defaults, which already carry
+  # the version (from the tag) and the revision (the commit). The source
+  # links the GHCR package to this repository.
+  OCI_METADATA: |
+    org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+    org.opencontainers.image.title=Omashiki
+    org.opencontainers.image.description=Omashiki house: manager, worker or embedded, chosen by OMASHIKI_ROLE
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check the tag against server/mix.exs
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(sed -n 's/^ *version: "\(.*\)",$/\1/p' server/mix.exs | head -n 1)
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $version in server/mix.exs"
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          # The provenance attestation turns the push into an index, so the
+          # annotations go on the index as well as on the manifest.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=edge,branch=master
+            type=sha,enable={{is_default_branch}}
+          labels: ${{ env.OCI_METADATA }}
+          annotations: ${{ env.OCI_METADATA }}
+
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: server
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
