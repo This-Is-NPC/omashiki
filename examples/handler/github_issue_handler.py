@@ -11,9 +11,10 @@ Two endpoints:
 
   POST /github     GitHub webhook receiver. Verifies X-Hub-Signature-256 with
                    GITHUB_WEBHOOK_SECRET. On `issues.labeled` with the trigger
-                   label, POSTs one job envelope to the house: environment
-                   *name*, instruction, context. Nothing GitHub-specific goes
-                   into omashiki.toml, the sandbox, or the worker.
+                   label (or on `issues.opened` with HANDLER_TRIGGER=opened),
+                   POSTs one job envelope to the house: environment *name*,
+                   instruction, context. Nothing GitHub-specific goes into
+                   omashiki.toml, the sandbox, or the worker.
 
   POST /omashiki   Omashiki terminal webhook receiver. Verifies
                    x-webhook-signature (v1 HMAC over timestamp + "." +
@@ -30,7 +31,10 @@ Configuration is environment variables only:
   OMASHIKI_REPO             optional registered repository name for git sinks
   OMASHIKI_WEBHOOK_SECRET   secret configured on that token's webhook destination
   GITHUB_WEBHOOK_SECRET     secret configured on the GitHub webhook
-  HANDLER_LABEL             trigger label, default "omashiki"
+  HANDLER_TRIGGER           "labeled" (default) or "opened"
+  HANDLER_LABEL             trigger label for "labeled", default "omashiki"
+  HANDLER_INSTRUCTION       optional file whose text precedes the issue in the
+                            instruction, e.g. how to triage it
   HANDLER_PORT              listen port, default 8090
 
 Run:  python3 examples/handler/github_issue_handler.py
@@ -79,9 +83,26 @@ def config_from_env(env: dict[str, str] | None = None) -> dict[str, Any]:
         "repo": env.get("OMASHIKI_REPO", "").strip() or None,
         "omashiki_webhook_secret": env.get("OMASHIKI_WEBHOOK_SECRET", "").strip() or None,
         "github_webhook_secret": required("GITHUB_WEBHOOK_SECRET"),
+        "trigger": trigger(env.get("HANDLER_TRIGGER", "labeled").strip() or "labeled"),
         "label": env.get("HANDLER_LABEL", "omashiki").strip() or "omashiki",
+        "instruction": instruction_file(env.get("HANDLER_INSTRUCTION", "").strip()),
         "port": int(env.get("HANDLER_PORT", "8090")),
     }
+
+
+def trigger(value: str) -> str:
+    if value not in ("labeled", "opened"):
+        raise SystemExit("HANDLER_TRIGGER must be labeled or opened")
+    return value
+
+
+def instruction_file(path: str) -> str | None:
+    if not path:
+        return None
+    try:
+        return open(path, encoding="utf-8").read().strip() or None
+    except OSError as error:
+        raise SystemExit(f"HANDLER_INSTRUCTION: {error}") from error
 
 
 # ---------------------------------------------------------------------------
@@ -105,13 +126,14 @@ def slug(text: str, limit: int = 40) -> str:
 def envelope_for(event_name: str, event: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any] | None:
     """Map one GitHub event to one job envelope, or None when it is not ours.
 
-    Only `issues.labeled` with the trigger label is work. Everything else
-    (edits, other labels, pull requests) is acknowledged and ignored: the
-    handler owns the event mapping, the house never sees GitHub.
+    Only the configured trigger is work: `issues.labeled` with the trigger
+    label, or `issues.opened`. Everything else (edits, other labels, pull
+    requests) is acknowledged and ignored: the handler owns the event mapping,
+    the house never sees GitHub.
     """
-    if event_name != "issues" or event.get("action") != "labeled":
+    if event_name != "issues" or event.get("action") != cfg["trigger"]:
         return None
-    if (event.get("label") or {}).get("name") != cfg["label"]:
+    if cfg["trigger"] == "labeled" and (event.get("label") or {}).get("name") != cfg["label"]:
         return None
 
     issue = event.get("issue") or {}
@@ -124,11 +146,18 @@ def envelope_for(event_name: str, event: dict[str, Any], cfg: dict[str, Any]) ->
     title = (issue.get("title") or "").strip() or f"Issue #{number}"
     body = (issue.get("body") or "").strip()
     instruction = title if not body else f"{title}\n\n{body}"
-
-    envelope: dict[str, Any] = {
+    if cfg.get("instruction"):
+        instruction = f"{cfg['instruction']}\n\nIssue {full_name}#{number}: {instruction}"
+    if cfg["trigger"] == "opened":
+        # One job per issue: GitHub opens an issue once.
+        key = f"github-{repository.get('id', full_name)}-{number}-opened"
+    else:
         # One job per labelling of one issue: re-labelling after removal is new
         # work, retries of the same delivery are not.
-        "idempotency_key": f"github-{repository.get('id', full_name)}-{number}-{(event.get('label') or {}).get('id', cfg['label'])}",
+        key = f"github-{repository.get('id', full_name)}-{number}-{(event.get('label') or {}).get('id', cfg['label'])}"
+
+    envelope: dict[str, Any] = {
+        "idempotency_key": key,
         "correlation_id": f"github:{full_name}#{number}",
         "environment": cfg["environment"],
         "priority": 1,
@@ -293,8 +322,9 @@ class Handler(BaseHTTPRequestHandler):
 def serve(cfg: dict[str, Any]) -> None:
     Handler.cfg = cfg
     server = ThreadingHTTPServer(("0.0.0.0", cfg["port"]), Handler)
+    trigger_text = "new issues" if cfg["trigger"] == "opened" else f"label '{cfg['label']}'"
     sys.stderr.write(
-        f"[handler] listening on :{cfg['port']} — label '{cfg['label']}' -> environment '{cfg['environment']}' at {cfg['omashiki_url']}\n"
+        f"[handler] listening on :{cfg['port']} — {trigger_text} -> environment '{cfg['environment']}' at {cfg['omashiki_url']}\n"
     )
     try:
         server.serve_forever()

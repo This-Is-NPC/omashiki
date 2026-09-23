@@ -26,7 +26,9 @@ CFG = {
     "repo": "app",
     "omashiki_webhook_secret": "house-secret",
     "github_webhook_secret": "gh-secret",
+    "trigger": "labeled",
     "label": "omashiki",
+    "instruction": None,
     "port": 0,
 }
 
@@ -84,6 +86,22 @@ class EnvelopeTest(unittest.TestCase):
         self.assertIsNone(handler.envelope_for("issues", labeled_event(label="wontfix"), CFG))
         self.assertIsNone(handler.envelope_for("issues", labeled_event(action="opened"), CFG))
         self.assertIsNone(handler.envelope_for("pull_request", labeled_event(), CFG))
+
+    def test_an_opened_issue_is_work_when_the_trigger_is_opened(self):
+        cfg = dict(CFG, trigger="opened")
+        envelope = handler.envelope_for("issues", labeled_event(action="opened", label=None), cfg)
+
+        self.assertEqual(envelope["idempotency_key"], "github-99-7-opened")
+        self.assertIsNone(handler.envelope_for("issues", labeled_event(), cfg))
+
+    def test_the_instruction_file_precedes_the_issue(self):
+        cfg = dict(CFG, instruction="Triage this issue.")
+        envelope = handler.envelope_for("issues", labeled_event(), cfg)
+
+        self.assertEqual(
+            envelope["payload"]["instruction"],
+            "Triage this issue.\n\nIssue acme/app#7: Login page throws 500\n\nSteps: open /login",
+        )
 
     def test_a_missing_repo_setting_omits_repo(self):
         cfg = dict(CFG, repo=None)
@@ -259,8 +277,20 @@ class ConfigTest(unittest.TestCase):
         })
         self.assertEqual(cfg["omashiki_url"], "http://h")
         self.assertEqual(cfg["label"], "omashiki")
+        self.assertEqual(cfg["trigger"], "labeled")
+        self.assertIsNone(cfg["instruction"])
         self.assertIsNone(cfg["repo"])
         self.assertIsNone(cfg["omashiki_webhook_secret"])
+
+    def test_an_unknown_trigger_is_refused(self):
+        with self.assertRaises(SystemExit):
+            handler.config_from_env({
+                "OMASHIKI_URL": "http://h",
+                "OMASHIKI_TOKEN": "t",
+                "OMASHIKI_ENVIRONMENT": "triagem",
+                "GITHUB_WEBHOOK_SECRET": "s",
+                "HANDLER_TRIGGER": "closed",
+            })
 
 
 if __name__ == "__main__":

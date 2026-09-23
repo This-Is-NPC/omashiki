@@ -14,7 +14,9 @@ The house must reach the handler's terminal notification URL.
 
 The [GitHub handler](../examples/handler/github_issue_handler.py) uses the Python standard library.
 It accepts `issues.labeled` events with a configured label.
+Set `HANDLER_TRIGGER=opened` to accept `issues.opened` events instead.
 Other events do not create jobs.
+Set `HANDLER_INSTRUCTION` to a file whose text precedes the issue in every instruction.
 
 ```bash
 export OMASHIKI_URL=http://127.0.0.1:4010
