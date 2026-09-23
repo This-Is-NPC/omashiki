@@ -61,6 +61,10 @@ It reads only the changed files, never Git history.
 It ignores `.gitleaks.toml`, `.gitleaksignore`, and `gitleaks:allow` comments in the output.
 The doctor checks that gitleaks runs.
 
+A refused output fails the job with a code that names the check, such as `secret_found` or `protected_path`, and a message that says which file tripped it.
+For a secret, the message and the details give the file, the line, and the gitleaks rule, never the secret itself.
+See [job errors](api.md#job-errors).
+
 Git finalization also checks worktree state.
 A successful Git result identifies a committed branch with base and head revisions.
 The machine publishes to the configured remote after validation.

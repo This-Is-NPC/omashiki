@@ -3,6 +3,7 @@ defmodule Omashiki.Jobs.FailureTest do
   use ExUnit.Case, async: false
 
   alias Omashiki.Jobs.Failure
+  alias Omashiki.Jobs.SecretScan.Finding
 
   @known [
     {:harness_not_ready, "harness_not_ready", "readiness check"},
@@ -87,6 +88,109 @@ defmodule Omashiki.Jobs.FailureTest do
              )
   end
 
+  describe "refused output" do
+    test "one secret names its file, line, and rule, and keeps the finding in details" do
+      finding = finding("docs/release.md", 12, "github-pat")
+
+      assert %{"code" => "secret_found", "message" => message, "details" => details} =
+               Failure.error({:finalization_failed, {:secret_found, [finding]}}, "finalization")
+
+      assert message ==
+               "Output was held back: gitleaks found a secret in docs/release.md line 12 " <>
+                 "(rule github-pat)."
+
+      assert details["finding_count"] == 1
+      assert details["step"] == "finalization"
+
+      assert details["findings"] == [
+               %{
+                 "file" => "docs/release.md",
+                 "line" => 12,
+                 "rule_id" => "github-pat",
+                 "description" => "A GitHub token.",
+                 "match" => "export GH=REDACTED",
+                 "fingerprint" => "fp-docs/release.md-12"
+               }
+             ]
+
+      assert Jason.encode!(details)
+    end
+
+    test "many secrets list the first three, then how many more" do
+      findings = for line <- 1..5, do: finding("notes.txt", line, "aws-access-token")
+
+      assert %{"code" => "secret_found", "message" => message, "details" => details} =
+               Failure.error({:finalization_failed, {:secret_found, findings}})
+
+      assert message ==
+               "Output was held back: gitleaks found secrets in " <>
+                 "notes.txt line 1 (rule aws-access-token), " <>
+                 "notes.txt line 2 (rule aws-access-token), " <>
+                 "notes.txt line 3 (rule aws-access-token) and 2 more."
+
+      assert details["finding_count"] == 5
+      assert length(details["findings"]) == 5
+    end
+
+    test "details keep at most 50 findings" do
+      findings = for line <- 1..60, do: finding("big.txt", line, "generic-api-key")
+
+      assert %{"details" => %{"finding_count" => 60, "findings" => kept}} =
+               Failure.error({:finalization_failed, {:secret_found, findings}})
+
+      assert length(kept) == 50
+    end
+
+    test "path, link, and size refusals read as sentences" do
+      assert %{
+               "code" => "protected_path",
+               "message" =>
+                 "Output writes to .ssh/config, a protected path, so it was not published.",
+               "details" => %{"path" => ".ssh/config"}
+             } = Failure.error({:finalization_failed, {:protected_path, ".ssh/config"}})
+
+      assert %{
+               "code" => "symlink_path",
+               "message" => "Output contains link, a symbolic link, so it was not published.",
+               "details" => %{"path" => "link"}
+             } = Failure.error({:finalization_failed, {:symlink_path, "link"}})
+
+      assert %{
+               "code" => "oversized_output",
+               "message" =>
+                 "Output changes 120.5 MiB, more than the 100 MiB limit, so it was not published.",
+               "details" => %{"changed_bytes" => 126_353_408, "max_bytes" => 104_857_600}
+             } =
+               Failure.error(
+                 {:finalization_failed, {:oversized_output, 126_353_408, 104_857_600}}
+               )
+
+      assert %{"message" => "Output changes 32 B, more than the 16 B limit" <> _} =
+               Failure.error({:finalization_failed, {:oversized_output, 32, 16}})
+    end
+
+    test "an unavailable scanner says why the output could not be scanned" do
+      assert %{"code" => "secret_scan_unavailable", "message" => message} =
+               Failure.error({:finalization_failed, {:secret_scan_unavailable, :not_found}})
+
+      assert message ==
+               "Output was held back: gitleaks is not installed on the node that ran the " <>
+                 "attempt, so it could not be scanned for secrets."
+
+      assert %{"message" => message} =
+               Failure.error(
+                 {:finalization_failed, {:secret_scan_unavailable, {:exit, 1, "bad flag"}}}
+               )
+
+      assert message =~ "gitleaks exited with code 1 (bad flag)"
+
+      assert %{"message" => message} =
+               Failure.error({:finalization_failed, {:secret_scan_unavailable, :timeout}})
+
+      assert message =~ "gitleaks did not finish in time"
+    end
+  end
+
   test "records the step that failed" do
     assert %{"details" => %{"step" => "provision"}} =
              Failure.error(:harness_not_ready, "provision")
@@ -125,5 +229,16 @@ defmodule Omashiki.Jobs.FailureTest do
     assert byte_size(message) <= 255
     assert String.valid?(message)
     assert Failure.event_data(%{"code" => "runner_failed"}) == %{"error_code" => "runner_failed"}
+  end
+
+  defp finding(file, line, rule_id) do
+    %Finding{
+      file: file,
+      line: line,
+      rule_id: rule_id,
+      description: "A GitHub token.",
+      match: "export GH=REDACTED",
+      fingerprint: "fp-#{file}-#{line}"
+    }
   end
 end

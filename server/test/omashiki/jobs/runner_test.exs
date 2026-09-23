@@ -74,6 +74,18 @@ defmodule Omashiki.Jobs.RunnerTest do
     end
   end
 
+  defmodule RefusedOutputContainer do
+    def provision(_job, _attempt, _environment, _opts),
+      do: {:ok, %{id: "refused-output-container"}}
+
+    def exec(_container, _argv, _timeout_ms),
+      do: {:ok, %{exit_status: 0, output: "ok"}}
+
+    def finalize(_container, _job, _opts), do: {:error, {:protected_path, ".ssh/config"}}
+
+    def destroy(_container), do: :ok
+  end
+
   defmodule FailedAttemptGitFinalizeFailureContainer do
     def provision(_job, _attempt, _environment, _opts),
       do: {:ok, %{id: "failed-git-finalize", artifact: %{task_branch: "feat-runner"}}}
@@ -338,6 +350,22 @@ defmodule Omashiki.Jobs.RunnerTest do
 
     assert Repo.aggregate(from(s in JobStep, where: s.attempt_id == ^attempt.id), :count, :id) ==
              8
+  end
+
+  test "refused output reaches the job as a readable failure", %{token: token} do
+    {:ok, _, job} = Admission.admit_once(token, request("refused-output"))
+    {:ok, attempt} = Jobs.claim(job, "runner-test")
+
+    assert {:ok, failed} =
+             Runner.run(attempt, container: RefusedOutputContainer, adapter: FakeHarness)
+
+    message = "Output writes to .ssh/config, a protected path, so it was not published."
+
+    assert %{"code" => "protected_path", "message" => ^message, "details" => details} =
+             failed.terminal_error
+
+    assert details["path"] == ".ssh/config"
+    assert details["step"] == "finalization"
   end
 
   test "failed git attempt does not preserve artifact when finalize fails", %{token: token} do

@@ -12,6 +12,9 @@ defmodule Omashiki.Jobs.Failure do
   @max_message_bytes 1_024
   @max_detail_bytes 4_096
   @max_event_bytes 255
+  # Findings a secret_found message names; its details keep more.
+  @max_listed_findings 3
+  @max_detail_findings 50
 
   @doc """
   Build the failure record for `reason`.
@@ -119,7 +122,9 @@ defmodule Omashiki.Jobs.Failure do
     do: {"runner_crash", "The runner crashed: #{kind} #{inspect(reason)}", %{}}
 
   defp describe({:finalization_failed, reason}),
-    do: {"finalization_failed", "The attempt output could not be saved: #{cause(reason)}", %{}}
+    do:
+      refusal(reason) ||
+        {"finalization_failed", "The attempt output could not be saved: #{cause(reason)}", %{}}
 
   defp describe({:agent_waiting_for_permission, permission, patterns, subagent?}) do
     asker = if subagent?, do: "A subagent", else: "The agent"
@@ -140,6 +145,78 @@ defmodule Omashiki.Jobs.Failure do
   end
 
   defp describe(_reason), do: nil
+
+  # Why `Omashiki.Jobs.Validate` refused the output, or nil for any other reason.
+  defp refusal({:secret_found, findings}) do
+    {listed, rest} = Enum.split(findings, @max_listed_findings)
+    where = Enum.map(listed, &"#{&1.file} line #{&1.line} (rule #{&1.rule_id})")
+    where = if rest == [], do: where, else: where ++ ["#{length(rest)} more"]
+    noun = if match?([_], findings), do: "a secret", else: "secrets"
+
+    {"secret_found", "Output was held back: gitleaks found #{noun} in #{sentence(where)}.",
+     %{
+       "finding_count" => length(findings),
+       "findings" => findings |> Enum.take(@max_detail_findings) |> Enum.map(&finding_detail/1)
+     }}
+  end
+
+  defp refusal({:protected_path, path}),
+    do:
+      {"protected_path", "Output writes to #{path}, a protected path, so it was not published.",
+       %{"path" => path}}
+
+  defp refusal({:symlink_path, path}),
+    do:
+      {"symlink_path", "Output contains #{path}, a symbolic link, so it was not published.",
+       %{"path" => path}}
+
+  defp refusal({:oversized_output, changed_bytes, max_bytes}),
+    do:
+      {"oversized_output",
+       "Output changes #{size(changed_bytes)}, more than the #{size(max_bytes)} limit, " <>
+         "so it was not published.",
+       %{"changed_bytes" => changed_bytes, "max_bytes" => max_bytes}}
+
+  defp refusal({:secret_scan_unavailable, reason}),
+    do:
+      {"secret_scan_unavailable",
+       "Output was held back: #{scanner_cause(reason)}, so it could not be scanned for secrets.",
+       %{}}
+
+  defp refusal(_reason), do: nil
+
+  defp finding_detail(finding) do
+    %{
+      "file" => finding.file,
+      "line" => finding.line,
+      "rule_id" => finding.rule_id,
+      "description" => finding.description,
+      "match" => finding.match,
+      "fingerprint" => finding.fingerprint
+    }
+  end
+
+  defp scanner_cause(:not_found), do: "gitleaks is not installed on the node that ran the attempt"
+  defp scanner_cause(:timeout), do: "gitleaks did not finish in time"
+
+  defp scanner_cause({:exit, status, output}),
+    do: "gitleaks exited with code #{status} (#{output})"
+
+  defp scanner_cause(reason), do: "gitleaks could not run (#{inspect(reason, limit: 20)})"
+
+  defp sentence([one]), do: one
+  defp sentence(items), do: Enum.join(Enum.drop(items, -1), ", ") <> " and " <> List.last(items)
+
+  defp size(bytes) when bytes < 1024, do: "#{bytes} B"
+  defp size(bytes), do: size(bytes / 1024, ["KiB", "MiB", "GiB"])
+
+  defp size(value, [unit | rest]) when value < 1024 or rest == [] do
+    rounded = Float.round(value, 1)
+    number = if rounded == trunc(rounded), do: trunc(rounded), else: rounded
+    "#{number} #{unit}"
+  end
+
+  defp size(value, [_unit | rest]), do: size(value / 1024, rest)
 
   defp fallback(reason), do: {"attempt_failed", "The attempt failed: #{cause(reason)}", %{}}
 

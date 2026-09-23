@@ -170,6 +170,11 @@ The object has a stable `code`, a readable `message`, and structured `details`.
 | `harness_unreachable_no_network` | An HTTP harness runs in a container without a network. |
 | `harness_exit` | The agent harness exited with a non-zero code. |
 | `agent_waiting_for_permission` | The agent or one of its subagents asked for an approval. `details` has the permission, its patterns, and `subagent`. |
+| `secret_found` | gitleaks found secrets in the output, which was not published. The message names up to three findings. `details.findings` lists up to 50, each with `file`, `line`, `rule_id`, `description`, a `match` with the secret replaced by `REDACTED`, and a stable `fingerprint`. `details.finding_count` counts them all. |
+| `protected_path` | The output writes under `.git/`, `.ssh/`, or `.aws/`. `details.path` names the file. |
+| `symlink_path` | The output contains a symbolic link. `details.path` names it. |
+| `oversized_output` | The output changes more than the size limit. `details` has `changed_bytes` and `max_bytes`. |
+| `secret_scan_unavailable` | gitleaks was missing or failed, so the output could not be scanned and was not published. |
 | `timeout` | A call to Docker or to the harness did not finish in time. |
 | `stale_attempt` | The attempt stopped renewing its lease. |
 | `cancelled` | An operator or a client cancelled the job. |
