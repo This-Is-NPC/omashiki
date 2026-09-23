@@ -81,8 +81,8 @@ Do not put shell command strings in place of argument arrays.
 | Sink | Repository | Output |
 | --- | --- | --- |
 | `git` | Required. | Verified branch with base and head revisions. |
-| `files` | Optional. | Validated archive with a digest and manager storage metadata. |
-| `none` | Optional. | Completion metadata. No published Git branch or archive. |
+| `files` | Not allowed. | Validated archive with a digest and manager storage metadata. |
+| `none` | Not allowed. | Completion metadata. No published Git branch or archive. |
 
 Git admission requires `payload.title` or `payload.branch`.
 The title becomes a branch name after normalization.
