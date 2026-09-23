@@ -119,10 +119,10 @@ Delivery uses canonical JSON and timestamp-bound HMAC-SHA256.
 Retries retain the event identity. Receivers must tolerate duplicate delivery.
 The delivery window is 24 hours before dead-letter state.
 
-The server integration function is `Omashiki.ApiTokens.configure_webhook/2`.
-It configures a token-owned destination and signing material.
+The destination and signing material belong to the API token.
+`mix omashiki.token webhook` sets or clears them on the house machine.
+It calls `Omashiki.ApiTokens.configure_webhook/2` and `Omashiki.ApiTokens.clear_webhook/1`.
 There is no public route for this operation.
-Use the function from trusted server integration code with the correct token record.
 
 ## Source map
 

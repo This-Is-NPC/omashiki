@@ -90,14 +90,16 @@ defmodule Omashiki.ApiTokens do
     |> Repo.all()
   end
 
-  def get_for_user!(%User{} = user, id) do
-    Token
-    |> where(user_id: ^user.id, id: ^id)
-    |> Repo.one!()
+  @doc "The user's token with `id`, or nil. A malformed id is a miss."
+  def get_for_user(%User{} = user, id) when is_binary(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, id} -> Repo.get_by(Token, id: id, user_id: user.id)
+      :error -> nil
+    end
   end
 
   def revoke(%User{} = user, id) when is_binary(id) do
-    case Repo.get_by(Token, id: id, user_id: user.id) do
+    case get_for_user(user, id) do
       nil ->
         {:error, :not_found}
 
@@ -130,6 +132,27 @@ defmodule Omashiki.ApiTokens do
   @doc "Configure the token-owned terminal webhook without exposing secret material."
   def configure_webhook(%Token{} = token, attrs) when is_map(attrs),
     do: Webhooks.configure(token, attrs)
+
+  @doc "Remove the token's terminal webhook destination and signing keys."
+  def clear_webhook(%Token{} = token), do: Webhooks.clear(token)
+
+  @doc "Operator-facing text for a `create_for_user/2` error."
+  def format_error(:invalid_request),
+    do: "set an expiry of 1 to #{max_ttl_days()} days"
+
+  def format_error(%Ecto.Changeset{} = changeset) do
+    changeset
+    |> Ecto.Changeset.traverse_errors(fn {message, opts} ->
+      Regex.replace(~r/%{(\w+)}/, message, fn _, key ->
+        opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
+      end)
+    end)
+    |> Enum.map_join("; ", fn {field, messages} ->
+      "#{field} #{Enum.join(messages, ", ")}"
+    end)
+  end
+
+  def format_error(reason), do: inspect(reason)
 
   @doc """
   Resolve a presented bearer token.

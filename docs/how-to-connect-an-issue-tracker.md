@@ -50,13 +50,25 @@ Follow the returned job ID through the [job API](how-to-follow-and-retrieve-a-jo
 
 ## 3. Configure the return path
 
-Ask the house operator to configure the submitting token's terminal webhook destination and secret.
-The destination must use the handler's reachable `/omashiki` URL.
-The secret must match `OMASHIKI_WEBHOOK_SECRET`.
-Setting that variable in the handler does not configure the house.
+On the house machine, set the submitting token's terminal webhook.
+Find the token ID with `mix omashiki.token list`.
+Run from `server/`, with `OMASHIKI_WEBHOOK_SECRET` set to the handler's value:
 
+```bash
+cd server
+mix omashiki.token webhook TOKEN_ID \
+  --url https://handler.example.com/omashiki \
+  --secret-env OMASHIKI_WEBHOOK_SECRET
+```
+
+The destination must use the handler's reachable `/omashiki` URL.
+The house refuses loopback and private addresses.
+The task reads the secret from the named variable and never prints it.
+The secret must have at least 8 bytes.
+Setting the variable in the handler alone does not configure the house.
+
+To stop notifications, run `mix omashiki.token webhook TOKEN_ID --clear`.
 The public API has no webhook-configuration route.
-The [internal integration entry point](internal/architecture.md#terminal-notifications) describes the available server function.
 
 The handler verifies the terminal signature before it calls `on_terminal`.
 That callback currently logs the status and branch.

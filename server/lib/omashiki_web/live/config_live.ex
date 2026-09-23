@@ -1,8 +1,10 @@
 defmodule OmashikiWeb.ConfigLive do
-  @moduledoc "Read-only repository, environment, runtime, and cache operations."
+  @moduledoc "Repository, environment, runtime, cache, and API token operations."
 
   use OmashikiWeb, :live_view
 
+  alias Omashiki.ApiTokens
+  alias Omashiki.ApiTokens.{Audit, Token}
   alias Omashiki.Config
   alias Omashiki.Config.Rollout
   alias Omashiki.HostSettings
@@ -16,7 +18,9 @@ defmodule OmashikiWeb.ConfigLive do
      |> assign(:page_title, "Omashiki · Config")
      |> assign(:active_tab, :config)
      |> assign(:reload_result, nil)
-     |> assign_config()}
+     |> assign(:issued_token, nil)
+     |> assign_config()
+     |> assign_tokens()}
   end
 
   @impl true
@@ -55,6 +59,48 @@ defmodule OmashikiWeb.ConfigLive do
   def handle_event("purge_cache", _params, socket),
     do: {:noreply, put_flash(socket, :error, "Cache purge requires a configured group.")}
 
+  def handle_event("create_token", %{"token" => params}, socket) do
+    attrs = %{
+      name: params["name"],
+      scopes: Map.get(params, "scopes", []),
+      allowed_environments:
+        params
+        |> Map.get("environments", "")
+        |> String.split(",", trim: true)
+        |> Enum.map(&String.trim/1),
+      max_active_jobs: integer(params["max_active_jobs"]),
+      ttl_days: integer(params["ttl_days"])
+    }
+
+    case ApiTokens.create_for_user(socket.assigns.current_user, attrs) do
+      {:ok, token, plaintext} ->
+        Audit.record(token, "issue")
+
+        {:noreply,
+         socket
+         |> assign(:issued_token, %{name: token.name, plaintext: plaintext})
+         |> assign_tokens()}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(:issued_token, nil)
+         |> put_flash(:error, "Token not created: #{ApiTokens.format_error(reason)}.")}
+    end
+  end
+
+  def handle_event("revoke_token", %{"id" => id}, socket) when is_binary(id) do
+    socket = assign(socket, :issued_token, nil)
+
+    case ApiTokens.revoke(socket.assigns.current_user, id) do
+      {:ok, token} ->
+        {:noreply, socket |> put_flash(:info, "Revoked token #{token.name}.") |> assign_tokens()}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "No such token to revoke.")}
+    end
+  end
+
   defp assign_config(socket) do
     socket
     |> assign(:repositories, Config.repositories())
@@ -63,6 +109,20 @@ defmodule OmashikiWeb.ConfigLive do
     |> assign(:max_containers, HostSettings.get_max_concurrent_containers())
     |> assign(:cache_rows, cache_rows())
   end
+
+  defp assign_tokens(socket),
+    do: assign(socket, :tokens, ApiTokens.list_for_user(socket.assigns.current_user))
+
+  # A blank or non-numeric field reaches ApiTokens as-is, so its validation
+  # decides the message rather than a second check here.
+  defp integer(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {number, ""} -> number
+      _ -> value
+    end
+  end
+
+  defp integer(value), do: value
 
   defp cache_rows do
     snapshots =
@@ -234,6 +294,95 @@ defmodule OmashikiWeb.ConfigLive do
           </article>
         </div>
       </section>
+
+      <section class="border border-outline-variant bg-surface-container p-5">
+        <header class="mb-5 flex flex-wrap items-baseline justify-between gap-3">
+          <h2 class="font-label text-label-md tracking-[0.25em] uppercase text-on-surface-variant">
+            Tokens
+          </h2>
+          <span class="font-mono text-xs text-on-surface-variant">{length(@tokens)} issued to {@current_user.username}</span>
+        </header>
+        <div
+          :if={@issued_token}
+          id="issued-token"
+          class="mb-5 border border-status-succeeded/50 p-4 font-mono text-xs"
+        >
+          <p class="text-on-surface-variant">
+            Copy {@issued_token.name} now. It is not shown again.
+          </p>
+          <p class="mt-2 break-all text-on-surface">{@issued_token.plaintext}</p>
+        </div>
+        <div :if={@tokens == []} class="font-mono text-xs text-on-surface-variant">
+          No tokens issued.
+        </div>
+        <table :if={@tokens != []} class="w-full font-mono text-xs">
+          <thead class="text-left text-on-surface-variant">
+            <tr>
+              <th class="py-2 pr-4 font-normal">name</th>
+              <th class="py-2 pr-4 font-normal">scopes</th>
+              <th class="py-2 pr-4 font-normal">environments</th>
+              <th class="py-2 pr-4 font-normal">expires</th>
+              <th class="py-2 pr-4 font-normal">webhook</th>
+              <th class="py-2 font-normal"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-outline-variant/40 text-on-surface">
+            <tr :for={token <- @tokens} id={"token-#{token.id}"}>
+              <td class="py-2 pr-4">{token.name}</td>
+              <td class="py-2 pr-4">{Enum.join(token.scopes, ", ")}</td>
+              <td class="py-2 pr-4">{Enum.join(token.allowed_environments, ", ")}</td>
+              <td class="py-2 pr-4">{token_expiry(token)}</td>
+              <td class="py-2 pr-4">{if token.webhook_destination, do: "set", else: "not set"}</td>
+              <td class="py-2 text-right">
+                <button
+                  :if={Token.status(token) == :active}
+                  type="button"
+                  phx-click="revoke_token"
+                  phx-value-id={token.id}
+                  data-confirm="Revoke this token? Clients using it stop working."
+                  class="border border-status-failed/50 px-3 py-1 font-label text-label-sm uppercase tracking-[0.2em] text-status-failed hover:border-status-failed"
+                >Revoke</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <form
+          id="create-token"
+          phx-submit="create_token"
+          class="mt-6 grid gap-4 border-t border-outline-variant/40 pt-5 md:grid-cols-2"
+        >
+          <label class="font-mono text-xs text-on-surface-variant">
+            name <.text_input name="token[name]" kind={:mono} required maxlength="80" />
+          </label>
+          <label class="font-mono text-xs text-on-surface-variant">
+            environments, comma-separated or *
+            <.text_input name="token[environments]" kind={:mono} required placeholder="*" />
+          </label>
+          <label class="font-mono text-xs text-on-surface-variant">
+            max active jobs
+            <.text_input name="token[max_active_jobs]" type="number" kind={:mono} value="10" min="1" />
+          </label>
+          <label class="font-mono text-xs text-on-surface-variant">
+            days until expiry
+            <.text_input name="token[ttl_days]" type="number" kind={:mono} value="30" min="1" />
+          </label>
+          <fieldset class="flex flex-wrap gap-4 font-mono text-xs text-on-surface">
+            <label :for={scope <- Token.allowed_scopes()} class="flex items-center gap-2">
+              <input type="checkbox" name="token[scopes][]" value={scope} checked={scope != "cancel"} />
+              {scope}
+            </label>
+          </fieldset>
+          <div class="flex items-end justify-end">
+            <button
+              type="submit"
+              phx-disable-with="Creating…"
+              class="border border-outline-variant px-4 py-2 font-label text-label-md uppercase tracking-[0.2em] text-on-surface hover:bg-surface-container-high"
+            >
+              Create token
+            </button>
+          </div>
+        </form>
+      </section>
     </div>
     """
   end
@@ -273,6 +422,13 @@ defmodule OmashikiWeb.ConfigLive do
 
   defp reload_class({:error, _reason}), do: "text-status-failed"
   defp reload_class(_result), do: "text-status-succeeded"
+
+  defp token_expiry(token) do
+    case Token.status(token) do
+      :active -> Ops.timestamp(token.expires_at)
+      status -> Ops.status_label(status)
+    end
+  end
 
   defp format_limit(nil, _suffix), do: nil
   defp format_limit(value, suffix), do: "#{value}#{suffix}"

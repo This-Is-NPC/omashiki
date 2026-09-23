@@ -49,6 +49,7 @@ Open <http://127.0.0.1:4010>.
 
 The checked-in configuration disables browser login for local use.
 Job submission still requires an API token.
+Issue one with `mix omashiki.token create`, as shown in [API authentication](api.md#authentication).
 For an authenticated installation, set `[auth].enabled = true` and restart the house.
 Use `/signup` to create the first operator account when signup is available.
 

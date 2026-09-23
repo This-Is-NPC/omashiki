@@ -36,6 +36,100 @@ defmodule OmashikiWeb.ConfigLiveTest do
     assert html =~ "requires a configured group"
   end
 
+  describe "tokens" do
+    test "lists the operator's tokens and whether a webhook is set", %{
+      conn: conn,
+      user: user,
+      token: token
+    } do
+      {:ok, _} =
+        Omashiki.ApiTokens.configure_webhook(token, %{
+          destination: "https://client.test/omashiki",
+          secret: "client-secret"
+        })
+
+      {other, _} = api_token_fixture(user, %{name: "ci", allowed_environments: ["app"]})
+      {foreign, _} = api_token_fixture(user_fixture(), %{name: "someone-else"})
+
+      {:ok, view, _html} = live(conn, ~p"/config")
+
+      row = view |> element("#token-#{token.id}") |> render() |> visible_text()
+      assert row =~ token.name
+      assert row =~ "read, submit, cancel"
+      assert row =~ "set"
+      refute row =~ "not set"
+      refute row =~ "client-secret"
+
+      other_row = view |> element("#token-#{other.id}") |> render() |> visible_text()
+      assert other_row =~ "app"
+      assert other_row =~ "not set"
+
+      refute has_element?(view, "#token-#{foreign.id}")
+    end
+
+    test "creates a token and shows its plaintext once", %{conn: conn, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/config")
+
+      view
+      |> form("#create-token", %{
+        "token" => %{
+          "name" => "demo",
+          "environments" => "app, web",
+          "max_active_jobs" => "2",
+          "ttl_days" => "7",
+          "scopes" => ["read", "submit"]
+        }
+      })
+      |> render_submit()
+
+      plaintext =
+        view
+        |> element("#issued-token")
+        |> render()
+        |> Floki.parse_fragment!()
+        |> Floki.find("p")
+        |> List.last()
+        |> Floki.text()
+        |> String.trim()
+
+      assert {:ok, token} = Omashiki.ApiTokens.find_presented_by_plaintext(plaintext)
+      assert token.user_id == user.id
+      assert token.allowed_environments == ["app", "web"]
+      assert token.scopes == ["read", "submit"]
+
+      {:ok, _view, html} = live(conn, ~p"/config")
+      refute html =~ plaintext
+    end
+
+    test "reports ApiTokens validation errors", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/config")
+
+      html =
+        view
+        |> form("#create-token", %{
+          "token" => %{"name" => "demo", "environments" => "*", "ttl_days" => "100000"}
+        })
+        |> render_submit()
+
+      assert html =~ "Token not created: set an expiry of 1 to"
+      refute has_element?(view, "#issued-token")
+    end
+
+    test "revokes a token", %{conn: conn, token: token} do
+      {:ok, view, _html} = live(conn, ~p"/config")
+
+      view |> element("#token-#{token.id} button", "Revoke") |> render_click()
+
+      assert Omashiki.ApiTokens.Token.status(
+               Omashiki.Repo.get!(Omashiki.ApiTokens.Token, token.id)
+             ) ==
+               :revoked
+
+      refute has_element?(view, "#token-#{token.id} button")
+      assert render(view) =~ "revoked"
+    end
+  end
+
   describe "configuration reload" do
     setup do
       root = Path.join(System.tmp_dir!(), "omashiki-live-#{System.unique_integer([:positive])}")

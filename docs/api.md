@@ -10,7 +10,25 @@ The `code` values are the enum in the OpenAPI Problem schema.
 
 ## Authentication
 
-Use an existing operator account to request a token.
+On the house machine, issue a token with the `omashiki.token` Mix task.
+Run it from `server/`:
+
+```bash
+cd server
+mix omashiki.token create --name local-client --env '*' --scopes read,submit,cancel
+```
+
+The task prints the plaintext token once.
+With `[auth] enabled = false`, the task acts as the local operator.
+Otherwise, add `--user` with an operator's username or email.
+`--max-active` sets `max_active_jobs` (default 10).
+`--ttl-days` sets the lifetime (default 30).
+
+`mix omashiki.token list` shows the operator's tokens.
+`mix omashiki.token revoke ID` revokes one.
+The Config screen lists the same tokens and can also create and revoke them.
+
+From another machine, use an existing operator account to request a token.
 Write the credentials to a private temporary file:
 
 ```bash
@@ -62,6 +80,7 @@ A token that lacks a required scope receives `403` with `code` `insufficient_sco
 `max_active_jobs` is the number of non-terminal jobs that token may hold.
 
 Local authentication-disabled mode does not remove the token requirement for job submission.
+Use `mix omashiki.token create` to get a token in that mode.
 Use the submitting token for job inspection and result access.
 
 ## Agent skill

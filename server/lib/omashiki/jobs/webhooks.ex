@@ -35,6 +35,19 @@ defmodule Omashiki.Jobs.Webhooks do
 
   def configure(_, _), do: {:error, :invalid_webhook_configuration}
 
+  @doc "Remove a token's destination and every stored signing key."
+  def clear(%Token{} = token) do
+    token
+    |> Token.webhook_changeset(%{
+      webhook_destination: nil,
+      webhook_secret_ciphertext: nil,
+      webhook_previous_secret_ciphertext: nil,
+      webhook_key_id: nil,
+      webhook_previous_key_id: nil
+    })
+    |> Repo.update()
+  end
+
   @doc "Validate and normalize a token-owned HTTP(S) destination."
   def validate_destination(destination) when is_binary(destination) do
     uri = URI.parse(String.trim(destination))
