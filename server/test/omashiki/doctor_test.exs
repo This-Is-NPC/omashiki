@@ -46,6 +46,7 @@ defmodule Omashiki.DoctorTest do
 
     checks =
       run(
+        install: :checkout,
         environments: [
           environment("codex", "none", "agent:missing"),
           environment("opencode", "none", "agent:missing"),
@@ -58,6 +59,24 @@ defmodule Omashiki.DoctorTest do
     assert fix =~ "mise run images"
     assert fix =~ "docker pull agent:missing"
     assert %{status: :ok} = find(checks, "image:agent:present")
+  end
+
+  test "a release builds a missing image from the repository at its own version" do
+    FakeProbe.set(%{image: {:error, :not_found}})
+
+    checks =
+      run(install: :release, environments: [environment("opencode", "none", "agent:missing")])
+
+    assert %{status: :error, fix: fix} = find(checks, "image:agent:missing")
+    vsn = Application.spec(:omashiki, :vsn)
+
+    assert fix =~
+             "`docker build -t agent:missing " <>
+               "\"https://github.com/This-Is-NPC/omashiki.git#v#{vsn}:agent\"`"
+
+    assert fix =~ "Omashiki never pulls images"
+    assert fix =~ "docker pull agent:missing"
+    refute fix =~ "mise"
   end
 
   test "a restricted environment without an agent network is an error" do
@@ -131,11 +150,22 @@ defmodule Omashiki.DoctorTest do
       route: fn _, _, _ -> flunk("route probed without a house") end
     })
 
-    checks =
-      run(environments: [environment("opencode", "restricted", "agent:1")], route: true)
+    [checkout, release] =
+      for install <- [:checkout, :release] do
+        checks =
+          run(
+            install: install,
+            environments: [environment("opencode", "restricted", "agent:1")],
+            route: true
+          )
 
-    assert %{status: :warn, fix: fix} = find(checks, "route:omashiki-agents")
-    assert fix =~ "mise run up"
+        assert %{status: :warn, fix: fix} = find(checks, "route:omashiki-agents")
+        fix
+      end
+
+    assert checkout =~ "`mise run up`, then run `mise run doctor` again"
+    assert release =~ "`docker compose up -d`, then run `bin/doctor` again"
+    refute release =~ "mise"
   end
 
   test "the route check never pulls: no present image is a warning" do
@@ -144,7 +174,8 @@ defmodule Omashiki.DoctorTest do
     checks =
       run(environments: [environment("opencode", "restricted", "agent:1")], route: true)
 
-    assert %{status: :warn} = find(checks, "route:omashiki-agents")
+    assert %{status: :warn, fix: fix} = find(checks, "route:omashiki-agents")
+    assert fix =~ "the image checks name"
   end
 
   test "an unreadable host credential is an error when an environment uses it" do

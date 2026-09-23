@@ -44,6 +44,7 @@ To use your own image, set its tag in `[runtimes.docker.runc.debian.images]` in 
 The image must contain the `opencode` binary.
 The house checks each image when it loads the configuration. It does not start without the image.
 The house never pulls an agent image, so build it or pull it yourself with `docker pull`.
+A missing image names this `docker build` command, at the release that you run, in the configuration error, the job failure, and the doctor.
 
 ## 3. Give the agent model access
 

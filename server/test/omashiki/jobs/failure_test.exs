@@ -1,5 +1,6 @@
 defmodule Omashiki.Jobs.FailureTest do
-  use ExUnit.Case, async: true
+  # The image_missing message follows the global :install.
+  use ExUnit.Case, async: false
 
   alias Omashiki.Jobs.Failure
 
@@ -47,6 +48,21 @@ defmodule Omashiki.Jobs.FailureTest do
       assert error["code"] == unquote(code)
       assert error["message"] =~ unquote(message)
       assert error["details"]["reason"] == inspect(reason, limit: 50)
+    end
+  end
+
+  test "a missing image names how this install provides it" do
+    previous = Application.fetch_env!(:omashiki, :install)
+    on_exit(fn -> Application.put_env(:omashiki, :install, previous) end)
+
+    for {install, build} <- [checkout: "`mise run images`", release: "`docker build -t agent:1 "] do
+      Application.put_env(:omashiki, :install, install)
+
+      assert %{"code" => "image_missing", "message" => message} =
+               Failure.error({:image_missing, "agent:1"})
+
+      assert message =~ build
+      assert message =~ "`docker pull agent:1`"
     end
   end
 

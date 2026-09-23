@@ -10,6 +10,9 @@ defmodule Omashiki.Doctor do
   The route check starts a container, so it runs only when asked (`route:
   true`): at boot and from `Omashiki.Cli.Doctor`. Every other check is cheap
   enough to repeat.
+
+  A fix names the commands of the install that runs the house: the `mise`
+  tasks in a checkout, `docker` and `bin/doctor` in a release.
   """
 
   alias Omashiki.Config
@@ -28,6 +31,8 @@ defmodule Omashiki.Doctor do
     * `:environments`, `:host_credentials`, `:identities` — default to the
       live configuration
     * `:port` — the house HTTP port; defaults to the endpoint's
+    * `:install` — `:checkout` or `:release`, which commands a fix names;
+      defaults to the `:install` the runtime configuration resolved
   """
   @spec run(keyword()) :: [check()]
   def run(opts \\ []) do
@@ -39,6 +44,9 @@ defmodule Omashiki.Doctor do
     environments = Keyword.get_lazy(opts, :environments, &Config.environments/0)
     host_credentials = Keyword.get_lazy(opts, :host_credentials, &Config.host_credentials/0)
     identities = Keyword.get_lazy(opts, :identities, &Config.identities/0)
+
+    opts =
+      Keyword.put_new_lazy(opts, :install, fn -> Application.fetch_env!(:omashiki, :install) end)
 
     docker_checks(probe, environments, opts) ++
       host_credential_checks(probe, host_credentials, environments) ++
@@ -65,11 +73,11 @@ defmodule Omashiki.Doctor do
 
         routes =
           if Keyword.get(opts, :route, false),
-            do: route_checks(probe, environments, images, networks, house_port(opts)),
+            do: route_checks(probe, environments, images, networks, opts),
             else: []
 
         [ok("docker", "Docker answers.")] ++
-          image_checks(images) ++ network_checks(environments, networks) ++ routes
+          image_checks(images, opts[:install]) ++ network_checks(environments, networks) ++ routes
 
       {:error, reason} ->
         [
@@ -90,7 +98,7 @@ defmodule Omashiki.Doctor do
     |> Map.new(fn {image, names} -> {image, {probe.image(image), Enum.sort(names)}} end)
   end
 
-  defp image_checks(images) do
+  defp image_checks(images, install) do
     images
     |> Enum.sort()
     |> Enum.map(fn {image, {result, names}} ->
@@ -104,7 +112,7 @@ defmodule Omashiki.Doctor do
           error(
             id,
             "Image #{image} is missing, so #{names(names)} cannot start.",
-            Runtimes.provide_image(image)
+            Runtimes.provide_image(image, install)
           )
 
         {:error, reason} ->
@@ -169,8 +177,9 @@ defmodule Omashiki.Doctor do
     end
   end
 
-  defp route_checks(probe, environments, images, networks, port) do
+  defp route_checks(probe, environments, images, networks, opts) do
     networks = for {network, :ok} <- Enum.sort(networks), do: network
+    port = house_port(opts)
 
     if networks == [] do
       []
@@ -178,28 +187,29 @@ defmodule Omashiki.Doctor do
       house = probe.house(port)
 
       Enum.map(networks, fn network ->
-        route_check(probe, network, house, probe_image(network, environments, images), port)
+        image = probe_image(network, environments, images)
+        route_check(probe, network, house, image, port, opts[:install])
       end)
     end
   end
 
-  defp route_check(_probe, network, {:error, _reason}, _image, port) do
+  defp route_check(_probe, network, {:error, _reason}, _image, port, install) do
     warn(
       "route:#{network}",
       "The house does not answer on port #{port}, so the route from network #{network} was not checked.",
-      "Start the house with `mise run up`, then run `mise run doctor` again."
+      start_fix(install)
     )
   end
 
-  defp route_check(_probe, network, :ok, nil, _port) do
+  defp route_check(_probe, network, :ok, nil, _port, _install) do
     warn(
       "route:#{network}",
       "No agent image is present to check the route from network #{network}.",
-      "Provide the agent images that the image checks name."
+      "Build or pull the missing images the image checks name, then run the doctor again."
     )
   end
 
-  defp route_check(probe, network, :ok, image, port) do
+  defp route_check(probe, network, :ok, image, port, _install) do
     id = "route:#{network}"
 
     case probe.route(image, network, "http://host.docker.internal:#{port}/api/v1/health") do
@@ -239,6 +249,12 @@ defmodule Omashiki.Doctor do
 
     Enum.find(present, &(&1 in own)) || List.first(present)
   end
+
+  defp start_fix(:checkout),
+    do: "Start the house with `mise run up`, then run `mise run doctor` again."
+
+  defp start_fix(:release),
+    do: "Start the house, for example with `docker compose up -d`, then run `bin/doctor` again."
 
   defp host_credential_checks(probe, host_credentials, environments) do
     in_use =

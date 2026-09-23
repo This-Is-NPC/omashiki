@@ -180,6 +180,14 @@ if config_env() == :prod do
 end
 
 # ---------------------------------------------------------------------------
+# :install — how this house is installed: :release when a release runs it
+# (its start script sets RELEASE_ROOT), :checkout otherwise. The config path
+# below and the commands Omashiki.Doctor names follow it.
+# ---------------------------------------------------------------------------
+install = if System.get_env("RELEASE_ROOT"), do: :release, else: :checkout
+config :omashiki, :install, install
+
+# ---------------------------------------------------------------------------
 # omashiki.toml — the house configuration file.
 #
 # One rule names it: OMASHIKI_CONFIG when set, otherwise omashiki.toml at the
@@ -202,7 +210,7 @@ omashiki_toml =
       Path.expand(path)
 
     _ ->
-      unless System.get_env("RELEASE_ROOT"), do: Path.expand("../../omashiki.toml", __DIR__)
+      if install == :checkout, do: Path.expand("../../omashiki.toml", __DIR__)
   end
 
 if omashiki_toml, do: config(:omashiki, :config_path, omashiki_toml)

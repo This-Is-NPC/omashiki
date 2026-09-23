@@ -22,7 +22,10 @@ defmodule Omashiki.Plugin.ImageProvidesTest do
     File.chmod!(docker, 0o755)
 
     previous =
-      Map.new([:plugin_image_provides, :docker_cli], &{&1, Application.get_env(:omashiki, &1)})
+      Map.new(
+        [:plugin_image_provides, :docker_cli, :install],
+        &{&1, Application.get_env(:omashiki, &1)}
+      )
 
     Application.put_env(:omashiki, :plugin_image_provides, :inspect)
     Application.put_env(:omashiki, :docker_cli, docker)
@@ -47,15 +50,20 @@ defmodule Omashiki.Plugin.ImageProvidesTest do
 
   @tag status: 125,
        output: "docker: Error response from daemon: No such image: omashiki/agent:latest"
-  test "a missing image names the image and how to provide it", %{image: image} do
-    error =
-      assert_raise Error, fn ->
-        ImageProvides.cover!(image, ["opencode"], [], "environments.opencode")
-      end
+  test "a missing image names the image and how this install provides it", %{image: image} do
+    for {install, build} <- [checkout: "`mise run images`", release: "`docker build -t #{image} "] do
+      Application.put_env(:omashiki, :install, install)
 
-    assert Exception.message(error) =~ "image #{inspect(image)} is not on this machine"
-    assert Exception.message(error) =~ "Omashiki never pulls images"
-    assert Exception.message(error) =~ "docker pull #{image}"
+      error =
+        assert_raise Error, fn ->
+          ImageProvides.cover!(image, ["opencode"], [], "environments.opencode")
+        end
+
+      assert Exception.message(error) =~ "image #{inspect(image)} is not on this machine"
+      assert Exception.message(error) =~ "Omashiki never pulls images"
+      assert Exception.message(error) =~ build
+      assert Exception.message(error) =~ "docker pull #{image}"
+    end
   end
 
   @tag status: 1

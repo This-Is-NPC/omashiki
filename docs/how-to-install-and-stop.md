@@ -77,6 +77,7 @@ Each check prints `ok`, `warn`, or `error`. Each problem has a fix.
 The task exits with a non-zero status when a check reports an error.
 
 An installation from the release image runs the same doctor as `bin/doctor` in the house container.
+Its fixes name the commands of the release, such as `docker build` for a missing agent image, instead of `mise` tasks.
 With the [manager Compose file](../examples/compose.manager.yml):
 
 ```bash

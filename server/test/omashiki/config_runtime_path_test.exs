@@ -68,13 +68,19 @@ defmodule Omashiki.ConfigRuntimePathTest do
   test "a checkout without OMASHIKI_CONFIG reads omashiki.toml at the repository root" do
     System.put_env("OMASHIKI_CONFIG", "")
 
-    assert runtime_config()[:config_path] == Path.expand("../../../omashiki.toml", __DIR__)
+    config = runtime_config()
+
+    assert config[:install] == :checkout
+    assert config[:config_path] == Path.expand("../../../omashiki.toml", __DIR__)
   end
 
   test "a release without OMASHIKI_CONFIG names no file, so loading fails clearly" do
     System.put_env("RELEASE_ROOT", "/app")
 
-    refute Keyword.has_key?(runtime_config(), :config_path)
+    config = runtime_config()
+
+    assert config[:install] == :release
+    refute Keyword.has_key?(config, :config_path)
 
     previous = Application.fetch_env!(:omashiki, :config_path)
     Application.delete_env(:omashiki, :config_path)
