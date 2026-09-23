@@ -29,6 +29,7 @@ defmodule Omashiki.Runtime.ContainerManager do
   @isolated_host_base_url "http://127.0.0.1:8080"
   @isolated_egress_proxy "http://127.0.0.1:8081"
   @default_bootstrap_timeout_ms 10 * 60 * 1_000
+  @provision_timeout_ms 15 * 60 * 1_000
   @cancellation_table :omashiki_runtime_cancellations
 
   @default_resource_limits %{
@@ -59,9 +60,12 @@ defmodule Omashiki.Runtime.ContainerManager do
     GenServer.call(
       __MODULE__,
       {:provision_for_job, job, attempt, environment, opts},
-      15 * 60 * 1_000
+      @provision_timeout_ms
     )
   end
+
+  @doc false
+  def provision_timeout_ms, do: @provision_timeout_ms
 
   @doc "Executes a validated argv list inside an existing container."
   @impl true
@@ -1834,9 +1838,13 @@ defmodule Omashiki.Runtime.ContainerManager do
   # `:orphan` or `:active`. Used by `cleanup_orphans` and exposed for
   # tests so the rule (no job-scope label or an inactive job) stays explicit.
   @doc false
-  def orphan_status(container, active_ids) when is_map(container) and is_list(active_ids) do
-    job_scope_id = job_scope_id_from_container(container)
+  def orphan_status(container, active_ids) when is_map(container) and is_list(active_ids),
+    do: container |> job_scope_id_from_container() |> scope_status(active_ids)
 
+  # The same rule for a container known only by its job scope, as a worker
+  # reports it to the manager: `Omashiki.Fleet.dead_containers/1`.
+  @doc false
+  def scope_status(job_scope_id, active_ids) when is_list(active_ids) do
     if is_nil(job_scope_id) or job_scope_id not in active_ids do
       :orphan
     else

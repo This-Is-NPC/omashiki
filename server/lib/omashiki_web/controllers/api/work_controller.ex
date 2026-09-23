@@ -29,7 +29,9 @@ defmodule OmashikiWeb.Api.WorkController do
   end
 
   # Slots, capacity, and the containers the worker runs for this house. It is
-  # what the fleet view draws; it grants nothing and changes no job.
+  # what the fleet view draws; it grants nothing and changes no job. The answer
+  # names the reported containers whose attempt is no longer live, for the
+  # worker to remove.
   def report(conn, params) do
     with {:ok, machine_id} <- required_string(params, "machine_id"),
          {:ok, free_slots} <- parse_free_slots(params["free_slots"]),
@@ -42,7 +44,7 @@ defmodule OmashikiWeb.Api.WorkController do
           containers: containers
         })
 
-      send_resp(conn, :no_content, "")
+      json(conn, %{reclaim: Fleet.dead_containers(containers)})
     end
   end
 

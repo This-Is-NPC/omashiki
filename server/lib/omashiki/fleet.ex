@@ -3,9 +3,11 @@ defmodule Omashiki.Fleet do
   The machines that run this house's jobs, and the containers on each.
 
   Remote workers report to the manager through `POST /internal/work/report`,
-  recorded by `Omashiki.Worker.Presence`. A node that runs jobs itself
-  (embedded role) reads its own `Omashiki.Runtime.ContainerTracker`. Both end up
-  in the same shape, so a screen draws one graph whatever the topology.
+  recorded by `Omashiki.Worker.Presence`; the answer names the reported
+  containers whose attempt is dead (`dead_containers/1`). A node that runs
+  jobs itself (embedded role) reads its own `Omashiki.Runtime.ContainerTracker`.
+  Both end up in the same shape, so a screen draws one graph whatever the
+  topology.
 
   `topic/0` carries `{:fleet_updated, machine_id}` whenever a node appears,
   changes its slots, or starts or removes a container. PubSub is not clustered
@@ -15,7 +17,7 @@ defmodule Omashiki.Fleet do
   alias Omashiki.Config
   alias Omashiki.Jobs.ExecutionCapacity
   alias Omashiki.Repo
-  alias Omashiki.Runtime.ContainerTracker
+  alias Omashiki.Runtime.{ContainerManager, ContainerTracker}
   alias Omashiki.Worker.Presence
 
   @topic "fleet"
@@ -104,6 +106,22 @@ defmodule Omashiki.Fleet do
       free_slots: entry.free_slots,
       containers: Map.get(entry, :containers, [])
     }
+  end
+
+  @doc """
+  The ids of reported containers whose attempt is no longer live in this house.
+
+  A worker cannot tell on its own that the manager failed an attempt: it has no
+  database. The manager answers each report with this list and the worker
+  removes those containers.
+  """
+  @spec dead_containers([ContainerTracker.container()]) :: [String.t()]
+  def dead_containers(containers) do
+    active_ids = ContainerManager.active_job_scope_ids()
+
+    for container <- containers,
+        ContainerManager.scope_status(container.scope_id, active_ids) == :orphan,
+        do: container.id
   end
 
   @doc "Wire form of one tracked container, as a worker reports it."

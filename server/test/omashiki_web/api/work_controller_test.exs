@@ -98,7 +98,7 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
           containers: [container]
         })
 
-      assert response(conn, 204)
+      assert %{"reclaim" => ["a1b2c3d4e5f60718"]} = json_response(conn, 200)
 
       assert %{
                capacity: 3,
@@ -106,6 +106,28 @@ defmodule OmashikiWeb.Api.WorkControllerTest do
                containers: [%{id: "a1b2c3d4e5f60718", state: "running"}]
              } =
                Enum.find(Omashiki.Fleet.nodes(), &(&1.machine_id == "box-r"))
+    end
+
+    @tag :unauthenticated
+    test "names the reported containers whose attempt is no longer live",
+         %{conn: conn, worker_token: token, user: user, token: api_token} do
+      {_job, failed} = job_fixture(user, api_token, %{status: "failed"})
+      {_job, running} = job_fixture(user, api_token, %{status: "running"})
+
+      conn =
+        conn
+        |> worker_conn(token)
+        |> post("/internal/work/report", %{
+          machine_id: "box-r",
+          free_slots: 0,
+          capacity: 2,
+          containers: [
+            %{id: "aaaaaaaaaaaa", state: "running", attempt_id: failed.id},
+            %{id: "bbbbbbbbbbbb", state: "running", attempt_id: running.id}
+          ]
+        })
+
+      assert %{"reclaim" => ["aaaaaaaaaaaa"]} = json_response(conn, 200)
     end
 
     @tag :unauthenticated

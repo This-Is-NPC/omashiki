@@ -79,7 +79,7 @@ defmodule Omashiki.FleetTest do
   end
 
   describe "worker report scope" do
-    test "a house sees only the containers of its own in-flight attempts" do
+    test "a house sees only the containers of attempts the worker took from it" do
       other_attempt = "11111111-2222-4333-8444-555555555555"
 
       containers = [
@@ -88,20 +88,31 @@ defmodule Omashiki.FleetTest do
         %{id: "cccccccccccc", attempt_id: nil}
       ]
 
-      in_flight = %{
-        @attempt_id => %{offer: %{manager_id: "ana"}},
-        other_attempt => %{offer: %{manager_id: "joao"}}
+      owners = %{
+        @attempt_id => %{manager_id: "ana", accepted_at: 0},
+        other_attempt => %{manager_id: "joao", accepted_at: 0}
       }
 
-      assert [%{id: "aaaaaaaaaaaa"}] = Poller.containers_for_manager(containers, in_flight, "ana")
-
-      assert [%{id: "bbbbbbbbbbbb"}] =
-               Poller.containers_for_manager(containers, in_flight, "joao")
-
-      assert [] = Poller.containers_for_manager(containers, in_flight, "nobody")
+      assert [%{id: "aaaaaaaaaaaa"}] = Poller.containers_for_manager(containers, owners, "ana")
+      assert [%{id: "bbbbbbbbbbbb"}] = Poller.containers_for_manager(containers, owners, "joao")
+      assert [] = Poller.containers_for_manager(containers, owners, "nobody")
     end
 
-    test "the client sends the report to the manager" do
+    test "only a reported container the manager named dead and past the grace is reclaimed" do
+      now = DateTime.utc_now()
+
+      old = %{id: "aaaaaaaaaaaa", created_at: DateTime.add(now, -60, :second)}
+      young = %{id: "bbbbbbbbbbbb", created_at: DateTime.add(now, -5, :second)}
+      live = %{id: "cccccccccccc", created_at: DateTime.add(now, -60, :second)}
+      reported = [old, young, live]
+      dead = ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "dddddddddddd"]
+
+      assert [^old] = Poller.reclaimable(reported, dead, now, 30_000)
+      assert [^old, ^young] = Poller.reclaimable(reported, dead, now, 0)
+      assert [] = Poller.reclaimable(reported, [], now, 0)
+    end
+
+    test "the client sends the report and returns the containers to reclaim" do
       bypass = Bypass.open()
       parent = self()
 
@@ -113,7 +124,9 @@ defmodule Omashiki.FleetTest do
           {:report, Plug.Conn.get_req_header(conn, "authorization"), Jason.decode!(body)}
         )
 
-        Plug.Conn.resp(conn, 204, "")
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"reclaim":["aaaaaaaaaaaa"]}))
       end)
 
       client = Omashiki.Worker.Client.new("http://127.0.0.1:#{bypass.port}", "worker-token")
@@ -126,7 +139,8 @@ defmodule Omashiki.FleetTest do
         started_at: nil
       }
 
-      assert :ok = Omashiki.Worker.Client.report(client, "vps-1", 3, 4, [container])
+      assert {:ok, ["aaaaaaaaaaaa"]} =
+               Omashiki.Worker.Client.report(client, "vps-1", 3, 4, [container])
 
       assert_receive {:report, ["Bearer worker-token"], body}
       assert %{"machine_id" => "vps-1", "free_slots" => 3, "capacity" => 4} = body

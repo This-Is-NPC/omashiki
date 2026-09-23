@@ -6,7 +6,7 @@ defmodule Omashiki.Worker.Poller do
   require Logger
 
   alias Omashiki.Jobs.{AttemptResult, Failure}
-  alias Omashiki.Runtime.ContainerTracker
+  alias Omashiki.Runtime.{ContainerManager, ContainerTracker}
   alias Omashiki.Worker.{Client, Complete, Execution, Managers, Offer, Slots}
 
   # A container change is reported to the managers almost at once; the
@@ -16,6 +16,10 @@ defmodule Omashiki.Worker.Poller do
   @complete_attempts 8
   @complete_retry_base_ms 100
   @complete_retry_cap_ms 5_000
+  # A manager names the reported containers whose attempt it no longer runs;
+  # one younger than this is left for a later report, so a container never
+  # goes while its attempt may still be starting.
+  @reclaim_grace_ms 30_000
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -97,6 +101,11 @@ defmodule Omashiki.Worker.Poller do
     end
   end
 
+  # One removal per container at a time; a later report retries a container
+  # that is still there.
+  def handle_info({:reclaimed, container_id}, state),
+    do: {:noreply, %{state | reclaiming: MapSet.delete(state.reclaiming, container_id)}}
+
   def handle_info(_message, state), do: {:noreply, state}
 
   defp poll_next_manager(state, free) do
@@ -174,8 +183,14 @@ defmodule Omashiki.Worker.Poller do
                 task_pid: task_pid
               })
 
+            owners =
+              Map.put(state.owners, offer.attempt_id, %{
+                manager_id: offer.manager_id,
+                accepted_at: System.monotonic_time(:millisecond)
+              })
+
             send(self(), :tick)
-            %{state | in_flight: in_flight}
+            %{state | in_flight: in_flight, owners: owners}
         end
     end
   end
@@ -296,9 +311,13 @@ defmodule Omashiki.Worker.Poller do
     min(cap, base * trunc(:math.pow(2, used)))
   end
 
-  defp adopt_in_flight(%{mode: :active} = next, %{in_flight: previous})
-       when map_size(previous) > 0 do
-    %{next | in_flight: Map.merge(previous, next.in_flight)}
+  defp adopt_in_flight(%{mode: :active} = next, previous) do
+    %{
+      next
+      | in_flight: Map.merge(previous.in_flight, next.in_flight),
+        owners: previous.owners,
+        reclaiming: previous.reclaiming
+    }
   end
 
   defp adopt_in_flight(%{mode: :idle} = next, %{in_flight: previous})
@@ -343,35 +362,99 @@ defmodule Omashiki.Worker.Poller do
   defp report_all(state) do
     containers = ContainerTracker.list()
     %{max: capacity, free: free} = Slots.snapshot(state.slots)
+    state = forget_finished(state, containers, System.monotonic_time(:millisecond))
 
-    for manager <- state.managers do
-      mine = containers_for_manager(containers, state.in_flight, manager.id)
+    state =
+      Enum.reduce(state.managers, state, fn manager, acc ->
+        mine = containers_for_manager(containers, acc.owners, manager.id)
 
-      case Client.report(manager.client, state.machine_id, free, capacity, mine) do
-        :ok ->
-          :ok
+        case Client.report(manager.client, acc.machine_id, free, capacity, mine) do
+          {:ok, dead} ->
+            reclaim(acc, manager, reclaimable(mine, dead, DateTime.utc_now(), reclaim_grace_ms()))
 
-        {:error, reason} ->
-          Logger.debug("Worker.Poller report to #{manager.id}: #{inspect(reason)}")
-      end
-    end
+          {:error, reason} ->
+            Logger.debug("Worker.Poller report to #{manager.id}: #{inspect(reason)}")
+            acc
+        end
+      end)
 
     %{state | last_report_at: System.monotonic_time(:millisecond), report_pending: false}
   end
 
+  # An attempt stays attributed while it runs or has a container here, and for
+  # as long as a provision may last after it was accepted: a provision the
+  # poller stopped waiting for can still create a container.
+  defp forget_finished(state, containers, now) do
+    attempts = MapSet.new(containers, & &1.attempt_id)
+    window_ms = ContainerManager.provision_timeout_ms()
+
+    owners =
+      Map.filter(state.owners, fn {attempt_id, owner} ->
+        Map.has_key?(state.in_flight, attempt_id) or MapSet.member?(attempts, attempt_id) or
+          now - owner.accepted_at < window_ms
+      end)
+
+    %{state | owners: owners}
+  end
+
+  defp reclaim(state, manager, containers) do
+    Enum.reduce(containers, state, fn container, acc ->
+      if MapSet.member?(acc.reclaiming, container.id) do
+        acc
+      else
+        Logger.info(
+          "Worker.Poller removing container #{container.id}: " <>
+            "attempt #{container.attempt_id} is no longer live on #{manager.id}"
+        )
+
+        runtime = acc.runtime
+        poller = self()
+
+        _ =
+          Task.start(fn ->
+            _ = runtime.destroy(container.id)
+            send(poller, {:reclaimed, container.id})
+          end)
+
+        %{acc | reclaiming: MapSet.put(acc.reclaiming, container.id)}
+      end
+    end)
+  end
+
   @doc """
-  The containers a manager may see: only those running its own in-flight
-  attempts. A worker shared by several houses never shows one house another's
+  The containers a manager may see: only those of attempts this worker took
+  from it. A worker shared by several houses never shows one house another's
   containers, and a container no attempt owns is reported to nobody.
   """
-  def containers_for_manager(containers, in_flight, manager_id) do
+  def containers_for_manager(containers, owners, manager_id) do
     attempts =
-      for {attempt_id, %{offer: %{manager_id: ^manager_id}}} <- in_flight,
+      for {attempt_id, %{manager_id: ^manager_id}} <- owners,
           into: MapSet.new(),
           do: attempt_id
 
     Enum.filter(containers, &MapSet.member?(attempts, &1.attempt_id))
   end
+
+  @doc """
+  The reported containers to remove: those the manager named dead and that are
+  older than `grace_ms`. Only a container reported to that manager qualifies,
+  whatever else the answer names.
+  """
+  def reclaimable(reported, dead, now, grace_ms) do
+    dead = MapSet.new(dead)
+
+    Enum.filter(reported, fn container ->
+      MapSet.member?(dead, container.id) and past_grace?(container.created_at, now, grace_ms)
+    end)
+  end
+
+  defp past_grace?(nil, _now, _grace_ms), do: true
+
+  defp past_grace?(created_at, now, grace_ms),
+    do: DateTime.diff(now, created_at, :millisecond) >= grace_ms
+
+  defp reclaim_grace_ms,
+    do: Application.get_env(:omashiki, :worker_reclaim_grace_ms, @reclaim_grace_ms)
 
   defp free_slots(slots), do: Slots.available(slots)
 
@@ -387,13 +470,21 @@ defmodule Omashiki.Worker.Poller do
     machine_id = Keyword.get(opts, :machine_id) || System.get_env("OMASHIKI_NODE") || hostname()
     interval_ms = Application.get_env(:omashiki, :worker_poll_interval_ms, 1_000)
     slots = Keyword.get(opts, :slots, Slots)
+    runtime = Keyword.get(opts, :runtime, ContainerManager)
 
     if managers == [] or is_nil(executor) do
       Logger.warning(
         "Worker.Poller idle: at least one manager and worker_executor must be configured"
       )
 
-      %{mode: :idle, slots: slots, in_flight: %{}}
+      %{
+        mode: :idle,
+        slots: slots,
+        runtime: runtime,
+        in_flight: %{},
+        owners: %{},
+        reclaiming: MapSet.new()
+      }
     else
       managers =
         Enum.map(managers, fn m ->
@@ -419,10 +510,13 @@ defmodule Omashiki.Worker.Poller do
         managers: managers,
         rr: 0,
         in_flight: %{},
+        owners: %{},
+        reclaiming: MapSet.new(),
         executor: executor,
         machine_id: machine_id,
         interval_ms: interval_ms,
         slots: slots,
+        runtime: runtime,
         report_ms: Application.get_env(:omashiki, :worker_fleet_report_ms, @report_ms),
         last_report_at: System.monotonic_time(:millisecond),
         report_pending: false
@@ -433,8 +527,10 @@ defmodule Omashiki.Worker.Poller do
     end
   end
 
-  defp default_opts(%{slots: slots}) when is_atom(slots) or is_pid(slots), do: [slots: slots]
-  defp default_opts(_), do: []
+  defp default_opts(%{slots: slots, runtime: runtime}) when is_atom(slots) or is_pid(slots),
+    do: [slots: slots, runtime: runtime]
+
+  defp default_opts(%{runtime: runtime}), do: [runtime: runtime]
 
   defp hostname do
     case :inet.gethostname() do

@@ -106,4 +106,5 @@ The event ID supports receiver deduplication across retries.
 Recovery finds expired active leases and stranded dispatch state.
 It records failure once and releases the reservation.
 A stale worker cannot complete with an expired fence.
+The worker removes the container of a failed attempt when its manager answers the next fleet report.
 See [distributed execution](distributed-execution.md) for worker-local leases and slots.

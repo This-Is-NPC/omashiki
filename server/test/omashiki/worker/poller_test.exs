@@ -18,6 +18,7 @@ defmodule Omashiki.Worker.PollerTest do
       restore_env(:fake_executor_mode)
       restore_env(:worker_managers)
       restore_env(:worker_complete_retry_ms)
+      restore_env(:worker_reclaim_grace_ms)
     end)
 
     :ok
@@ -610,6 +611,102 @@ defmodule Omashiki.Worker.PollerTest do
       refute_receive {:blob_wrong_manager, _}, 200
     end
   end
+
+  describe "reclaiming containers of dead attempts" do
+    setup do
+      bypass = Bypass.open()
+      parent = self()
+      put_env(:manager_url, "http://127.0.0.1:#{bypass.port}")
+      put_env(:worker_token, "worker-reclaim-#{System.unique_integer([:positive])}")
+      put_env(:worker_executor, Omashiki.Worker.PollerTest.FakeExecutor)
+      put_env(:worker_poll_interval_ms, @poll_interval_ms)
+      put_env(:fake_executor_owner, parent)
+      put_env(:fake_executor_mode, :hang)
+      put_env(:fake_executor_result, {:ok, %Complete{kind: :none, changed_bytes: 0}})
+
+      offer = Map.put(sample_offer("none"), "attempt_id", Ecto.UUID.generate())
+      expect_register(bypass)
+      expect_accept(bypass, parent)
+      expect_poll_sequence(bypass, [offer], parent)
+
+      # The manager names every reported container dead, and one it was never
+      # told about.
+      Bypass.stub(bypass, "POST", "/internal/work/report", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        reported = Enum.map(Jason.decode!(body)["containers"], & &1["id"])
+        send(parent, {:report, reported})
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, Jason.encode!(%{reclaim: ["ffffffffffff" | reported]}))
+      end)
+
+      on_exit(fn ->
+        for id <- ["aaaaaaaaaaaa", "ffffffffffff"],
+            do: Omashiki.Runtime.ContainerEvents.publish(:removed, id)
+      end)
+
+      {:ok, bypass: bypass, offer: offer, slots: start_slots!()}
+    end
+
+    test "removes the container of an attempt the manager cancelled", %{
+      bypass: bypass,
+      offer: offer,
+      slots: slots
+    } do
+      put_env(:worker_reclaim_grace_ms, 0)
+
+      Bypass.stub(bypass, "POST", "/internal/work/heartbeat", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"cancel":true}))
+      end)
+
+      assert {:ok, poller} = start_poller(slots, runtime: Omashiki.Worker.PollerTest.FakeRuntime)
+      assert_receive {:accept, _}, 2_000
+      until(fn -> :sys.get_state(poller).in_flight == %{} end)
+
+      # The attempt is gone from the worker; its container is not.
+      publish_container("aaaaaaaaaaaa", "job-" <> offer["attempt_id"])
+      publish_container("ffffffffffff", nil)
+
+      assert_receive {:report, ["aaaaaaaaaaaa"]}, 2_000
+      assert_receive {:destroyed, "aaaaaaaaaaaa"}, 2_000
+      refute_receive {:destroyed, "ffffffffffff"}, 200
+    end
+
+    test "leaves a container younger than the grace period for a later report", %{
+      bypass: bypass,
+      offer: offer,
+      slots: slots
+    } do
+      put_env(:worker_reclaim_grace_ms, :timer.hours(1))
+      stub_heartbeat(bypass)
+
+      assert {:ok, poller} = start_poller(slots, runtime: Omashiki.Worker.PollerTest.FakeRuntime)
+      assert_receive {:accept, _}, 2_000
+
+      publish_container("aaaaaaaaaaaa", "job-" <> offer["attempt_id"])
+      assert_receive {:report, ["aaaaaaaaaaaa"]}, 2_000
+      refute_receive {:destroyed, _}, 200
+
+      put_env(:worker_reclaim_grace_ms, 0)
+      send(poller, :report)
+
+      assert_receive {:report, ["aaaaaaaaaaaa"]}, 2_000
+      assert_receive {:destroyed, "aaaaaaaaaaaa"}, 2_000
+    end
+  end
+
+  defmodule FakeRuntime do
+    def destroy(container_id) do
+      send(Application.get_env(:omashiki, :fake_executor_owner), {:destroyed, container_id})
+      :ok
+    end
+  end
+
+  defp publish_container(id, scope_id),
+    do: Omashiki.Runtime.ContainerEvents.publish(:created, id, scope_id)
 
   defmodule CompleteRaisingMint do
     def connect(scheme, host, port, opts), do: Mint.HTTP.connect(scheme, host, port, opts)

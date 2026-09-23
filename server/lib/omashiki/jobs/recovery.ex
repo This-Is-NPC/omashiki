@@ -58,7 +58,8 @@ defmodule Omashiki.Jobs.Recovery do
   # still looked alive. Once the attempt is failed its container is an orphan,
   # so reclaim it now. Only where this node runs both the database and Docker:
   # a worker-role node has no attempts to compare against and would see every
-  # container as an orphan.
+  # container as an orphan. A remote worker learns which of its containers are
+  # dead from its manager's answer to each report (`Omashiki.Worker.Poller`).
   defp remove_dead_containers do
     if Omashiki.Application.boot_role() == :embedded and
          Process.whereis(Omashiki.Runtime.ContainerManager) do

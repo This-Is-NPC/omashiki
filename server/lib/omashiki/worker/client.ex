@@ -62,9 +62,13 @@ defmodule Omashiki.Worker.Client do
         "containers" => Enum.map(containers, &Omashiki.Fleet.encode_container/1)
       })
 
-    with {:ok, %{status: status}} when status in 200..299 <-
-           request(client, "POST", "/internal/work/report", json_headers(client), body) do
-      :ok
+    with {:ok, %{status: status, body: resp}} when status in 200..299 <-
+           request(client, "POST", "/internal/work/report", json_headers(client), body),
+         {:ok, %{"reclaim" => reclaim}} when is_list(reclaim) <- Jason.decode(resp) do
+      {:ok, Enum.filter(reclaim, &is_binary/1)}
+    else
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :invalid_report_response}
     end
   end
 

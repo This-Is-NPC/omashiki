@@ -43,7 +43,7 @@ The worker resolves permitted host credential origins on its own machine.
 | --- | --- |
 | `POST /internal/work/register` | Register worker presence with a manager. |
 | `POST /internal/work/poll` | Request available work. |
-| `POST /internal/work/report` | Send free slots, capacity, and this house's containers. |
+| `POST /internal/work/report` | Send free slots, capacity, and this house's containers; receive the dead ones. |
 | `POST /internal/work/accept` | Accept an offer under worker capacity. |
 | `POST /internal/work/reject` | Refuse an unusable offer. |
 | `POST /internal/work/heartbeat` | Renew active execution information. |
@@ -69,9 +69,15 @@ The documented stale threshold is thirty seconds without a poll.
 `ContainerManager` publishes created, started, and removed events after each Docker call.
 A census every ten seconds corrects the list.
 The worker sends a report after each container change and every five seconds.
-A report to a house contains only containers of that house's in-flight attempts.
+A report to a house contains only containers of attempts the worker accepted from that house.
 The manager validates the report and records it with the worker presence.
 The report does not change a job, a lease, or capacity.
+
+The manager answers a report with the reported containers whose attempt is not provisioning or running.
+The worker removes each of those containers that is at least thirty seconds old and logs the removal.
+A younger container waits for a later report, so an attempt that is still starting keeps its container.
+The worker never removes a container it did not report to that manager.
+This reclaims the container of an attempt the manager failed while the worker kept running.
 
 Manager leases and worker slot ownership prevent duplicate acceptance and completion.
 A stale completion cannot replace the result of a later attempt.

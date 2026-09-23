@@ -82,6 +82,7 @@ Use an explicit `--manager-id` when several houses have similar URLs.
 [Follow the job](how-to-follow-and-retrieve-a-job.md) until it reaches a terminal status.
 If work waits, check worker logs, enrollment, available slots, and manager access.
 If provisioning fails, check the image catalog and credential paths on the worker.
+When the manager fails an attempt, the worker removes its container at its next report and logs the removal.
 
 To stop the deployment, run the applicable command on each host:
 
