@@ -23,7 +23,9 @@ Set the required values in `.env` on the relevant hosts:
 SECRET_KEY_BASE=replace-with-a-long-random-secret
 OMASHIKI_WORKER_TOKEN=replace-with-a-random-worker-token
 OMASHIKI_ENROLL_SECRET=replace-with-a-different-random-secret
-OMASHIKI_HOST_HOME=/home/worker-user
+OMASHIKI_UID=1000
+OMASHIKI_GID=1000
+OMASHIKI_DOCKER_GID=967
 OMASHIKI_MANAGER_URL=http://manager.lan:4010
 OMASHIKI_WORKER_URL=http://worker.lan:4012
 ```
@@ -31,8 +33,11 @@ OMASHIKI_WORKER_URL=http://worker.lan:4012
 Use the same `SECRET_KEY_BASE` for the manager and the worker.
 Use the same worker token for the manager and enrollment request.
 Use the same enrollment secret for the worker listener and enrollment request.
-Set `OMASHIKI_HOST_HOME` to the execution account's actual home path.
-The host Docker daemon must see the same paths as the worker container.
+On the worker host, set `OMASHIKI_UID` and `OMASHIKI_GID` to the output of `id -u` and `id -g`.
+Set `OMASHIKI_DOCKER_GID` to the output of `stat -c %g /var/run/docker.sock`.
+The worker runs as that user and group, in the group of the Docker socket.
+The worker uses your home directory, so the host Docker daemon sees the same paths as the worker container.
+If Compose runs from another account, set `OMASHIKI_HOST_HOME` to the home path of the account that `OMASHIKI_UID` names.
 
 For Compose on one host, use these URLs:
 
@@ -55,15 +60,26 @@ docker compose -f examples/compose.manager.yml up -d --build
 
 ## 3. Start the worker
 
+Create the cache and state directories on the worker host, so that they belong to your account:
+
+```bash
+mkdir -p ~/.cache/omashiki ~/.local/state/omashiki
+```
+
+The worker keeps its mirrors and job directories in `~/.cache/omashiki`.
+It keeps its enrollment in `~/.local/state/omashiki/workers/`, in a file named after the Compose project.
+The files that it writes there belong to your account.
+
 The worker reads host credential origins inside its container.
 If an environment uses host credentials, first [mount their origins](how-to-configure-model-access.md#mount-the-origins-into-a-container) into the worker.
 
 From the worker checkout:
 
 ```bash
-docker compose -f examples/compose.worker.yml up -d --build
+docker compose --env-file .env -f examples/compose.worker.yml up -d --build
 ```
 
+With `-f`, Compose reads `.env` from the directory of the Compose file, so name it with `--env-file`.
 The worker and its job containers share a Docker network that `compose.worker.yml` creates.
 Its name is the Compose project name followed by `-agents`.
 The worker reaches each job container on that network.
@@ -98,9 +114,10 @@ Run the manager and the worker at the same release. A worker refuses an offer th
 To stop the deployment, run the applicable command on each host:
 
 ```bash
-docker compose -f examples/compose.worker.yml stop
+docker compose --env-file .env -f examples/compose.worker.yml stop
 docker compose -f examples/compose.manager.yml stop
 ```
 
-Keep the volumes to retain the queue and enrollment state.
+Keep the manager volumes to retain the queue.
+The worker keeps its enrollment in `~/.local/state/omashiki/workers/` across restarts.
 Next, [share the worker between houses](how-to-share-workers-between-houses.md).

@@ -75,7 +75,7 @@ Compose reads `compose.override.yml` with `compose.yml`.
 With `-f`, Compose reads only the named files, so name both:
 
 ```bash
-docker compose -f examples/compose.worker.yml -f examples/compose.override.yml up -d --build
+docker compose --env-file .env -f examples/compose.worker.yml -f examples/compose.override.yml up -d --build
 ```
 
 The doctor then reports each host credential as readable.

@@ -239,10 +239,20 @@ def stop_leftover_harness_fake_llm(port: int = FAKE_LLM_PORT) -> None:
             pass
 
 
+def operator_env() -> dict[str, str]:
+    """The account the worker runs as, in the Docker socket's group."""
+    return {
+        "OMASHIKI_UID": str(os.getuid()),
+        "OMASHIKI_GID": str(os.getgid()),
+        "OMASHIKI_DOCKER_GID": str(os.stat("/var/run/docker.sock").st_gid),
+    }
+
+
 def teardown_compose_env() -> dict[str, str]:
+    """Compose interpolates the worker's required values even to take it down."""
     env = os.environ.copy()
-    env.setdefault("OMASHIKI_HOST_HOME", str(Path.home()))
-    env.setdefault("OMASHIKI_ENROLL_SECRET", "teardown")
+    for name in ("OMASHIKI_ENROLL_SECRET", "OMASHIKI_UID", "OMASHIKI_GID", "OMASHIKI_DOCKER_GID"):
+        env.setdefault(name, "teardown")
     return env
 
 
@@ -266,30 +276,17 @@ def cleanup_overture_fixture() -> None:
 
 
 def cleanup_compose_e2e_cache() -> None:
-    """Remove mirror/worktree state left by compose enroll hosts."""
-    host_home = Path.home()
-    mirrors = host_home / ".cache" / "omashiki" / "mirrors"
-    for host in ("host.docker.internal", "127.0.0.1"):
-        mirror_root = mirrors / host
-        if not mirror_root.exists():
-            continue
-        try:
-            shutil.rmtree(mirror_root)
-        except OSError:
-            run(
-                [
-                    "docker",
-                    "run",
-                    "--rm",
-                    "-v",
-                    f"{host_home}/.cache/omashiki:/cache",
-                    "alpine:3.22",
-                    "rm",
-                    "-rf",
-                    f"/cache/mirrors/{host}",
-                ],
-                check=False,
-            )
+    """Remove mirrors, work directories and enrollment left by the compose worker."""
+    home = Path.home()
+    mirrors = home / ".cache" / "omashiki" / "mirrors"
+    for directory in (
+        mirrors / "host.docker.internal",
+        mirrors / "127.0.0.1",
+        home / ".cache" / "omashiki" / "tmp" / WORKER_PROJECT,
+    ):
+        if directory.exists():
+            shutil.rmtree(directory)
+    (home / ".local" / "state" / "omashiki" / "workers" / f"{WORKER_PROJECT}.json").unlink(missing_ok=True)
 
 
 def teardown_leftovers() -> None:
@@ -373,7 +370,6 @@ class Harness:
         self.container_watch_thread: threading.Thread | None = None
         self.override_path: Path | None = None
         self.manager_override_path: Path | None = None
-        self.host_home = Path.home()
 
     def acquire_lock(self) -> None:
         if os.environ.get("OMASHIKI_E2E_LOCK_HELD") == "1":
@@ -406,7 +402,7 @@ class Harness:
             "OMASHIKI_ENROLL_SECRET": self.enroll_secret,
             "SECRET_KEY_BASE": "compose-worker-e2e-secret",
             "OMASHIKI_CONFIG_DIR": str(E2E_CONFIG.resolve().parent),
-            "OMASHIKI_HOST_HOME": str(self.host_home),
+            **operator_env(),
         })
         return env
 

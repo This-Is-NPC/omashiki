@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = Path(__file__).with_name("compose_worker_e2e.py")
 SPEC = importlib.util.spec_from_file_location("compose_worker_e2e", SCRIPT)
@@ -89,6 +91,41 @@ class ComposeWorkerHelperTests(unittest.TestCase):
         self.assertIn(MODULE.MANAGER_PROJECT, calls[0])
         self.assertIn("down", calls[1])
         self.assertIn(MODULE.WORKER_PROJECT, calls[1])
+
+    def test_teardown_env_fills_the_worker_required_values(self) -> None:
+        env = MODULE.teardown_compose_env()
+        for name in ("OMASHIKI_ENROLL_SECRET", "OMASHIKI_UID", "OMASHIKI_GID", "OMASHIKI_DOCKER_GID"):
+            self.assertTrue(env[name])
+
+    def test_operator_env_names_this_account(self) -> None:
+        if not Path("/var/run/docker.sock").exists():
+            self.skipTest("no Docker socket")
+        env = MODULE.operator_env()
+        self.assertEqual(env["OMASHIKI_UID"], str(os.getuid()))
+        self.assertEqual(env["OMASHIKI_GID"], str(os.getgid()))
+        self.assertEqual(
+            env["OMASHIKI_DOCKER_GID"],
+            str(Path("/var/run/docker.sock").stat().st_gid),
+        )
+
+    def test_cleanup_compose_e2e_cache_removes_worker_leftovers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            mirror = home / ".cache/omashiki/mirrors/host.docker.internal/abc"
+            work = home / ".cache/omashiki/tmp" / MODULE.WORKER_PROJECT / "omashiki-work"
+            kept = home / ".cache/omashiki/tmp/another-house"
+            state = home / ".local/state/omashiki/workers" / f"{MODULE.WORKER_PROJECT}.json"
+            for path in (mirror, work, kept, state.parent):
+                path.mkdir(parents=True)
+            state.write_text("{}", encoding="utf-8")
+
+            with mock.patch.object(MODULE.Path, "home", return_value=home):
+                MODULE.cleanup_compose_e2e_cache()
+
+            self.assertFalse(mirror.parent.exists())
+            self.assertFalse(work.parent.exists())
+            self.assertFalse(state.exists())
+            self.assertTrue(kept.exists())
 
     def test_manager_override_volume_uses_identical_repo_paths(self) -> None:
         repo = Path("/home/tester/Projects/omashiki")
