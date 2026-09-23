@@ -9,6 +9,9 @@
 #
 # Set OMASHIKI_HOST_HOME to this machine's home directory so Git mirrors and
 # worktrees resolve to the same paths as the host Docker daemon.
+#
+# Mount host credential origins read-only with a compose.override.yml:
+# see docs/how-to-configure-model-access.md.
 
 services:
   worker:

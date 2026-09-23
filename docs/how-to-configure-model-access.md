@@ -52,6 +52,34 @@ A token refresh can update that copy.
 Omashiki does not copy the change back to the source credential file.
 If authentication expires, authenticate the agent again on the execution machine.
 
+### Mount the origins into a container
+
+The house in `compose.yml` and the worker in `examples/compose.worker.yml` read each origin inside their container.
+Both containers use the host home directory as `HOME`, so `~/` names the same path inside and outside.
+Mount the directory of each origin read-only at that path.
+Create `compose.override.yml` beside the Compose file:
+
+```yaml
+services:
+  omashiki:
+    volumes:
+      - ${OMASHIKI_HOST_HOME:-${HOME}}/.local/share/opencode:${OMASHIKI_HOST_HOME:-${HOME}}/.local/share/opencode:ro
+      - ${OMASHIKI_HOST_HOME:-${HOME}}/.config/opencode:${OMASHIKI_HOST_HOME:-${HOME}}/.config/opencode:ro
+```
+
+For the worker, name the service `worker`.
+Add one line for each origin directory, such as `.claude` or `.codex`.
+Mount the directory, not the file. A login refresh replaces the file, and a file mount keeps the old one.
+
+Compose reads `compose.override.yml` with `compose.yml`.
+With `-f`, Compose reads only the named files, so name both:
+
+```bash
+docker compose -f examples/compose.worker.yml -f examples/compose.override.yml up -d --build
+```
+
+The doctor then reports each host credential as readable.
+
 ## Check access
 
 [Submit a small job](how-to-submit-a-job.md) with the configured environment.

@@ -54,6 +54,9 @@ docker compose -f examples/compose.manager.yml up -d --build
 
 ## 3. Start the worker
 
+The worker reads host credential origins inside its container.
+If an environment uses host credentials, first [mount their origins](how-to-configure-model-access.md#mount-the-origins-into-a-container) into the worker.
+
 From the worker checkout:
 
 ```bash

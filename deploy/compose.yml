@@ -7,6 +7,9 @@
 #
 # .env may also set OMASHIKI_VERSION (default latest) and OMASHIKI_PORT
 # (default 4010). See docs/how-to-install-from-the-image.md.
+#
+# Mount host credential origins read-only with a compose.override.yml:
+# see docs/how-to-configure-model-access.md.
 
 services:
   db:

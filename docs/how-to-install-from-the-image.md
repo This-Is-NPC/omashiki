@@ -49,18 +49,8 @@ The house never pulls an agent image, so build it or pull it yourself with `dock
 
 The starter configuration uses your OpenCode login on this machine.
 Log in with OpenCode on this machine first.
-The house reads the login files inside its container, so mount them.
-Create `compose.override.yml` beside `compose.yml`:
-
-```yaml
-services:
-  omashiki:
-    volumes:
-      - ${HOME}/.local/share/opencode:${HOME}/.local/share/opencode:ro
-      - ${HOME}/.config/opencode:${HOME}/.config/opencode:ro
-```
-
-Compose reads this file with `compose.yml`.
+The house reads the login files inside its container.
+[Mount them into the container](how-to-configure-model-access.md#mount-the-origins-into-a-container) with `compose.override.yml`.
 For other agents and for gateway access, see [configure model access](how-to-configure-model-access.md).
 
 ## 4. Start the house
