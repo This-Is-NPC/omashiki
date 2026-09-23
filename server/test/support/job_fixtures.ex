@@ -1,5 +1,5 @@
 defmodule Omashiki.JobFixtures do
-  alias Omashiki.Jobs.{Failure, Job, JobAttempt, Statuses}
+  alias Omashiki.Jobs.{Failure, Job, JobAttempt, SecretScan, Statuses}
   alias Omashiki.Repo
 
   def job_fixture(user, token, attrs \\ %{}) do
@@ -34,10 +34,11 @@ defmodule Omashiki.JobFixtures do
           status: status,
           current_attempt: 1,
           queued_at: if(status == "blocked", do: nil, else: now),
-          started_at: if(status in ~w(provisioning running succeeded failed), do: now),
+          started_at: if(status in ~w(provisioning running review succeeded failed), do: now),
           finished_at: if(Statuses.terminal?(status), do: now),
           terminal_result: if(status == "succeeded", do: %{"ok" => true}),
-          terminal_error: fixture_error(status)
+          terminal_error: fixture_error(status),
+          review: fixture_review(status)
         },
         attrs
       )
@@ -51,8 +52,8 @@ defmodule Omashiki.JobFixtures do
       finished_at: if(Statuses.terminal?(status), do: now),
       result: if(status == "succeeded", do: %{"ok" => true}),
       error: fixture_error(status),
-      started_at: if(status in ~w(provisioning running succeeded failed), do: now),
-      lease_token: if(Statuses.active?(status), do: "fixture-lease"),
+      started_at: if(status in ~w(provisioning running review succeeded failed), do: now),
+      lease_token: if(Statuses.active?(status) or status == "review", do: "fixture-lease"),
       lease_expires_at: if(Statuses.active?(status), do: DateTime.add(now, 60, :second)),
       capacity_reserved: Statuses.active?(status),
       branch: if(status == "succeeded", do: "feat-fixture-run-001"),
@@ -68,4 +69,25 @@ defmodule Omashiki.JobFixtures do
   defp fixture_error("failed"), do: Failure.error(:failed)
   defp fixture_error("cancelled"), do: Failure.error(:cancelled)
   defp fixture_error(_status), do: nil
+
+  # A held job: gitleaks found one GitHub token in notes.txt.
+  defp fixture_review("review") do
+    finding = %SecretScan.Finding{
+      file: "notes.txt",
+      line: 3,
+      rule_id: "github-pat",
+      description: "GitHub Personal Access Token",
+      match: "export GH=REDACTED",
+      fingerprint: String.duplicate("f", 64)
+    }
+
+    %{
+      "error" =>
+        Failure.error({:finalization_failed, {:secret_found, [finding]}}, "finalization"),
+      "node" => "worker-a",
+      "decision" => nil
+    }
+  end
+
+  defp fixture_review(_status), do: nil
 end

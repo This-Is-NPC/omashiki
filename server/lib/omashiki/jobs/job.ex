@@ -31,7 +31,6 @@ defmodule Omashiki.Jobs.Job do
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
-  @statuses ~w(blocked queued provisioning running succeeded failed cancelled)
   @admission_fields [
     :user_id,
     :api_token_id,
@@ -59,7 +58,8 @@ defmodule Omashiki.Jobs.Job do
     :finished_at,
     :terminal_result,
     :terminal_error,
-    :dependency_artifacts
+    :dependency_artifacts,
+    :review
   ]
 
   schema "jobs" do
@@ -86,6 +86,7 @@ defmodule Omashiki.Jobs.Job do
     field :terminal_result, :map
     field :terminal_error, :map
     field :dependency_artifacts, Omashiki.Jobs.JsonValue
+    field :review, :map
 
     belongs_to :user, Omashiki.Accounts.User
     belongs_to :api_token, Omashiki.ApiTokens.Token
@@ -120,7 +121,7 @@ defmodule Omashiki.Jobs.Job do
       :current_attempt
     ])
     |> validate_repository_shape()
-    |> validate_inclusion(:status, @statuses)
+    |> validate_inclusion(:status, Omashiki.Jobs.Statuses.all())
     |> validate_number(:priority, greater_than_or_equal_to: 0, less_than_or_equal_to: 3)
     |> validate_number(:current_attempt, greater_than: 0)
     |> unique_constraint([:user_id, :idempotency_key])
@@ -128,6 +129,7 @@ defmodule Omashiki.Jobs.Job do
     |> foreign_key_constraint(:api_token_id)
     |> foreign_key_constraint(:api_token_id, name: :jobs_api_token_owner_fkey)
     |> check_constraint(:status, name: :jobs_terminal_shape)
+    |> check_constraint(:review, name: :jobs_review_shape)
   end
 
   defp validate_repository_shape(changeset) do

@@ -50,14 +50,8 @@ defmodule Omashiki.Jobs.JobEvent do
     ])
     |> validate_number(:attempt, greater_than: 0)
     |> validate_number(:sequence, greater_than: 0)
-    |> validate_inclusion(
-      :outcome,
-      ~w(blocked queued provisioning running succeeded failed cancelled)
-    )
-    |> validate_inclusion(
-      :step,
-      ~w(blocked queued provisioning running succeeded failed cancelled)
-    )
+    |> validate_inclusion(:outcome, Omashiki.Jobs.Statuses.all())
+    |> validate_inclusion(:step, Omashiki.Jobs.Statuses.all())
     |> validate_length(:correlation_id, min: 1, max: 255)
     |> unique_constraint([:job_id, :sequence])
     |> foreign_key_constraint(:job_id)

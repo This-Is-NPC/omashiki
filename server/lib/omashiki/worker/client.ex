@@ -72,17 +72,33 @@ defmodule Omashiki.Worker.Client do
     end
   end
 
-  def heartbeat(%__MODULE__{} = client, %Execution{} = execution) do
+  def heartbeat(%__MODULE__{} = client, %Execution{} = execution),
+    do: post_heartbeat(client, execution, %{})
+
+  @doc """
+  Ask what to do with output held for review: `:ok` keeps it, `:publish`
+  publishes it, `:cancel` removes it. It renews no lease.
+  """
+  def held(%__MODULE__{} = client, %Execution{} = execution),
+    do: post_heartbeat(client, execution, %{"held" => true})
+
+  defp post_heartbeat(client, execution, extra) do
     body =
-      Jason.encode!(%{
-        "attempt_id" => execution.attempt_id,
-        "lease_token" => execution.lease_token
-      })
+      Jason.encode!(
+        Map.merge(extra, %{
+          "attempt_id" => execution.attempt_id,
+          "lease_token" => execution.lease_token
+        })
+      )
 
     with {:ok, %{status: status, body: resp}} when status in 200..299 <-
            request(client, "POST", "/internal/work/heartbeat", json_headers(client), body),
-         {:ok, %{"cancel" => cancel?}} <- Jason.decode(resp) do
-      if cancel?, do: :cancel, else: :ok
+         {:ok, %{"cancel" => cancel?} = answer} <- Jason.decode(resp) do
+      cond do
+        cancel? -> :cancel
+        answer["publish"] == true -> :publish
+        true -> :ok
+      end
     end
   end
 
@@ -134,6 +150,24 @@ defmodule Omashiki.Worker.Client do
     end
   end
 
+  @doc """
+  Upload the archive of a files complete to the manager and drop its local
+  path. Any other complete, or a failed upload, is returned unchanged: the
+  manager then refuses a files complete whose blob it lacks.
+  """
+  def upload_blob(%__MODULE__{} = client, job_id, %Complete{kind: :files} = complete) do
+    with path when is_binary(path) <- complete.blob_path,
+         {:ok, binary} <- File.read(path),
+         digest = complete.blob_digest || sha256_hex(binary),
+         :ok <- put_blob(client, job_id, digest, binary) do
+      %{complete | blob_digest: digest, blob_path: nil}
+    else
+      _ -> complete
+    end
+  end
+
+  def upload_blob(%__MODULE__{}, _job_id, %Complete{} = complete), do: complete
+
   def complete(%__MODULE__{} = client, %Execution{} = execution, %Complete{} = complete) do
     body =
       Jason.encode!(%{
@@ -147,6 +181,8 @@ defmodule Omashiki.Worker.Client do
       :ok
     end
   end
+
+  defp sha256_hex(binary), do: :crypto.hash(:sha256, binary) |> Base.encode16(case: :lower)
 
   defp json_headers(%__MODULE__{} = client) do
     auth_headers(client) ++ [{"content-type", "application/json"}]

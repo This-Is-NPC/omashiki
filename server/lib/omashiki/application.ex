@@ -74,7 +74,7 @@ defmodule Omashiki.Application do
       Omashiki.SupplyChain.SocketBridge,
       # After the endpoint: the doctor's route check calls the house back.
       Omashiki.Doctor.Monitor
-    ] ++ recovery_children()
+    ] ++ recovery_children() ++ held_output_children()
   end
 
   defp manager_children do
@@ -110,7 +110,7 @@ defmodule Omashiki.Application do
       Omashiki.Worker.Enroll.Listener,
       Omashiki.Worker.Slots,
       Omashiki.Worker.Poller
-    ]
+    ] ++ held_output_children()
   end
 
   defp manager_oban_child do
@@ -121,6 +121,13 @@ defmodule Omashiki.Application do
   defp recovery_children do
     if Application.get_env(:omashiki, :enable_job_recovery, true),
       do: [Omashiki.Jobs.Recovery],
+      else: []
+  end
+
+  # A node that runs attempts settles the output it holds for review.
+  defp held_output_children do
+    if Application.get_env(:omashiki, :enable_held_output_sweeper, true),
+      do: [Omashiki.Jobs.HeldOutput.Sweeper],
       else: []
   end
 

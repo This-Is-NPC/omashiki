@@ -69,7 +69,7 @@ defmodule Omashiki.Cli.TokenTest do
       auth(:none)
 
       assert failed!(~w(create --name demo --env * --scopes admin)) =~
-               "scopes must be read, submit, and/or cancel"
+               "scopes must be among read, submit, cancel, review"
 
       assert failed!(~w(create --name demo --env * --scopes read --ttl-days 100000)) =~
                "expiry of 1 to"

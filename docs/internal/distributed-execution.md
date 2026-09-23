@@ -46,8 +46,8 @@ The worker resolves permitted host credential origins on its own machine.
 | `POST /internal/work/report` | Send free slots, capacity, and this house's containers; receive the dead ones. |
 | `POST /internal/work/accept` | Accept an offer under worker capacity. |
 | `POST /internal/work/reject` | Refuse an unusable offer. |
-| `POST /internal/work/heartbeat` | Renew active execution information. |
-| `POST /internal/work/complete` | Return a fenced terminal completion. |
+| `POST /internal/work/heartbeat` | Renew active execution information. With `held: true`, ask what to do with output held for review. |
+| `POST /internal/work/complete` | Return a fenced completion: terminal, or output held for review. |
 | `PUT /internal/work/blobs/{job_id}` | Upload a file result before completion. |
 
 Worker authentication is separate from operator API authentication.
@@ -100,6 +100,11 @@ A failed manager connection does not remove another house's work.
 | `git` | Validate and publish to the captured remote. | Record branch and revision metadata. |
 | `files` | Create and upload the validated archive. | Verify its digest and store the result. |
 | `none` | Return completion metadata. | Record the terminal result. |
+
+Output held for review stays on the worker that produced it.
+The worker completes the attempt with a `review` complete, and keeps a record of the output.
+The answer to a heartbeat with `held: true` says `publish` after an approval and `cancel` after a rejection or a cancellation.
+The worker then publishes to the manager that offered the attempt, or removes the output.
 
 A files completion cannot refer only to a worker-local path.
 The manager must have the blob before it accepts success.

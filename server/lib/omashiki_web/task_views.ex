@@ -85,13 +85,13 @@ defmodule OmashikiWeb.TaskViews do
   title = "Board"
   layout = "board"
   group_by = "status"
-  filter = { status = ["queued", "provisioning", "running", "succeeded", "failed", "blocked", "cancelled"], since = "24h" }
+  filter = { status = ["queued", "provisioning", "running", "review", "succeeded", "failed", "blocked", "cancelled"], since = "24h" }
   fields = ["title", "environment", "worker", "step", "duration"]
 
   [[views]]
   name = "active"
   title = "Active"
-  filter = { status = ["queued", "provisioning", "running", "blocked"] }
+  filter = { status = ["queued", "provisioning", "running", "review", "blocked"] }
   fields = ["status", "title", "environment", "worker", "step", "wait", "duration"]
   blocks = ["status_counts", "slots", "workers"]
 

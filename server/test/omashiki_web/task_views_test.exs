@@ -214,10 +214,10 @@ defmodule OmashikiWeb.TaskViewsTest do
     assert %View{name: "board", layout: :board, group_by: :status} = board
 
     assert board.filter.status ==
-             ~w(queued provisioning running succeeded failed blocked cancelled)
+             ~w(queued provisioning running review succeeded failed blocked cancelled)
 
     assert %View{name: "active", blocks: [:status_counts | _]} = active
-    assert active.filter.status == ~w(queued provisioning running blocked)
+    assert active.filter.status == ~w(queued provisioning running review blocked)
 
     assert {:ok, [%View{name: "board"} = example_board | _], "board"} =
              @example |> File.read!() |> TaskViews.parse()

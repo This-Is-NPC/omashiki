@@ -2,7 +2,7 @@ defmodule Mix.Tasks.Omashiki.Token do
   @moduledoc """
   Issues, lists, and revokes API tokens and sets their webhook.
 
-      mix omashiki.token create --name NAME --env ENV[,ENV] --scopes read,submit[,cancel]
+      mix omashiki.token create --name NAME --env ENV[,ENV] --scopes read,submit[,cancel][,review]
                                 [--max-active N] [--ttl-days N] [--user USERNAME]
       mix omashiki.token list [--user USERNAME]
       mix omashiki.token revoke ID [--user USERNAME]

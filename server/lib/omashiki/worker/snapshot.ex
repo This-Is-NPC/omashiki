@@ -7,8 +7,10 @@ defmodule Omashiki.Worker.Snapshot do
 
   @behaviour Omashiki.Worker.Executor
 
+  require Logger
+
   alias Omashiki.Harness.CliJson
-  alias Omashiki.Jobs.{Job, JobAttempt, Runner}
+  alias Omashiki.Jobs.{Failure, HeldOutput, Job, JobAttempt, Runner}
   alias Omashiki.Worker.{Complete, Offer}
 
   @sinks ~w(git files none)
@@ -62,10 +64,10 @@ defmodule Omashiki.Worker.Snapshot do
          state <- run_pre_steps(state, pre_steps, timeout_ms),
          state <- run_harness(state),
          state <- run_post_steps(state, post_steps, timeout_ms) do
-      result =
+      {result, state} =
         case state.outcome do
-          :success -> finalize_success(state)
-          :failure -> {:error, state.error || :attempt_failed}
+          :success -> finalize_success(state, offer)
+          :failure -> {{:error, state.error || :attempt_failed}, state}
         end
 
       destroy_container(state)
@@ -73,12 +75,41 @@ defmodule Omashiki.Worker.Snapshot do
     end
   end
 
-  defp finalize_success(state) do
+  defp finalize_success(state, offer) do
     opts = Keyword.put(state.opts, :update_task_branch, true)
+    summary = Runner.harness_summary(state.harness_result)
 
     case state.container_mod.finalize(state.container, state.job, opts) do
-      {:ok, final} -> {:ok, complete_from_finalize(state.sink, final, state)}
-      {:error, reason} -> {:error, reason}
+      {:ok, final} ->
+        {{:ok, Complete.from_finalize(state.sink, final, summary)}, state}
+
+      {:error, reason} ->
+        if HeldOutput.review?(state.environment, reason),
+          do: hold(state, offer, reason, summary),
+          else: {{:error, reason}, state}
+    end
+  end
+
+  # The held output outlives the container: only the container is destroyed.
+  defp hold(state, offer, reason, summary) do
+    held =
+      HeldOutput.hold(state.job, state.attempt,
+        token: offer.lease_token,
+        manager_id: offer.manager_id,
+        sink: state.sink,
+        artifact: state.container.artifact,
+        summary: summary
+      )
+
+    case held do
+      {:ok, _record} ->
+        error = Failure.error({:finalization_failed, reason}, "finalization")
+        container = Map.delete(state.container, :artifact)
+        {{:ok, Complete.from_error(:review, error)}, %{state | container: container}}
+
+      {:error, why} ->
+        Logger.warning("output of attempt #{offer.attempt_id} could not be held: #{inspect(why)}")
+        {{:error, reason}, state}
     end
   end
 
@@ -300,44 +331,6 @@ defmodule Omashiki.Worker.Snapshot do
        do: :ok
 
   defp validate_offer(_), do: {:error, :invalid_offer}
-
-  defp complete_from_finalize("git", final, state) do
-    %Complete{
-      kind: :git,
-      remote: fetch_key(final, :remote),
-      branch: fetch_key(final, :branch),
-      base_sha: fetch_key(final, :base_sha),
-      head_sha: fetch_key(final, :head_sha),
-      summary: Runner.harness_summary(state.harness_result),
-      changes: fetch_key(final, :changes)
-    }
-  end
-
-  defp complete_from_finalize("files", final, _state) do
-    result = fetch_key(final, :result) || %{}
-
-    %Complete{
-      kind: :files,
-      changed_bytes: Map.get(result, "changed_bytes"),
-      blob_digest: Map.get(result, "blob_digest"),
-      blob_path: Map.get(result, "blob_path")
-    }
-  end
-
-  defp complete_from_finalize("none", final, _state) do
-    result = fetch_key(final, :result) || %{}
-
-    %Complete{
-      kind: :none,
-      changed_bytes: Map.get(result, "changed_bytes", 0)
-    }
-  end
-
-  defp fetch_key(map, key) when is_map(map) do
-    Map.get(map, key) || Map.get(map, Atom.to_string(key))
-  end
-
-  defp fetch_key(_, _), do: nil
 
   defp short_sha256(value) when is_binary(value) do
     :crypto.hash(:sha256, value) |> Base.encode16(case: :lower) |> String.slice(0, 16)

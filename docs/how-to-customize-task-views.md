@@ -94,7 +94,8 @@ No key starts an action, such as cancel or retry.
 | `worker` | A machine ID or a list of machine IDs. | The machine of the current attempt. |
 | `since` | A duration, such as `"30m"`, `"24h"`, or `"7d"`. | Jobs admitted within this duration. |
 
-The statuses are `blocked`, `queued`, `provisioning`, `running`, `succeeded`, `failed`, and `cancelled`.
+The statuses are `blocked`, `queued`, `provisioning`, `running`, `review`, `succeeded`, `failed`, and `cancelled`.
+A job in `review` holds output that the secret scan refused until an operator approves or rejects it.
 
 ## Status order
 
@@ -112,10 +113,10 @@ Without it, the screen rejects the file and names the view.
 [[views]]
 name = "board"
 layout = "board"
-filter = { status = ["queued", "provisioning", "running", "succeeded", "failed", "blocked", "cancelled"], since = "24h" }
+filter = { status = ["queued", "provisioning", "running", "review", "succeeded", "failed", "blocked", "cancelled"], since = "24h" }
 ```
 
-This board shows seven columns, from `queued` on the left to `cancelled` on the right.
+This board shows eight columns, from `queued` on the left to `cancelled` on the right.
 
 ## Fields
 

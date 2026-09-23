@@ -80,6 +80,7 @@ A job payload cannot add registry declarations.
 | `resources` | CPU, memory, and PID limits. |
 | `policy` | Package policy mode and related settings. |
 | `mcp_servers` | Declared tool server URLs and headers. |
+| `secret_scan` | `review` (the default) or `block`: what a secret found in the output does. |
 
 A `restricted` environment runs on the Docker network named by `OMASHIKI_AGENT_NETWORK_MODE`.
 Without that variable it has no network, and an HTTP harness such as OpenCode cannot start.
@@ -90,6 +91,10 @@ A house in a container must be attached to the network. [`deploy/compose.yml`](.
 
 Agent containers reach the house gateway, tools proxy, and package proxy at `OMASHIKI_HOUSE_URL`, such as `http://omashiki:4000` on a network they share.
 Without it, they reach the house through the host, at `host.docker.internal` on the house port.
+
+With `secret_scan = "review"`, output in which gitleaks finds a secret waits in status `review` on the node that produced it, until an operator approves or rejects it.
+With `secret_scan = "block"`, the job fails with `secret_found` and the output is removed.
+[Output checks](security-and-limits.md#output-checks) describes both.
 
 A lifecycle step uses `argv`, `condition`, and `timeout_ms`.
 Commands must use declared executables.

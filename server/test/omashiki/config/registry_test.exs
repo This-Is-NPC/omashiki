@@ -147,6 +147,7 @@ defmodule Omashiki.Config.RegistryTest do
                credentials: [%Credential{name: "provider"}],
                timeout_ms: 1_800_000,
                network: "restricted",
+               secret_scan: "review",
                pre_steps: [%Step{argv: ["mise", "install", "--yes"], condition: "always"}],
                post_steps: [%Step{condition: "on_success"}],
                resources: %{nano_cpus: 2_000_000_000, memory_bytes: 2_147_483_648}
@@ -1066,6 +1067,18 @@ defmodule Omashiki.Config.RegistryTest do
     invalid = put_in(fixture(ctx), ["environments", "opencode", "network"], "host")
 
     assert_raise Error, ~r/allowlist policy requires restricted network/, fn ->
+      Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
+    end
+  end
+
+  test "secret_scan is review or block", ctx do
+    blocking = put_in(fixture(ctx), ["environments", "opencode", "secret_scan"], "block")
+    assert :ok = Config.load_map!(blocking, path: Path.join(ctx.root, "omashiki.toml"))
+    assert [%Environment{secret_scan: "block"}] = Config.environments()
+
+    invalid = put_in(fixture(ctx), ["environments", "opencode", "secret_scan"], "off")
+
+    assert_raise Error, ~r/environments.opencode.secret_scan must be one of review, block/, fn ->
       Config.load_map!(invalid, path: Path.join(ctx.root, "omashiki.toml"))
     end
   end

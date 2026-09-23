@@ -214,21 +214,8 @@ defmodule Omashiki.Worker.Poller do
 
   defp complete_from_result(client, offer, result) do
     case result do
-      {:ok, %Complete{kind: :files} = complete} ->
-        maybe_upload_blob(complete, client, offer)
-
-      {:ok, %Complete{} = complete} ->
-        complete
-
-      {:error, reason} ->
-        error = Failure.error(reason)
-
-        %Complete{
-          kind: :error,
-          code: error["code"],
-          message: error["message"],
-          details: error["details"]
-        }
+      {:ok, %Complete{} = complete} -> Client.upload_blob(client, offer.job_id, complete)
+      {:error, reason} -> Complete.from_error(:error, Failure.error(reason))
     end
   end
 
@@ -340,17 +327,6 @@ defmodule Omashiki.Worker.Poller do
   end
 
   defp adopt_in_flight(next, _previous), do: next
-
-  defp maybe_upload_blob(%Complete{kind: :files} = complete, client, %Offer{job_id: job_id}) do
-    with path when is_binary(path) <- complete.blob_path,
-         {:ok, binary} <- File.read(path),
-         digest when is_binary(digest) <- complete.blob_digest || sha256_hex(binary),
-         :ok <- Client.put_blob(client, job_id, digest, binary) do
-      %{complete | blob_digest: digest, blob_path: nil}
-    else
-      _ -> complete
-    end
-  end
 
   defp execution_from(%Offer{} = offer) do
     %Execution{
@@ -546,9 +522,5 @@ defmodule Omashiki.Worker.Poller do
       {:ok, name} -> to_string(name)
       _ -> "unknown"
     end
-  end
-
-  defp sha256_hex(binary) do
-    :crypto.hash(:sha256, binary) |> Base.encode16(case: :lower)
   end
 end

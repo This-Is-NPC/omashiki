@@ -95,6 +95,8 @@ defmodule OmashikiWeb.Router do
     get "/jobs/:id/result", JobsController, :result
     post "/jobs/:id/cancel", JobsController, :cancel
     post "/jobs/:id/retry", JobsController, :retry
+    post "/jobs/:id/approve", JobsController, :approve
+    post "/jobs/:id/reject", JobsController, :reject
     get "/jobs/:id/webhook-deliveries", WebhookDeliveriesController, :index
 
     post "/jobs/:id/webhook-deliveries/:delivery_id/redeliver",

@@ -6,7 +6,6 @@ defmodule Omashiki.Jobs.JobAttempt do
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
-  @statuses ~w(blocked queued provisioning running succeeded failed cancelled)
 
   schema "job_attempts" do
     field :number, :integer
@@ -65,7 +64,7 @@ defmodule Omashiki.Jobs.JobAttempt do
     ])
     |> validate_required([:job_id, :number, :status])
     |> validate_number(:number, greater_than: 0)
-    |> validate_inclusion(:status, @statuses)
+    |> validate_inclusion(:status, Omashiki.Jobs.Statuses.all())
     |> unique_constraint([:job_id, :number])
     |> unique_constraint(:oban_job_id)
     |> foreign_key_constraint(:job_id)

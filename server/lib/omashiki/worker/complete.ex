@@ -1,8 +1,10 @@
 defmodule Omashiki.Worker.Complete do
   @moduledoc """
-  Terminal execution result keyed by sink.
+  Execution result keyed by sink.
 
-  JSON-serialisable sum type for the worker transport protocol.
+  JSON-serialisable sum type for the worker transport protocol. `:review`
+  reports output held for review on the node: it carries the `secret_found`
+  failure a rejection records.
   """
 
   import Ecto.Query
@@ -12,7 +14,7 @@ defmodule Omashiki.Worker.Complete do
 
   import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_unsuccessful: 1]
 
-  @type kind :: :git | :files | :none | :error
+  @type kind :: :git | :files | :none | :error | :review
 
   @type t :: %__MODULE__{
           kind: kind(),
@@ -46,18 +48,15 @@ defmodule Omashiki.Worker.Complete do
     :changes
   ]
 
-  @doc "Build a complete value from a terminal job row."
+  @doc "Build a complete value from the row of a job whose attempt was released."
   def from_job(%Job{status: "succeeded"} = job), do: from_succeeded_job(job)
 
+  def from_job(%Job{status: "review", review: %{"error" => error}}),
+    do: from_error(:review, error)
+
   def from_job(%Job{status: status, terminal_error: error})
-      when is_unsuccessful(status) and is_map(error) do
-    %__MODULE__{
-      kind: :error,
-      code: error_code(error),
-      message: error_message(error),
-      details: error_details(error)
-    }
-  end
+      when is_unsuccessful(status) and is_map(error),
+      do: from_error(:error, error)
 
   def from_job(%Job{status: status}) when is_terminal(status) do
     %__MODULE__{
@@ -65,6 +64,54 @@ defmodule Omashiki.Worker.Complete do
       code: "terminal_without_error",
       message: "job reached #{status} without terminal_error",
       details: nil
+    }
+  end
+
+  @doc "Build an `:error` or `:review` complete from a failure record."
+  def from_error(kind, error) when kind in [:error, :review] do
+    %__MODULE__{
+      kind: kind,
+      code: error_code(error),
+      message: error_message(error),
+      details: error_details(error)
+    }
+  end
+
+  @doc "Build the complete of a sink from what its finalization returned."
+  def from_finalize("git", final, summary) do
+    %__MODULE__{
+      kind: :git,
+      remote: fetch_key(final, :remote),
+      branch: fetch_key(final, :branch),
+      base_sha: fetch_key(final, :base_sha),
+      head_sha: fetch_key(final, :head_sha),
+      summary: summary,
+      changes: fetch_key(final, :changes)
+    }
+  end
+
+  def from_finalize("files", final, _summary) do
+    result = fetch_key(final, :result) || %{}
+
+    %__MODULE__{
+      kind: :files,
+      changed_bytes: Map.get(result, "changed_bytes"),
+      blob_digest: Map.get(result, "blob_digest"),
+      blob_path: Map.get(result, "blob_path")
+    }
+  end
+
+  def from_finalize("none", final, _summary) do
+    result = fetch_key(final, :result) || %{}
+    %__MODULE__{kind: :none, changed_bytes: Map.get(result, "changed_bytes", 0)}
+  end
+
+  @doc "The failure record an `:error` or `:review` complete carries."
+  def error(%__MODULE__{kind: kind} = complete) when kind in [:error, :review] do
+    %{
+      "code" => complete.code,
+      "message" => complete.message,
+      "details" => complete.details || %{}
     }
   end
 
@@ -98,9 +145,9 @@ defmodule Omashiki.Worker.Complete do
     %{"kind" => "none", "changed_bytes" => changed_bytes}
   end
 
-  def to_map(%__MODULE__{kind: :error} = complete) do
+  def to_map(%__MODULE__{kind: kind} = complete) when kind in [:error, :review] do
     base = %{
-      "kind" => "error",
+      "kind" => Atom.to_string(kind),
       "code" => complete.code,
       "message" => complete.message
     }
@@ -139,11 +186,11 @@ defmodule Omashiki.Worker.Complete do
     {:ok, %__MODULE__{kind: :none, changed_bytes: changed_bytes}}
   end
 
-  def from_map(%{"kind" => "error", "code" => code, "message" => message} = map)
-      when is_binary(code) and is_binary(message) do
+  def from_map(%{"kind" => kind, "code" => code, "message" => message} = map)
+      when kind in ["error", "review"] and is_binary(code) and is_binary(message) do
     {:ok,
      %__MODULE__{
-       kind: :error,
+       kind: String.to_existing_atom(kind),
        code: code,
        message: message,
        details: Map.get(map, "details")
@@ -244,6 +291,11 @@ defmodule Omashiki.Worker.Complete do
   defp error_details(%{"details" => details}) when is_map(details), do: details
   defp error_details(%{details: details}) when is_map(details), do: details
   defp error_details(_), do: nil
+
+  defp fetch_key(map, key) when is_map(map),
+    do: Map.get(map, key) || Map.get(map, Atom.to_string(key))
+
+  defp fetch_key(_map, _key), do: nil
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)

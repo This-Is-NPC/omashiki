@@ -20,6 +20,7 @@ curl --fail-with-body -sS -X POST \
 The house records cancellation before it interrupts active execution.
 Container cleanup can finish after the response.
 Cancellation does not reverse external tool actions that already completed.
+Cancelling a job in `review` removes the output it holds.
 
 Read the job again to confirm its terminal status.
 If it completed before cancellation, use the returned state as the result of the race.

@@ -115,8 +115,10 @@ defmodule Omashiki.Jobs.Runner do
 
   import Ecto.Query
 
+  require Logger
+
   alias Omashiki.Harness.CliJson
-  alias Omashiki.Jobs.{Failure, Job, JobAttempt, JobStep}
+  alias Omashiki.Jobs.{Failure, HeldOutput, Job, JobAttempt, JobStep}
   alias Omashiki.Repo
 
   @unsafe_executables ~w(sh bash dash zsh fish cmd powershell pwsh env xargs python python2 python3 node perl ruby php lua busybox make awk)
@@ -299,6 +301,10 @@ defmodule Omashiki.Jobs.Runner do
       end)
 
     case result do
+      # The held output outlives the container: cleanup removes the container alone.
+      {:ok, %{"held" => true}} ->
+        %{state | container: Map.delete(state.container, :artifact)}
+
       {:ok, %{"preserve_artifact" => true}} ->
         put_in(state, [:container, :preserve_artifact], true)
 
@@ -359,8 +365,10 @@ defmodule Omashiki.Jobs.Runner do
 
       {:error, reason} ->
         error = Failure.error({:finalization_failed, reason}, "finalization")
-        _ = Omashiki.Jobs.complete(state.attempt, lease_token(state), :failed, %{error: error})
-        {:error, reason}
+
+        if HeldOutput.review?(state.environment, reason),
+          do: hold(state, reason, error),
+          else: fail_finalization(state, reason, error)
     end
   end
 
@@ -395,6 +403,39 @@ defmodule Omashiki.Jobs.Runner do
 
   defp git_artifact?(%{artifact: %{task_branch: _}}), do: true
   defp git_artifact?(_), do: false
+
+  defp hold(state, reason, error) do
+    token = lease_token(state)
+
+    held =
+      HeldOutput.hold(state.job, state.attempt,
+        token: token,
+        sink: state.environment["sink"],
+        artifact: state.container.artifact,
+        summary: harness_summary(state.harness_result)
+      )
+
+    case held do
+      {:ok, record} ->
+        case Omashiki.Jobs.hold(state.attempt, token, error) do
+          {:ok, _attempt} ->
+            {:ok, %{"status" => "review", "held" => true}}
+
+          {:error, why} ->
+            HeldOutput.discard(record)
+            {:error, why}
+        end
+
+      {:error, why} ->
+        Logger.warning("output of attempt #{state.attempt.id} could not be held: #{inspect(why)}")
+        fail_finalization(state, reason, error)
+    end
+  end
+
+  defp fail_finalization(state, reason, error) do
+    _ = Omashiki.Jobs.complete(state.attempt, lease_token(state), :failed, %{error: error})
+    {:error, reason}
+  end
 
   defp run_command_step(state, step) do
     argv = step.input["argv"]

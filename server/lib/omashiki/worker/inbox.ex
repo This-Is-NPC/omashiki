@@ -50,6 +50,10 @@ defmodule Omashiki.Worker.Inbox do
     end
   end
 
+  @doc "Tell the node that holds an attempt's output what to do with it. Renews no lease."
+  def held(attempt_id, lease_token) when is_binary(attempt_id) and is_binary(lease_token),
+    do: {:ok, Jobs.held_command(attempt_id, lease_token)}
+
   @doc "Renew a lease after the worker accepts an offer; does not mark running."
   def accept(attempt_id, lease_token)
       when is_binary(attempt_id) and is_binary(lease_token) do
@@ -78,9 +82,8 @@ defmodule Omashiki.Worker.Inbox do
   def complete(attempt_id, lease_token, complete_map)
       when is_binary(attempt_id) and is_binary(lease_token) and is_map(complete_map) do
     with {:ok, complete} <- Complete.from_map(complete_map),
-         %JobAttempt{job_id: job_id} <- Repo.get(JobAttempt, attempt_id) || {:error, :not_found},
-         {:ok, status, attrs} <- completion_args(complete, job_id) do
-      Jobs.complete(attempt_id, lease_token, status, attrs)
+         %JobAttempt{job_id: job_id} <- Repo.get(JobAttempt, attempt_id) || {:error, :not_found} do
+      apply_complete(attempt_id, lease_token, complete, job_id)
     else
       {:error, _} = error -> error
       nil -> {:error, :not_found}
@@ -101,6 +104,15 @@ defmodule Omashiki.Worker.Inbox do
       path = Path.join(dir, "artifact.tar.gz")
       :ok = File.write!(path, binary)
       {:ok, path}
+    end
+  end
+
+  defp apply_complete(attempt_id, lease_token, %Complete{kind: :review} = complete, _job_id),
+    do: Jobs.hold(attempt_id, lease_token, Complete.error(complete))
+
+  defp apply_complete(attempt_id, lease_token, complete, job_id) do
+    with {:ok, status, attrs} <- completion_args(complete, job_id) do
+      Jobs.complete(attempt_id, lease_token, status, attrs)
     end
   end
 
@@ -152,16 +164,8 @@ defmodule Omashiki.Worker.Inbox do
      }}
   end
 
-  defp completion_args(%Complete{kind: :error} = complete, _job_id) do
-    {:ok, "failed",
-     %{
-       error: %{
-         "code" => complete.code,
-         "message" => complete.message,
-         "details" => complete.details || %{}
-       }
-     }}
-  end
+  defp completion_args(%Complete{kind: :error} = complete, _job_id),
+    do: {:ok, "failed", %{error: Complete.error(complete)}}
 
   defp blob_path_for(job_id, digest) when is_binary(digest) do
     path = Path.join([blob_root(), job_id, "artifact.tar.gz"])

@@ -78,10 +78,12 @@ Token issuance returns `200`, invalid credentials return `401`, and rate limitin
 An expired token returns `401` with `code` `token_expired`.
 Authenticated responses include `x-token-expires-at`.
 
-Scopes are `read`, `submit`, and `cancel`.
+Scopes are `read`, `submit`, `cancel`, and `review`.
 Submit, retry, and webhook redeliver require `submit`.
 Cancellation requires `cancel`.
+Approving and rejecting output held for review require `review`.
 Listing, inspection, events, and results require `read`.
+Grant `review` only to a client trusted to publish output in which gitleaks found secrets.
 A token that lacks a required scope receives `403` with `code` `insufficient_scope`.
 
 `allowed_environments` is a non-empty list of environment names, or `["*"]` for every registered environment.
@@ -124,6 +126,7 @@ Both require the `read` scope.
       "image": "omashiki/agent:latest",
       "timeout_ms": 1800000,
       "network": "restricted",
+      "secret_scan": "review",
       "capabilities": [],
       "resources": {"cpus": 2.0, "memory": "2GB", "pids": 256}
     }
@@ -141,6 +144,7 @@ It decides whether a job for that environment takes `repo`:
 | `none` | Omit it. A request with `repo` is rejected. |
 
 [Result sinks](configuration.md#result-sinks) describes the output of each sink.
+`secret_scan` is `review` or `block`: whether output with a secret waits for review or fails the job.
 
 ## Wait and listing
 
@@ -154,6 +158,36 @@ A successful result includes `summary`, `changes` (`files_changed`, `insertions`
 The page size is 50.
 Filter by `status`, `environment`, `repository`, `worker`, `correlation_id`, and `since`.
 An unknown `status` value returns HTTP `422` with `code` `invalid_status`.
+
+## Review held output
+
+A job in status `review` holds output in which gitleaks found secrets, and no other output check failed.
+Its `review` object in `GET /jobs/{id}` has:
+
+| Field | Meaning |
+| --- | --- |
+| `error` | The `secret_found` error that a rejection records. `error.details.findings` lists the findings, as in [job errors](#job-errors). |
+| `node` | The node that holds the output. |
+| `decision` | `null` until a decision, then `approve` or `reject`. |
+| `decided_by`, `decided_at` | Who decided, and when. |
+
+The object stays on the job after the decision.
+A retry clears it.
+
+`POST /jobs/{id}/approve` publishes the output.
+The job stays in `review` until the node that holds the output publishes it, then becomes `succeeded`.
+If publishing fails, the job fails with the publishing error.
+Approving again returns the job unchanged.
+
+`POST /jobs/{id}/reject` fails the job at once with its `secret_found` error, and the node removes the output.
+
+Both require the `review` scope and return the job.
+A job that is not in `review` returns `409` with `code` `invalid_transition`.
+`POST /jobs/{id}/cancel` also works on a job in review, and the node removes the output.
+[Output checks](security-and-limits.md#output-held-for-review) explains where the output waits.
+
+The job emits a `job.review` event with `error_code` and `error_message` when it enters review.
+The webhook comes when the job ends.
 
 ## Job errors
 
@@ -170,7 +204,7 @@ The object has a stable `code`, a readable `message`, and structured `details`.
 | `harness_unreachable_no_network` | An HTTP harness runs in a container without a network. |
 | `harness_exit` | The agent harness exited with a non-zero code. |
 | `agent_waiting_for_permission` | The agent or one of its subagents asked for an approval. `details` has the permission, its patterns, and `subagent`. |
-| `secret_found` | gitleaks found secrets in the output, which was not published. The message names up to three findings. `details.findings` lists up to 50, each with `file`, `line`, `rule_id`, `description`, a `match` with the secret replaced by `REDACTED`, and a stable `fingerprint`. `details.finding_count` counts them all. |
+| `secret_found` | gitleaks found secrets in the output, which was not published: the environment blocks such output, or an operator rejected it. The message names up to three findings. `details.findings` lists up to 50, each with `file`, `line`, `rule_id`, `description`, a `match` with the secret replaced by `REDACTED`, and a stable `fingerprint`. `details.finding_count` counts them all. |
 | `protected_path` | The output writes under `.git/`, `.ssh/`, or `.aws/`. `details.path` names the file. |
 | `symlink_path` | The output contains a symbolic link. `details.path` names it. |
 | `oversized_output` | The output changes more than the size limit. `details` has `changed_bytes` and `max_bytes`. |

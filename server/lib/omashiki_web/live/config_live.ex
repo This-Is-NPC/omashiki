@@ -378,7 +378,12 @@ defmodule OmashikiWeb.ConfigLive do
           </label>
           <fieldset class="flex flex-wrap gap-4 font-mono text-xs text-on-surface">
             <label :for={scope <- Token.allowed_scopes()} class="flex items-center gap-2">
-              <input type="checkbox" name="token[scopes][]" value={scope} checked={scope != "cancel"} />
+              <input
+                type="checkbox"
+                name="token[scopes][]"
+                value={scope}
+                checked={scope in ~w(read submit)}
+              />
               {scope}
             </label>
           </fieldset>

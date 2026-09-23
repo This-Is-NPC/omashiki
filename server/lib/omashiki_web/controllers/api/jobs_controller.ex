@@ -193,6 +193,51 @@ defmodule OmashikiWeb.Api.JobsController do
     end
   end
 
+  operation(:approve,
+    summary: "Approve output held for review",
+    description:
+      "Publish the output of a job in review. The job stays in review until the node that holds the output publishes it.",
+    security: [%{"bearer" => ["review"]}],
+    parameters: [
+      id: [in: :path, type: :string, required: true]
+    ],
+    responses: %{
+      200 => {"Approved", "application/json", Schemas.JobResponse},
+      404 => {"Missing", "application/problem+json", Schemas.Problem},
+      409 => {"Not in review", "application/problem+json", Schemas.Problem},
+      503 => {"Busy", "application/problem+json", Schemas.Problem}
+    }
+  )
+
+  def approve(conn, params), do: decide(conn, params, "approve", &Jobs.approve/2)
+
+  operation(:reject,
+    summary: "Reject output held for review",
+    description:
+      "Fail a job in review with its secret_found error. The node that holds the output removes it.",
+    security: [%{"bearer" => ["review"]}],
+    parameters: [
+      id: [in: :path, type: :string, required: true]
+    ],
+    responses: %{
+      200 => {"Rejected", "application/json", Schemas.JobResponse},
+      404 => {"Missing", "application/problem+json", Schemas.Problem},
+      409 => {"Not in review", "application/problem+json", Schemas.Problem},
+      503 => {"Busy", "application/problem+json", Schemas.Problem}
+    }
+  )
+
+  def reject(conn, params), do: decide(conn, params, "reject", &Jobs.reject/2)
+
+  defp decide(conn, params, action, decide) do
+    with {:ok, job} <- Api.get(param(params, :id), ApiConn.actor(conn)),
+         {:ok, decided} <- decide.(job, conn.assigns.current_user.username) do
+      ApiConn.audit(conn, conn.assigns[:current_token], action, job_id: decided.id)
+
+      json(conn, %{data: job_json(decided)})
+    end
+  end
+
   operation(:events,
     summary: "Read durable job events",
     security: [%{"bearer" => ["read"]}],
@@ -355,7 +400,8 @@ defmodule OmashikiWeb.Api.JobsController do
       queued_at: iso(job.queued_at),
       started_at: iso(job.started_at),
       finished_at: iso(job.finished_at),
-      error: job.terminal_error
+      error: job.terminal_error,
+      review: job.review
     }
   end
 

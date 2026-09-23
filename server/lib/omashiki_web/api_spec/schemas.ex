@@ -148,10 +148,36 @@ defmodule OmashikiWeb.ApiSpec.Schemas.JobError do
   })
 end
 
-defmodule OmashikiWeb.ApiSpec.Schemas.Job do
+defmodule OmashikiWeb.ApiSpec.Schemas.JobReview do
   require OpenApiSpex
   alias OpenApiSpex.Schema
   alias OmashikiWeb.ApiSpec.Schemas.JobError
+
+  OpenApiSpex.schema(%{
+    title: "JobReview",
+    description:
+      "Output held because gitleaks found secrets in it. It stays on the node that produced it until an operator approves or rejects it.",
+    type: :object,
+    additionalProperties: false,
+    required: [:error, :node, :decision],
+    properties: %{
+      error: %Schema{
+        allOf: [JobError],
+        description:
+          "The secret_found error a rejection records. details.findings lists the findings."
+      },
+      node: %Schema{type: :string, description: "The node that holds the output."},
+      decision: %Schema{type: :string, enum: ["approve", "reject"], nullable: true},
+      decided_by: %Schema{type: :string, nullable: true},
+      decided_at: %Schema{type: :string, format: :"date-time", nullable: true}
+    }
+  })
+end
+
+defmodule OmashikiWeb.ApiSpec.Schemas.Job do
+  require OpenApiSpex
+  alias OpenApiSpex.Schema
+  alias OmashikiWeb.ApiSpec.Schemas.{JobError, JobReview}
 
   OpenApiSpex.schema(%{
     title: "Job",
@@ -187,7 +213,8 @@ defmodule OmashikiWeb.ApiSpec.Schemas.Job do
       queued_at: %Schema{type: :string, format: :"date-time", nullable: true},
       started_at: %Schema{type: :string, format: :"date-time", nullable: true},
       finished_at: %Schema{type: :string, format: :"date-time", nullable: true},
-      error: %Schema{allOf: [JobError], nullable: true}
+      error: %Schema{allOf: [JobError], nullable: true},
+      review: %Schema{allOf: [JobReview], nullable: true}
     }
   })
 end
@@ -393,6 +420,12 @@ defmodule OmashikiWeb.ApiSpec.Schemas.Environment do
       image: %Schema{type: :string},
       timeout_ms: %Schema{type: :integer},
       network: %Schema{type: :string},
+      secret_scan: %Schema{
+        type: :string,
+        enum: ["review", "block"],
+        description:
+          "What a secret found in the output does: review holds the job for an operator, block fails it."
+      },
       capabilities: %Schema{type: :array, items: %Schema{type: :string}},
       resources: %Schema{type: :object}
     }
@@ -495,7 +528,7 @@ defmodule OmashikiWeb.ApiSpec.Schemas.IssueTokenRequest do
       scopes: %Schema{
         type: :array,
         minItems: 1,
-        items: %Schema{type: :string, enum: ["read", "submit", "cancel"]}
+        items: %Schema{type: :string, enum: Omashiki.ApiTokens.Token.allowed_scopes()}
       },
       allowed_environments: %Schema{type: :array, minItems: 1, items: %Schema{type: :string}},
       max_active_jobs: %Schema{type: :integer, minimum: 1},
@@ -529,7 +562,7 @@ defmodule OmashikiWeb.ApiSpec.Schemas.SignupRequest do
       scopes: %Schema{
         type: :array,
         minItems: 1,
-        items: %Schema{type: :string, enum: ["read", "submit", "cancel"]}
+        items: %Schema{type: :string, enum: Omashiki.ApiTokens.Token.allowed_scopes()}
       },
       allowed_environments: %Schema{type: :array, minItems: 1, items: %Schema{type: :string}},
       max_active_jobs: %Schema{type: :integer, minimum: 1},

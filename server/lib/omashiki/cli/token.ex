@@ -2,7 +2,7 @@ defmodule Omashiki.Cli.Token do
   @moduledoc """
   Issues, lists, and revokes API tokens, and sets their terminal webhook.
 
-      create --name NAME --env ENV[,ENV] --scopes read,submit[,cancel]
+      create --name NAME --env ENV[,ENV] --scopes read,submit[,cancel][,review]
              [--max-active N] [--ttl-days N] [--user USERNAME]
       list [--user USERNAME]
       revoke ID [--user USERNAME]
@@ -192,7 +192,7 @@ defmodule Omashiki.Cli.Token do
   defp usage do
     """
     Usage (mix omashiki.token in a checkout, bin/token in the release):
-      create --name NAME --env ENV[,ENV] --scopes read,submit[,cancel] [--max-active N] [--ttl-days N] [--user USERNAME]
+      create --name NAME --env ENV[,ENV] --scopes read,submit[,cancel][,review] [--max-active N] [--ttl-days N] [--user USERNAME]
       list [--user USERNAME]
       revoke ID [--user USERNAME]
       webhook ID --url URL --secret-env VAR [--user USERNAME]

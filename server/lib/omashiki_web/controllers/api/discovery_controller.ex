@@ -44,6 +44,7 @@ defmodule OmashikiWeb.Api.DiscoveryController do
       image: environment.runtime.image,
       timeout_ms: environment.timeout_ms,
       network: environment.network,
+      secret_scan: environment.secret_scan,
       capabilities: environment.capabilities,
       resources: environment.resources
     }

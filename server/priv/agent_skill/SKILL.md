@@ -93,9 +93,10 @@ Rules that the schema does not restate:
   instruction or context.
 - Capture `data.id` from a successful admission. Do not predict a job ID.
 
-Token scopes are `read`, `submit`, and `cancel`. Submit, retry, and webhook
-redeliver require `submit`. Cancellation requires `cancel`. Listing, inspection,
-events, and results require `read`.
+Token scopes are `read`, `submit`, `cancel`, and `review`. Submit, retry, and
+webhook redeliver require `submit`. Cancellation requires `cancel`. Approving and
+rejecting held output require `review`. Listing, inspection, events, and results
+require `read`.
 
 ## Wait For Results
 
@@ -109,6 +110,15 @@ A successful result includes status, attempt, Git identity when the sink is
 git, `summary`, `changes`, and `compare_url` when the remote is recognised.
 Report the branch and commit identifiers exactly as returned. Do not claim that
 changes were merged.
+
+## Output Held For Review
+
+A job in status `review` is not terminal. gitleaks found secrets in its output,
+which waits on the node that produced it. The job's `review.error.details.findings`
+lists each finding's file, line, rule, and redacted match. Report the findings
+to the user. `POST /api/v1/jobs/{id}/approve` publishes the output and
+`POST /api/v1/jobs/{id}/reject` fails the job. Both are mutations: perform one
+only when the user decided it for that job. Never approve to get past the check.
 
 ## Cancel, Retry, And Errors
 

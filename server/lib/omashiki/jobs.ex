@@ -2,6 +2,7 @@ defmodule Omashiki.Jobs do
   @moduledoc "DB-authoritative claims, leases, retries, cancellation, and recovery."
 
   import Ecto.Query
+
   import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_unsuccessful: 1, is_active: 1]
 
   require Logger
@@ -30,7 +31,8 @@ defmodule Omashiki.Jobs do
     "blocked" => ~w(cancelled),
     "queued" => ~w(provisioning cancelled),
     "provisioning" => ~w(running succeeded failed cancelled),
-    "running" => ~w(succeeded failed cancelled)
+    "running" => ~w(succeeded failed cancelled),
+    "review" => ~w(cancelled)
   }
   @default_lease_ms 30_000
 
@@ -60,6 +62,7 @@ defmodule Omashiki.Jobs do
     "queued" => ~w(depends_on unlock_event_id retry unclaimed runner_id),
     "provisioning" => ~w(runner_id),
     "running" => [],
+    "review" => ~w(error_code error_message),
     "succeeded" => ~w(branch base_sha head_sha),
     "failed" => ~w(error_code error_message recovered),
     "cancelled" => ~w(error_code error_message recovered)
@@ -257,6 +260,11 @@ defmodule Omashiki.Jobs do
           when is_terminal(attempt_status) ->
             attempt
 
+          %{attempt: %JobAttempt{status: "review"} = attempt, job: job} ->
+            assert_approved!(job, attempt, lease_token)
+            complete_locked(job, attempt, status, attrs, now)
+            Repo.get!(JobAttempt, attempt.id)
+
           %{attempt: attempt, job: job} ->
             assert_lease!(attempt, lease_token, now)
             complete_locked(job, attempt, status, attrs, now)
@@ -268,6 +276,105 @@ defmodule Omashiki.Jobs do
   end
 
   def complete(_, _, _, _), do: {:error, :invalid_completion}
+
+  @doc """
+  Hold an attempt whose output only the secret scan refused.
+
+  The job and its attempt enter `review` with `error`, the `secret_found`
+  record a rejection keeps. The slot and the lease are released; the attempt
+  keeps its lease token as the fence of the node that holds the output.
+  Holding again with the same token returns the held attempt.
+  """
+  def hold(attempt_or_id, lease_token, error) when is_binary(lease_token) and is_map(error) do
+    with {:ok, attempt_id} <- attempt_id(attempt_or_id) do
+      Tx.run(fn ->
+        now = now()
+
+        case locked_attempt_with_job(attempt_id) do
+          nil ->
+            Repo.rollback(:not_found)
+
+          %{attempt: %JobAttempt{status: "review", lease_token: ^lease_token} = attempt} ->
+            attempt
+
+          %{attempt: attempt, job: job} ->
+            assert_lease!(attempt, lease_token, now)
+            hold_locked(job, attempt, error)
+        end
+      end)
+      |> notify_job()
+    end
+  end
+
+  @doc """
+  Approve the held output of a job in `review`. The job stays in `review`
+  until the node that holds the output publishes it and completes the
+  attempt. Approving again changes nothing.
+  """
+  def approve(job_or_id, reviewer) when is_binary(reviewer) do
+    with {:ok, job_id} <- job_id(job_or_id) do
+      Tx.run(fn ->
+        case locked_job(job_id) do
+          nil -> Repo.rollback(:not_found)
+          %Job{status: "review", review: %{"decision" => "approve"}} = job -> job
+          %Job{status: "review"} = job -> decide!(job, "approve", reviewer)
+          %Job{status: status} -> Repo.rollback({:invalid_transition, status, "succeeded"})
+        end
+      end)
+      |> notify_job()
+    end
+  end
+
+  @doc """
+  Reject the held output of a job in `review`: the job fails with its
+  `secret_found` error. The node that holds the output removes it when it
+  next asks.
+  """
+  def reject(job_or_id, reviewer) when is_binary(reviewer) do
+    with {:ok, job_id} <- job_id(job_or_id) do
+      Tx.run(fn ->
+        case locked_job(job_id) do
+          nil ->
+            Repo.rollback(:not_found)
+
+          %Job{status: "review"} = job ->
+            job = decide!(job, "reject", reviewer)
+
+            complete_locked(
+              job,
+              current_attempt!(job),
+              "failed",
+              %{error: job.review["error"]},
+              now()
+            )
+
+          %Job{status: status} ->
+            Repo.rollback({:invalid_transition, status, "failed"})
+        end
+      end)
+      |> notify_job()
+    end
+  end
+
+  @doc """
+  The answer to a node that holds an attempt's output: `:publish` once the
+  job is approved, `:ok` while it waits or the attempt still runs, and
+  `:cancel` when the output must go — the job was rejected or cancelled, or
+  the token is not the attempt's.
+  """
+  def held_command(attempt_id, lease_token)
+      when is_binary(attempt_id) and is_binary(lease_token) do
+    with {:ok, id} <- Ecto.UUID.cast(attempt_id),
+         %JobAttempt{lease_token: ^lease_token} = attempt <- Repo.get(JobAttempt, id) do
+      case {attempt.status, Repo.get!(Job, attempt.job_id)} do
+        {"review", %Job{review: %{"decision" => "approve"}}} -> :publish
+        {status, _job} when status == "review" or is_active(status) -> :ok
+        _ -> :cancel
+      end
+    else
+      _ -> :cancel
+    end
+  end
 
   @doc "Advance a job in a transaction, unlocking direct children only on success."
   def transition(job_or_id, status, attrs \\ %{}) when is_map(attrs) do
@@ -500,6 +607,46 @@ defmodule Omashiki.Jobs do
 
       true ->
         :ok
+    end
+  end
+
+  defp hold_locked(job, attempt, error) do
+    held =
+      update_attempt!(attempt, %{
+        status: "review",
+        lease_expires_at: nil,
+        capacity_reserved: false
+      })
+
+    release_capacity_if_reserved!(attempt)
+
+    updated =
+      update_job!(job, %{
+        status: "review",
+        review: %{"error" => error, "node" => attempt.machine_id, "decision" => nil}
+      })
+
+    record_event!(updated, "review", Failure.event_data(error), held)
+    held
+  end
+
+  defp decide!(%Job{review: review} = job, decision, reviewer) do
+    update_job!(job, %{
+      review:
+        Map.merge(review, %{
+          "decision" => decision,
+          "decided_by" => reviewer,
+          "decided_at" => DateTime.to_iso8601(now())
+        })
+    })
+  end
+
+  # Only the node that holds approved output completes a held attempt.
+  defp assert_approved!(%Job{} = job, %JobAttempt{} = attempt, token) do
+    cond do
+      attempt.lease_token != token -> Repo.rollback(:stale_lease)
+      job.review["decision"] != "approve" -> Repo.rollback(:attempt_not_active)
+      true -> :ok
     end
   end
 
@@ -742,7 +889,8 @@ defmodule Omashiki.Jobs do
         started_at: nil,
         finished_at: nil,
         terminal_result: nil,
-        terminal_error: nil
+        terminal_error: nil,
+        review: nil
       })
 
     insert_attempt!(updated, %{number: number, status: "queued"})
@@ -1183,11 +1331,10 @@ defmodule Omashiki.Jobs do
   defp normalize_status(status) when is_atom(status), do: Atom.to_string(status)
   defp normalize_status(status), do: status
 
-  defp valid_status(status)
-       when status in ~w(blocked queued provisioning running succeeded failed cancelled),
-       do: :ok
+  defp valid_status(status) do
+    if status in Statuses.all(), do: :ok, else: {:error, :invalid_status}
+  end
 
-  defp valid_status(_), do: {:error, :invalid_status}
   defp valid_terminal(status) when is_terminal(status), do: :ok
   defp valid_terminal(_), do: {:error, :invalid_terminal_status}
 

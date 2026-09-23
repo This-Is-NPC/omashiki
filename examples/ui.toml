@@ -13,14 +13,14 @@ name = "board"
 title = "Board"
 layout = "board"
 group_by = "status"
-filter = { status = ["queued", "provisioning", "running", "succeeded", "failed", "blocked", "cancelled"], since = "24h" }
+filter = { status = ["queued", "provisioning", "running", "review", "succeeded", "failed", "blocked", "cancelled"], since = "24h" }
 fields = ["title", "environment", "worker", "step", "duration"]
 
 # The status_counts block counts the statuses in filter.status, in that order.
 [[views]]
 name = "active"
 title = "In progress"
-filter = { status = ["queued", "provisioning", "running", "blocked"] }
+filter = { status = ["queued", "provisioning", "running", "review", "blocked"] }
 sort = "-submitted"
 fields = ["status", "title", "environment", "plugin", "worker", "step", "wait", "duration"]
 blocks = ["status_counts", "slots", "workers"]

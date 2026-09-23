@@ -8,7 +8,8 @@ defmodule Omashiki.Jobs.Validate do
   The protected directories `.git/`, `.ssh/` and `.aws/` are refused by path:
   output never writes there, whatever the content. Every other file is judged
   by its content, through `Omashiki.Jobs.SecretScan`. When the scanner is
-  unavailable the output is refused.
+  unavailable the output is refused. `secret_scan: false` skips only the
+  secret scan: an operator approved output the scan refused.
   """
 
   alias Omashiki.Jobs.SecretScan
@@ -31,8 +32,11 @@ defmodule Omashiki.Jobs.Validate do
       protected = Enum.find(paths, &protected_path?/1) ->
         {:error, {:protected_path, protected}}
 
-      true ->
+      Keyword.get(opts, :secret_scan, true) ->
         secret_scan(path, paths)
+
+      true ->
+        :ok
     end
   end
 

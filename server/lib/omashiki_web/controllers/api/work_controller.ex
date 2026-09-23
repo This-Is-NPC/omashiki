@@ -48,13 +48,18 @@ defmodule OmashikiWeb.Api.WorkController do
     end
   end
 
+  # An attempt that runs renews its lease. Output held for review asks with
+  # `held: true` and renews nothing; its answer may also say `publish`.
   def heartbeat(conn, params) do
     with {:ok, attempt_id} <- required_string(params, "attempt_id"),
          {:ok, lease_token} <- required_string(params, "lease_token"),
-         {:ok, status} <- Inbox.heartbeat(attempt_id, lease_token) do
-      json(conn, %{cancel: status == :cancel})
+         {:ok, status} <- heartbeat(attempt_id, lease_token, params["held"] == true) do
+      json(conn, %{cancel: status == :cancel, publish: status == :publish})
     end
   end
+
+  defp heartbeat(attempt_id, lease_token, true), do: Inbox.held(attempt_id, lease_token)
+  defp heartbeat(attempt_id, lease_token, false), do: Inbox.heartbeat(attempt_id, lease_token)
 
   def accept(conn, params) do
     with {:ok, attempt_id} <- required_string(params, "attempt_id"),

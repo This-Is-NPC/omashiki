@@ -65,6 +65,39 @@ A refused output fails the job with a code that names the check, such as `secret
 For a secret, the message and the details give the file, the line, and the gitleaks rule, never the secret itself.
 See [job errors](api.md#job-errors).
 
+### Output held for review
+
+gitleaks also flags test fixtures, examples, and placeholders.
+When the secret scan is the only check that refuses the output, the environment's `secret_scan` setting decides what happens:
+
+| `secret_scan` | Effect |
+| --- | --- |
+| `review` (default) | The job waits in status `review`. The node that produced the output keeps it: the work directory of a `files` or `none` job, or the worktree and run branch of a `git` job. The container is removed and its slot is free. |
+| `block` | The job fails with `secret_found` and the output is removed. |
+
+A symbolic link, an oversized output, a protected path, or an unavailable scanner fails the job in both modes.
+
+The task details on the Home screen and `GET /api/v1/jobs/{id}` show the findings of a job in review: file, line, gitleaks rule, and the match with the secret replaced by `REDACTED`.
+An operator decides in the task details, and a client decides with a token that has the `review` scope:
+
+- **Approve** publishes the output with the same step as any output, without the secret scan. The job becomes `succeeded` when the node has published it.
+- **Reject** fails the job with `secret_found`. The node removes the output.
+- **Cancel** cancels the job. The node removes the output.
+
+Jobs that depend on a job in review keep waiting.
+
+The node keeps a record of each held output in `~/.cache/omashiki/held`, readable only by the house user.
+Recovery, container reclaim, boot cleanup, and a restart of the node leave the output and its record in place.
+Every few seconds the node asks the house what to do with each held output, over the attempt heartbeat that carries cancellation.
+An embedded house asks itself.
+A worker asks the manager that offered the attempt, and publishes to that manager.
+
+A decision is recorded in the house at once.
+Only the node that holds the output can publish it, so an approval waits for that node.
+While a worker is offline, its held output stays in `review`, and the task details say which node holds it.
+A rejection or a cancellation ends the job at once; the worker removes the output when it is back.
+If the node never comes back, reject or cancel the job.
+
 Git finalization also checks worktree state.
 A successful Git result identifies a committed branch with base and head revisions.
 The machine publishes to the configured remote after validation.

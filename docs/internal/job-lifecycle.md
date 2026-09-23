@@ -33,6 +33,10 @@ stateDiagram-v2
     running --> succeeded: verified result
     running --> failed: execution or finalization failure
     running --> cancelled: cancellation
+    running --> review: only the secret scan refused the output
+    review --> succeeded: approved output published
+    review --> failed: rejection or publishing failure
+    review --> cancelled: cancellation
     failed --> queued: retry with next attempt
     cancelled --> queued: retry with next attempt
 ```
@@ -82,6 +86,20 @@ A cancellation does not undo completed external tool actions.
 The remote files path uploads the blob before completion.
 A missing or invalid blob prevents successful completion.
 The worker returns results only to the manager associated with the offer.
+
+### Review
+
+With `secret_scan = "review"`, an attempt whose output only the secret scan refused enters `review` instead of `failed`.
+The node writes a record of the output with `Omashiki.Jobs.HeldOutput` before the house records the hold.
+The hold releases the slot and the lease and keeps the lease token as the fence of the held output.
+The container is removed; the work directory or the worktree and run branch stay.
+
+`Omashiki.Jobs.HeldOutput.Sweeper` runs on every node that runs attempts.
+It asks the house about each record through `Omashiki.Worker.Inbox.held/2`: in process on an embedded house, and over `POST /internal/work/heartbeat` with `held: true` on a worker.
+The answer renews no lease.
+After an approval the node runs the sink's finalization without the secret scan, stores the resulting complete in the record, and sends it through the normal completion.
+A restart resends a stored complete instead of publishing again.
+After a rejection or a cancellation the node removes the output and its run branch.
 
 ### Git branch names
 

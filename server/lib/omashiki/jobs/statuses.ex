@@ -1,15 +1,18 @@
 defmodule Omashiki.Jobs.Statuses do
   @moduledoc "Job lifecycle vocabulary shared by persistence, API, and admission."
 
-  @all ~w(blocked queued provisioning running succeeded failed cancelled)
+  @all ~w(blocked queued provisioning running review succeeded failed cancelled)
   @terminal ~w(succeeded failed cancelled)
   @active ~w(provisioning running)
   @unsuccessful ~w(failed cancelled)
+  # The attempt no longer runs: it ended, or its output waits for an operator.
+  @released ["review" | @terminal]
   @max_payload_bytes 1_048_576
 
   defguard is_terminal(status) when status in @terminal
   defguard is_active(status) when status in @active
   defguard is_unsuccessful(status) when status in @unsuccessful
+  defguard is_released(status) when status in @released
 
   def all, do: @all
   def terminal, do: @terminal

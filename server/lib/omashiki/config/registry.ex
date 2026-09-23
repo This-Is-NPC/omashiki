@@ -59,7 +59,8 @@ defmodule Omashiki.Config.Environment do
     :policy,
     :network,
     :resources,
-    :packages
+    :packages,
+    :secret_scan
   ]
   defstruct @enforce_keys
 end
@@ -90,6 +91,7 @@ defmodule Omashiki.Config.Registry do
   @conditions ~w(always on_success on_failure)
   @networks ~w(none restricted host)
   @sinks ~w(git files none)
+  @secret_scans ~w(review block)
   @unsafe_executables ~w(
     sh bash dash zsh fish cmd powershell pwsh env xargs
     python python2 python3 node perl ruby php lua busybox make awk
@@ -562,7 +564,7 @@ defmodule Omashiki.Config.Registry do
 
       reject_unknown!(
         attrs,
-        ~w(preset runtime sink packages executables credentials capabilities mcp_servers pre_steps post_steps timeout_ms caches mounts policy network resources),
+        ~w(preset runtime sink packages executables credentials capabilities mcp_servers pre_steps post_steps timeout_ms caches mounts policy network resources secret_scan),
         where
       )
 
@@ -642,6 +644,15 @@ defmodule Omashiki.Config.Registry do
         raise Error, "#{where}: allowlist policy requires restricted network"
       end
 
+      secret_scan = Map.get(attrs, "secret_scan", "review")
+
+      unless secret_scan in @secret_scans,
+        do:
+          raise(
+            Error,
+            "#{where}.secret_scan must be one of #{Enum.join(@secret_scans, ", ")}"
+          )
+
       %Environment{
         name: name,
         preset: preset,
@@ -660,7 +671,8 @@ defmodule Omashiki.Config.Registry do
         mounts: mounts,
         policy: policy,
         network: network,
-        resources: build_resources!(Map.get(attrs, "resources", %{}), where)
+        resources: build_resources!(Map.get(attrs, "resources", %{}), where),
+        secret_scan: secret_scan
       }
     end)
     |> Enum.sort_by(& &1.name)

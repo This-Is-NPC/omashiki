@@ -10,7 +10,7 @@ defmodule Omashiki.ApiTokens.Token do
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
-  @allowed_scopes ~w(read submit cancel)
+  @allowed_scopes ~w(read submit cancel review)
 
   @derive {Inspect,
            except: [
@@ -106,7 +106,7 @@ defmodule Omashiki.ApiTokens.Token do
         if Enum.all?(list, &(&1 in @allowed_scopes)) do
           changeset
         else
-          add_error(changeset, :scopes, "must be read, submit, and/or cancel")
+          add_error(changeset, :scopes, "must be among #{Enum.join(@allowed_scopes, ", ")}")
         end
 
       _ ->

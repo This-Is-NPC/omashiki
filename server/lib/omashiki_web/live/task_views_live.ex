@@ -1,10 +1,11 @@
 defmodule OmashikiWeb.TaskViewsLive do
   @moduledoc """
-  Display-only task views declared in the operator's `ui.toml`.
+  Task views declared in the operator's `ui.toml`.
 
-  The screen reads jobs and the views file. It has no event that changes a
-  job, and the views file never reaches admission, dispatch, or the registry.
-  Selecting a view or a task only patches the URL.
+  The screen reads jobs and the views file, and the views file never reaches
+  admission, dispatch, or the registry. Selecting a view or a task only
+  patches the URL. The one action is the decision on output held for review,
+  in the task details: approve publishes it, reject fails the job.
   """
 
   use OmashikiWeb, :live_view
@@ -87,6 +88,30 @@ defmodule OmashikiWeb.TaskViewsLive do
   end
 
   def handle_info(_message, socket), do: {:noreply, socket}
+
+  @impl true
+  def handle_event("approve", %{"id" => id}, socket),
+    do: {:noreply, decide(socket, id, &Jobs.approve/2, "Approved. The output is published by")}
+
+  def handle_event("reject", %{"id" => id}, socket),
+    do: {:noreply, decide(socket, id, &Jobs.reject/2, "Rejected. The output is removed from")}
+
+  defp decide(socket, id, decide, done) do
+    user = socket.assigns.current_user
+
+    with {:ok, job} <- Api.get(id, user),
+         {:ok, decided} <- decide.(job, user.username) do
+      socket
+      |> put_flash(:info, "#{done} #{decided.review["node"]}.")
+      |> refresh_screen()
+    else
+      {:error, {:invalid_transition, status, _to}} ->
+        put_flash(socket, :error, "The task is #{status}, no longer waiting for review.")
+
+      {:error, reason} ->
+        put_flash(socket, :error, "Decision not recorded: #{inspect(reason)}.")
+    end
+  end
 
   defp schedule_clock, do: Process.send_after(self(), :clock, @clock_ms)
   defp schedule_resync, do: Process.send_after(self(), :resync, @resync_ms)
@@ -414,6 +439,12 @@ defmodule OmashikiWeb.TaskViewsLive do
               <p class="font-mono text-sm leading-snug">
                 <.cell row={row} field={hd(@view.fields)} now={@now} />
               </p>
+              <p
+                :if={row.job.status == "review"}
+                class="mt-2 font-label text-label-sm uppercase tracking-[0.18em] text-status-awaiting"
+              >
+                {review_note(row.job.review, row.job.status)}
+              </p>
               <dl :if={tl(@view.fields) != []} class="mt-2 grid gap-1 font-mono text-xs">
                 <div
                   :for={field <- tl(@view.fields)}
@@ -706,6 +737,10 @@ defmodule OmashikiWeb.TaskViewsLive do
       </ol>
     </.detail_section>
 
+    <.detail_section :if={@detail.job.review} title="Review">
+      <.review job={@detail.job} />
+    </.detail_section>
+
     <.detail_section
       :if={@detail.job.terminal_result || @detail.job.terminal_error}
       title="Result"
@@ -767,6 +802,58 @@ defmodule OmashikiWeb.TaskViewsLive do
     """
   end
 
+  attr :job, :map, required: true
+
+  defp review(assigns) do
+    assigns =
+      assign(assigns,
+        review: assigns.job.review,
+        findings: get_in(assigns.job.review, ["error", "details", "findings"]) || []
+      )
+
+    ~H"""
+    <div class="space-y-3 font-mono text-xs">
+      <p class="whitespace-pre-wrap break-words text-on-surface">{@review["error"]["message"]}</p>
+      <table class="stack-table w-full">
+        <thead>
+          <tr class="text-left text-on-surface-variant">
+            <th scope="col" class="py-1 pr-3 font-normal">file</th>
+            <th scope="col" class="py-1 pr-3 font-normal">line</th>
+            <th scope="col" class="py-1 pr-3 font-normal">rule</th>
+            <th scope="col" class="py-1 font-normal">match</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-outline-variant/40">
+          <tr :for={finding <- @findings}>
+            <td data-label="file" class="py-1 pr-3 break-all text-on-surface">{finding["file"]}</td>
+            <td data-label="line" class="py-1 pr-3 tabular-nums">{finding["line"]}</td>
+            <td data-label="rule" class="py-1 pr-3 break-all">{finding["rule_id"]}</td>
+            <td data-label="match" class="py-1 break-all text-status-failed">{finding["match"]}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="text-on-surface-variant">{review_note(@review, @job.status)}</p>
+      <div :if={@job.status == "review"} class="flex flex-wrap gap-3">
+        <button
+          :if={@review["decision"] != "approve"}
+          type="button"
+          phx-click="approve"
+          phx-value-id={@job.id}
+          data-confirm="Publish this output with the findings above?"
+          class="border border-status-awaiting/50 px-3 py-2 font-label text-label-sm uppercase tracking-[0.2em] text-status-awaiting hover:border-status-awaiting pointer-coarse:min-h-10"
+        >Approve and publish</button>
+        <button
+          type="button"
+          phx-click="reject"
+          phx-value-id={@job.id}
+          data-confirm="Reject this output? The job fails and the output is removed."
+          class="border border-status-failed/50 px-3 py-2 font-label text-label-sm uppercase tracking-[0.2em] text-status-failed hover:border-status-failed pointer-coarse:min-h-10"
+        >Reject</button>
+      </div>
+    </div>
+    """
+  end
+
   attr :view, :map, required: true
 
   defp close_link(assigns) do
@@ -795,6 +882,29 @@ defmodule OmashikiWeb.TaskViewsLive do
   end
 
   defp detail_fields, do: @detail_fields
+
+  defp review_note(%{"decision" => nil, "node" => node}, "review"),
+    do: "Waiting for review · output held on #{node}"
+
+  defp review_note(%{"decision" => nil}, status), do: "Not reviewed · the job was #{status}"
+
+  defp review_note(%{"decision" => "approve", "node" => node} = review, "review"),
+    do: "#{decision(review)} · waiting for #{node} to publish"
+
+  defp review_note(review, _status), do: decision(review)
+
+  defp decision(%{"decision" => "approve", "decided_by" => by} = review),
+    do: "Approved by #{by} #{decided_at(review)}"
+
+  defp decision(%{"decision" => "reject", "decided_by" => by} = review),
+    do: "Rejected by #{by} #{decided_at(review)}"
+
+  defp decided_at(%{"decided_at" => at}) do
+    case DateTime.from_iso8601(at) do
+      {:ok, at, _offset} -> "at " <> Ops.timestamp(at)
+      _ -> ""
+    end
+  end
 
   defp recent_events(events), do: events |> Enum.reverse() |> Enum.take(@detail_event_limit)
 

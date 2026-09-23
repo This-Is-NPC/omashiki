@@ -6,7 +6,7 @@ defmodule Omashiki.ApiTokens.AuditEvent do
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
-  @actions ~w(submit cancel retry issue rotate revoke redeliver)
+  @actions ~w(submit cancel retry approve reject issue rotate revoke redeliver)
 
   schema "token_audit_events" do
     field :action, :string

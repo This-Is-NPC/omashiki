@@ -316,24 +316,85 @@ defmodule OmashikiWeb.TaskViewsLiveTest do
     assert text =~ "Task not found"
   end
 
-  # The guarantee behind the screen: it reads, it never writes. There is no
-  # event handler at all, and opening, refreshing, and inspecting leave the
-  # job exactly as it was.
-  test "the screen cannot change a job", %{conn: conn, user: user, token: token} do
+  # The guarantee behind the screen: it reads. Its only action is the review
+  # decision, offered for a job in review; opening, refreshing, and inspecting
+  # any other job leave it exactly as it was.
+  test "the screen cannot change a job that is not in review",
+       %{conn: conn, user: user, token: token} do
     {job, _attempt} = insert_job(user, token, "queued", "untouched")
     before = Repo.get!(Job, job.id)
-
-    refute function_exported?(OmashikiWeb.TaskViewsLive, :handle_event, 3)
 
     {:ok, lv, html} = live(conn, ~p"/?job=#{job.id}")
     send(lv.pid, :clock)
     send(lv.pid, {:job_updated, job.id})
-    text = lv |> render() |> visible_text()
+    rendered = render(lv)
+    text = visible_text(rendered)
 
     refute html =~ "phx-submit"
+    refute rendered =~ ~s(phx-click="approve")
+    refute rendered =~ ~s(phx-click="reject")
     refute text =~ "Cancel"
     refute text =~ "Retry"
     assert Repo.get!(Job, job.id) == before
+  end
+
+  describe "a task held for review" do
+    test "the board card says it waits for review", %{conn: conn, user: user, token: token} do
+      insert_job(user, token, "review", "leaky-notes")
+
+      {:ok, _lv, html} = live(conn, ~p"/?view=board")
+      text = visible_text(html)
+
+      assert text =~ "leaky-notes"
+      assert text =~ "Waiting for review · output held on worker-a"
+    end
+
+    test "the details show the findings and approve records the decision",
+         %{conn: conn, user: user, token: token} do
+      {job, _attempt} = insert_job(user, token, "review", "leaky-notes")
+
+      {:ok, lv, html} = live(conn, ~p"/?job=#{job.id}")
+      text = visible_text(html)
+
+      assert text =~ "notes.txt"
+      assert text =~ "github-pat"
+      assert text =~ "export GH=REDACTED"
+      assert text =~ "Approve and publish"
+
+      text = lv |> element(~s(button[phx-click="approve"])) |> render_click() |> visible_text()
+
+      assert text =~ "Approved. The output is published by worker-a."
+      assert text =~ "Approved by #{user.username}"
+      assert text =~ "waiting for worker-a to publish"
+      assert %{"decision" => "approve"} = Repo.get!(Job, job.id).review
+    end
+
+    test "reject fails the task", %{conn: conn, user: user, token: token} do
+      {job, _attempt} = insert_job(user, token, "review", "leaky-notes")
+
+      {:ok, lv, _html} = live(conn, ~p"/?job=#{job.id}")
+      text = lv |> element(~s(button[phx-click="reject"])) |> render_click() |> visible_text()
+
+      assert text =~ "Rejected by #{user.username}"
+      refute text =~ "Approve and publish"
+
+      assert %Job{status: "failed", terminal_error: %{"code" => "secret_found"}} =
+               Repo.get!(Job, job.id)
+    end
+
+    test "a decision on a task that left review is refused", %{
+      conn: conn,
+      user: user,
+      token: token
+    } do
+      {job, _attempt} = insert_job(user, token, "review", "leaky-notes")
+      {:ok, lv, _html} = live(conn, ~p"/?job=#{job.id}")
+      {:ok, _cancelled} = Omashiki.Jobs.cancel(job)
+
+      text = lv |> element(~s(button[phx-click="approve"])) |> render_click() |> visible_text()
+
+      assert text =~ "The task is cancelled, no longer waiting for review."
+    end
   end
 
   defp insert_job(user, token, status, title, context \\ nil) do

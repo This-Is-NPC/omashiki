@@ -176,6 +176,79 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     assert_schema(json_response(retried, 202), "JobResponse", @api_spec)
   end
 
+  describe "output held for review" do
+    setup %{user: user} do
+      {token, plaintext} =
+        api_token_fixture(user, %{scopes: ["read", "submit", "cancel", "review"]})
+
+      {:ok, _, job} = Admission.admit_once(token, request())
+      {:ok, attempt} = Omashiki.Jobs.claim(job, "api-review")
+
+      finding = %Omashiki.Jobs.SecretScan.Finding{
+        file: "notes.txt",
+        line: 1,
+        rule_id: "github-pat",
+        description: "GitHub Personal Access Token",
+        match: "export GH=REDACTED",
+        fingerprint: String.duplicate("f", 64)
+      }
+
+      error =
+        Omashiki.Jobs.Failure.error(
+          {:finalization_failed, {:secret_found, [finding]}},
+          "finalization"
+        )
+
+      {:ok, _held} = Omashiki.Jobs.hold(attempt, attempt.lease_token, error)
+      {:ok, job: job, reviewer: build_conn_with_auth(plaintext)}
+    end
+
+    test "the job shows the findings while it waits", %{job: job, reviewer: reviewer} do
+      shown = json_response(get(reviewer, "/api/v1/jobs/#{job.id}"), 200)
+
+      assert shown["data"]["status"] == "review"
+      assert shown["data"]["review"]["decision"] == nil
+
+      assert [%{"file" => "notes.txt", "line" => 1}] =
+               shown["data"]["review"]["error"]["details"]["findings"]
+
+      assert_schema(shown, "JobResponse", @api_spec)
+    end
+
+    test "approve records the decision and leaves the job in review", %{
+      job: job,
+      reviewer: reviewer,
+      user: user
+    } do
+      approved = post(reviewer, "/api/v1/jobs/#{job.id}/approve", %{})
+
+      body = json_response(approved, 200)
+      assert body["data"]["status"] == "review"
+      assert body["data"]["review"]["decision"] == "approve"
+      assert body["data"]["review"]["decided_by"] == user.username
+      assert_schema(body, "JobResponse", @api_spec)
+    end
+
+    test "reject fails the job with its secret_found error", %{job: job, reviewer: reviewer} do
+      rejected = post(reviewer, "/api/v1/jobs/#{job.id}/reject", %{})
+
+      body = json_response(rejected, 200)
+      assert body["data"]["status"] == "failed"
+      assert body["data"]["error"]["code"] == "secret_found"
+      assert body["data"]["review"]["decision"] == "reject"
+      assert_schema(body, "JobResponse", @api_spec)
+
+      again = post(reviewer, "/api/v1/jobs/#{job.id}/approve", %{})
+      assert json_response(again, 409)["code"] == "invalid_transition"
+    end
+
+    test "a token without the review scope cannot decide", %{conn: conn, job: job} do
+      forbidden = post(conn, "/api/v1/jobs/#{job.id}/approve", %{})
+      assert json_response(forbidden, 403)["code"] == "insufficient_scope"
+      assert Repo.get!(Job, job.id).review["decision"] == nil
+    end
+  end
+
   test "a read-only token cannot submit", %{user: user} do
     {_token, plaintext} =
       api_token_fixture(user, %{
@@ -445,6 +518,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     assert environment["backend"] == "docker"
     assert environment["distribution"] == "debian"
     assert environment["image"] == "omashiki/agent:latest"
+    assert environment["secret_scan"] == "review"
     assert_schema(json_response(repositories, 200), "RepositoryListResponse", @api_spec)
     assert_schema(json_response(environments, 200), "EnvironmentListResponse", @api_spec)
   end
