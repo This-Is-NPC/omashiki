@@ -15,7 +15,8 @@ defmodule Omashiki.Cli do
   @callback run(argv :: [String.t()]) :: {non_neg_integer(), String.t()}
 
   @doc """
-  Starts `tool`, runs it on `argv`, and prints its output.
+  Starts `tool`, runs it on `argv` with the log held to errors, and prints
+  its output.
 
   Exits with `{:shutdown, status}` when the status is not zero, which both
   Mix and `bin/omashiki eval` turn into the process exit status.
@@ -24,8 +25,20 @@ defmodule Omashiki.Cli do
   def run(tool, argv) do
     :ok = Application.ensure_loaded(:omashiki)
 
-    :ok = tool.start()
-    {status, output} = tool.run(argv)
+    # The terminal shows the tool's own lines. Below :error the log carries
+    # the Repo's SQL debug lines, with their parameters, and framework info
+    # lines; an error, such as a database that refuses the connection, stays.
+    level = Logger.level()
+    Logger.configure(level: :error)
+
+    {status, output} =
+      try do
+        :ok = tool.start()
+        tool.run(argv)
+      after
+        Logger.configure(level: level)
+      end
+
     IO.write(output)
 
     if status != 0, do: exit({:shutdown, status})

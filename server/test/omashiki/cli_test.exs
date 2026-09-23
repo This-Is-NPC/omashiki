@@ -2,6 +2,7 @@ defmodule Omashiki.CliTest do
   use Omashiki.DataCase, async: false
 
   import ExUnit.CaptureIO
+  import ExUnit.CaptureLog
 
   alias Omashiki.Cli
 
@@ -22,5 +23,20 @@ defmodule Omashiki.CliTest do
       end)
 
     assert output =~ "Usage"
+  end
+
+  test "keeps the Repo's SQL log lines out of the output" do
+    level = Logger.level()
+    Logger.configure(level: :debug)
+    on_exit(fn -> Logger.configure(level: level) end)
+
+    log =
+      capture_log(fn ->
+        assert capture_io(fn -> Cli.run(Cli.Token, ["list"]) end) == "No tokens.\n"
+      end)
+
+    refute log =~ "QUERY"
+    refute log =~ "SELECT"
+    assert Logger.level() == :debug
   end
 end
