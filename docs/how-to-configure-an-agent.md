@@ -21,7 +21,7 @@ plugin = "opencode"
 ```
 
 Plugin-specific settings belong in `options`.
-Use the corresponding file in [plugins](../plugins) to check supported option names.
+Use the corresponding file in [plugins](../server/priv/plugins) to check supported option names.
 Do not put `runtime`, `image`, or `credentials` on a preset.
 
 ## 2. Add the environment

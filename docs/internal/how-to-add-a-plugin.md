@@ -7,12 +7,12 @@ A preset supplies option values. An environment supplies execution policy.
 
 Read the [architecture](architecture.md) and [design decisions](design-decisions.md).
 Select an existing manifest with a similar transport.
-Use `plugins/jcode.toml` for a simple CLI example.
-Use `plugins/opencode.toml` for the HTTP transport.
+Use `server/priv/plugins/jcode.toml` for a simple CLI example.
+Use `server/priv/plugins/opencode.toml` for the HTTP transport.
 
 ## 1. Define the manifest
 
-Create `plugins/<name>.toml`.
+Create `server/priv/plugins/<name>.toml`.
 The filename supplies the plugin name.
 The loader reads TOML files from the plugin directory.
 

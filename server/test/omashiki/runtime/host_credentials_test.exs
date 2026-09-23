@@ -199,10 +199,8 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
     }
   end
 
-  @plugins_dir Path.expand("../../../../plugins", __DIR__)
-
   defp claude_profile do
-    manifest = @plugins_dir |> Loader.load!() |> Map.fetch!("claude-code")
+    manifest = Loader.shipped_dir() |> Loader.load!() |> Map.fetch!("claude-code")
 
     %Preset{
       name: "claude-code",

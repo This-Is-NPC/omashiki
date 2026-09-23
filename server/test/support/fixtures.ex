@@ -15,13 +15,11 @@ defmodule Omashiki.Fixtures do
     })
   end
 
-  @plugins_source Path.expand("../../../plugins", __DIR__)
-
   def copy_plugins!(root) when is_binary(root) do
     dest = Path.join(root, "plugins")
     File.mkdir_p!(dest)
 
-    for file <- Path.wildcard(Path.join(@plugins_source, "*.toml")) do
+    for file <- Path.wildcard(Path.join(Omashiki.Plugin.Loader.shipped_dir(), "*.toml")) do
       File.cp!(file, Path.join(dest, Path.basename(file)))
     end
 

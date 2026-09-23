@@ -1085,10 +1085,8 @@ defmodule Omashiki.Config do
 
   defp plugins_dir_for(base_dir) do
     direct = Path.join(base_dir, "plugins")
-    if File.dir?(direct), do: direct, else: repo_plugins_dir()
+    if File.dir?(direct), do: direct, else: Omashiki.Plugin.Loader.shipped_dir()
   end
-
-  defp repo_plugins_dir, do: Path.expand("../../../plugins", __DIR__)
 
   defp expand_path("~/" <> rest), do: Path.join(System.user_home!(), rest)
   defp expand_path(path) when is_binary(path), do: path

@@ -4,6 +4,9 @@ defmodule Omashiki.Plugin.Loader do
   alias Omashiki.Config.Error
   alias Omashiki.Plugin.Manifest
 
+  @doc "The manifests that ship with the application, in `priv/plugins`."
+  def shipped_dir, do: Application.app_dir(:omashiki, "priv/plugins")
+
   def load!(plugins_dir) when is_binary(plugins_dir) do
     unless File.dir?(plugins_dir) do
       raise Error, "plugins directory not found at #{plugins_dir}"

@@ -27,7 +27,9 @@ RUN mix release
 
 FROM alpine:3.22
 
-RUN apk add --no-cache libstdc++ openssl ncurses-libs git \
+# docker-cli: an embedded house loads its configuration by running each
+# agent image to check that it provides the plugin's binaries.
+RUN apk add --no-cache libstdc++ openssl ncurses-libs git docker-cli \
  && git config --system --add safe.directory '*'
 
 WORKDIR /app

@@ -3,10 +3,8 @@ defmodule Omashiki.Plugin.OptionSchemaTest do
 
   alias Omashiki.Plugin.{Loader, OptionSchema}
 
-  @plugins_dir Path.expand("../../../../plugins", __DIR__)
-
   setup do
-    {:ok, plugins: Loader.load!(@plugins_dir)}
+    {:ok, plugins: Loader.load!(Loader.shipped_dir())}
   end
 
   test "rejects unknown fields in manifest option specs", %{plugins: plugins} do

@@ -7,12 +7,11 @@ defmodule Omashiki.Plugin.InterpreterTest do
   alias Omashiki.Runtime.Capability
   alias Omashiki.Runtime.Spec
 
-  @plugins_dir Path.expand("../../../../plugins", __DIR__)
   @minimal "transport = \"cli\"\n[output]\nshape = \"object\"\ntext = \"text\"\n"
   @approvals "[approvals]\nmechanism = \"non_interactive\"\nenforced_by = \"tool --print\"\n"
 
   setup do
-    plugins = Loader.load!(@plugins_dir)
+    plugins = Loader.load!(Loader.shipped_dir())
     manifest = Map.fetch!(plugins, "jcode")
     {:ok, manifest: manifest, plugins: plugins}
   end
