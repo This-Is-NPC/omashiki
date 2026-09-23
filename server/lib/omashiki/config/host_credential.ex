@@ -34,7 +34,7 @@ defmodule Omashiki.Config.HostCredential do
   Origins are kept in their declared form. `~/` is **not** expanded here: the
   home that matters is the one on the machine that runs the container, which
   in a manager/worker split is not the machine loading this file.
-  `Omashiki.Runtime.HostCredentials.materialize/3` expands it at copy time.
+  `Omashiki.Runtime.HostCredentials.materialize/4` expands it at copy time.
   Absolute paths pass through; `./` and `../` are rejected because they would
   silently bind the credential to whichever working directory the process
   happened to start in. Nothing is checked for existence: a missing or

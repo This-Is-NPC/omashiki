@@ -12,13 +12,17 @@ defmodule Omashiki.Runtime.HostCredentials do
   running Docker (embedded manager or remote worker), not to whoever loaded
   `omashiki.toml`. A worker whose home lacks the file fails the attempt with
   `host_credential_unavailable`; nothing is fetched from anywhere else.
+
+  A copy belongs to the house of its attempt, the one whose id labels the
+  attempt's container (`Omashiki.House`). Its directory names both, so houses
+  that share a machine each sweep only their own copies.
   """
 
   alias Omashiki.Config.HostCredential
 
   @container_dir HostCredential.container_dir()
   @empty %{dir: nil, binds: [], mounts: []}
-  @scope ~r/^[A-Za-z0-9._-]+$/
+  @id ~r/^[A-Za-z0-9._-]+$/
   @prefix "omashiki-credentials-"
 
   @doc """
@@ -30,47 +34,58 @@ defmodule Omashiki.Runtime.HostCredentials do
     Application.get_env(:omashiki, :host_credential_root) || default_base()
   end
 
-  @doc "Private host directory for one attempt scope."
-  def scope_dir(scope_id) when is_binary(scope_id) do
-    unless Regex.match?(@scope, scope_id) do
-      raise ArgumentError, "unsafe attempt scope #{inspect(scope_id)}"
-    end
+  @doc """
+  Private host directory for one attempt scope of one house,
+  `omashiki-credentials-<scope>@<house>`. Neither id may contain `@`, so a
+  name splits back into exactly one scope and one house.
+  """
+  def scope_dir(house, scope_id) when is_binary(house) and is_binary(scope_id) do
+    Path.join(root(), @prefix <> safe_id!(scope_id) <> "@" <> safe_id!(house))
+  end
 
-    Path.join(root(), @prefix <> scope_id)
+  defp safe_id!(id) do
+    if Regex.match?(@id, id), do: id, else: raise(ArgumentError, "unsafe id #{inspect(id)}")
   end
 
   @doc """
-  Copy every origin declared by the environment into the attempt directory.
+  Copy every origin declared by the environment into the directory of the
+  attempt scope of `house`.
 
   Returns the directory bind plus one mount definition per file so harness
   adapters resolve their credential paths. A missing origin fails the attempt.
   """
-  def materialize(scope_id, environment, opts \\ []) when is_binary(scope_id) do
+  def materialize(house, scope_id, environment, opts \\ [])
+      when is_binary(house) and is_binary(scope_id) do
     case declared(environment) do
       [] -> {:ok, @empty}
-      credentials -> copy_all(scope_id, credentials, Keyword.get(opts, :owner))
+      credentials -> copy_all(scope_dir(house, scope_id), credentials, Keyword.get(opts, :owner))
     end
   end
 
   @doc "Remove one attempt's credential directory. Idempotent."
-  def discard(scope_id) when is_binary(scope_id) do
-    _ = File.rm_rf(scope_dir(scope_id))
+  def discard(house, scope_id) when is_binary(house) and is_binary(scope_id) do
+    _ = File.rm_rf(scope_dir(house, scope_id))
     :ok
   rescue
     ArgumentError -> :ok
   end
 
-  def discard(_scope_id), do: :ok
+  def discard(_house, _scope_id), do: :ok
 
-  @doc "Drop credential directories that no longer belong to an active attempt."
-  def sweep(active_scope_ids) when is_list(active_scope_ids) do
+  @doc """
+  Drop the credential directories of `houses` that no longer belong to an
+  active attempt. Those of every other house stay.
+  """
+  def sweep(houses, active_scope_ids) when is_list(houses) and is_list(active_scope_ids) do
     active = MapSet.new(active_scope_ids)
 
     case File.ls(root()) do
       {:ok, entries} ->
-        for @prefix <> scope_id <- entries,
+        for @prefix <> name <- entries,
+            [scope_id, house] <- [String.split(name, "@")],
+            house in houses,
             not MapSet.member?(active, scope_id),
-            do: discard(scope_id)
+            do: discard(house, scope_id)
 
       _ ->
         :ok
@@ -93,16 +108,14 @@ defmodule Omashiki.Runtime.HostCredentials do
     end
   end
 
-  defp copy_all(scope_id, credentials, owner) do
-    dir = scope_dir(scope_id)
-
+  defp copy_all(dir, credentials, owner) do
     with :ok <- reset(dir),
          {:ok, mounts} <- copy_files(dir, credentials, owner) do
       chown(dir, owner)
       {:ok, %{dir: dir, binds: ["#{dir}:#{@container_dir}"], mounts: mounts}}
     else
       {:error, reason} ->
-        discard(scope_id)
+        _ = File.rm_rf(dir)
         {:error, reason}
     end
   end

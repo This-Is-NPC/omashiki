@@ -48,5 +48,12 @@ defmodule Omashiki.Worker.OfferTest do
     assert round.house_id == house
 
     assert {:error, :missing_house_id} = Offer.from_map(Map.delete(map, "house_id"))
+
+    # The id reaches container labels and credential directory names.
+    for bad <- ["", "another-house", "#{house}@x", "../#{house}"] do
+      assert {:error, :invalid_house_id} = Offer.from_map(%{map | "house_id" => bad})
+    end
+
+    assert {:error, :missing_house_id} = Offer.from_map(%{map | "house_id" => 42})
   end
 end

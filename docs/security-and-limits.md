@@ -15,6 +15,9 @@ A client selects registered names and supplies an instruction with optional cont
 Provider API keys for gateway access remain in the house.
 Subscription credential files are a separate access method.
 Those files exist on the execution machine and are copied for each attempt.
+Each copy is a private directory in `/dev/shm` named after the attempt and the id of its house.
+The copy is removed with the attempt's container.
+A cleanup removes only copies of the houses it serves, so other houses on the machine keep the copies of their running attempts.
 The worker does not receive the developer's house password or house database.
 
 The GitHub identity broker keeps App keys and installation tokens in the house.

@@ -4,7 +4,8 @@ defmodule Omashiki.Worker.Offer do
 
   An offer sent to a remote worker names the house it comes from
   (`house_id`, `Omashiki.House.id/0`). The worker labels the attempt's
-  container with it; an offer without it is refused.
+  container with it; an offer without it, or with one that is not a UUID, is
+  refused.
   """
 
   alias Omashiki.Jobs.{Job, JobAttempt}
@@ -109,33 +110,45 @@ defmodule Omashiki.Worker.Offer do
   end
 
   @doc "Decode an offer from JSON transport."
-  def from_map(%{"house_id" => house_id} = map) when is_binary(house_id) and house_id != "" do
-    {:ok,
-     %__MODULE__{
-       job_id: map["job_id"],
-       attempt_id: map["attempt_id"],
-       lease_token: map["lease_token"],
-       sink: map["sink"],
-       payload: Map.get(map, "payload"),
-       admitted_environment: Map.get(map, "admitted_environment"),
-       admitted_repository: Map.get(map, "admitted_repository"),
-       admitted_plugin: Map.get(map, "admitted_plugin"),
-       registry_digest: Map.get(map, "registry_digest"),
-       timeout_ms: Map.get(map, "timeout_ms", 60_000),
-       attempt_number: map["attempt_number"],
-       user_id: map["user_id"],
-       repository: Map.get(map, "repository"),
-       environment: map["environment"],
-       admitted_environment_digest: map["admitted_environment_digest"],
-       admitted_repository_digest: Map.get(map, "admitted_repository_digest"),
-       admitted_plugin_digest: map["admitted_plugin_digest"],
-       house_id: house_id,
-       manager_id: Map.get(map, "manager_id"),
-       manager_url: Map.get(map, "manager_url")
-     }}
+  def from_map(map) when is_map(map) do
+    with {:ok, house_id} <- house_id(map), do: {:ok, decode(map, house_id)}
   end
 
-  def from_map(map) when is_map(map), do: {:error, :missing_house_id}
+  # The id names the worker's containers and credential copies, so nothing
+  # but a house id, a UUID, gets that far.
+  defp house_id(%{"house_id" => house_id}) when is_binary(house_id) do
+    case Ecto.UUID.cast(house_id) do
+      {:ok, house_id} -> {:ok, house_id}
+      :error -> {:error, :invalid_house_id}
+    end
+  end
+
+  defp house_id(_map), do: {:error, :missing_house_id}
+
+  defp decode(map, house_id) do
+    %__MODULE__{
+      job_id: map["job_id"],
+      attempt_id: map["attempt_id"],
+      lease_token: map["lease_token"],
+      sink: map["sink"],
+      payload: Map.get(map, "payload"),
+      admitted_environment: Map.get(map, "admitted_environment"),
+      admitted_repository: Map.get(map, "admitted_repository"),
+      admitted_plugin: Map.get(map, "admitted_plugin"),
+      registry_digest: Map.get(map, "registry_digest"),
+      timeout_ms: Map.get(map, "timeout_ms", 60_000),
+      attempt_number: map["attempt_number"],
+      user_id: map["user_id"],
+      repository: Map.get(map, "repository"),
+      environment: map["environment"],
+      admitted_environment_digest: map["admitted_environment_digest"],
+      admitted_repository_digest: Map.get(map, "admitted_repository_digest"),
+      admitted_plugin_digest: map["admitted_plugin_digest"],
+      house_id: house_id,
+      manager_id: Map.get(map, "manager_id"),
+      manager_url: Map.get(map, "manager_url")
+    }
+  end
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)

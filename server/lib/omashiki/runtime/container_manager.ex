@@ -306,9 +306,11 @@ defmodule Omashiki.Runtime.ContainerManager do
     cache_groups = environment_cache_groups(environment)
     network_mode = network_mode(environment)
     job_scope = %{id: "job-#{attempt.id}"}
+    house = owning_house(opts)
 
     opts =
       opts
+      |> Keyword.put(:house, house)
       |> Keyword.put(:worktree_path, worktree_path)
       |> Keyword.put(:preset, profile)
       |> Keyword.put(:job, job)
@@ -362,7 +364,9 @@ defmodule Omashiki.Runtime.ContainerManager do
 
     result =
       with {:ok, host_credentials} <-
-             HostCredentials.materialize(job_scope.id, environment, owner: {host_uid, host_gid}) do
+             HostCredentials.materialize(house, job_scope.id, environment,
+               owner: {host_uid, host_gid}
+             ) do
         runtime_mounts = runtime_mount_binds(runtime_mount_defs) ++ host_credentials.binds
         runtime_mount_defs = runtime_mount_defs ++ host_credentials.mounts
 
@@ -396,7 +400,7 @@ defmodule Omashiki.Runtime.ContainerManager do
       end
 
     unless match?({:ok, _}, result) do
-      HostCredentials.discard(job_scope.id)
+      HostCredentials.discard(house, job_scope.id)
 
       if protocol == "http" and is_nil(requested_host_port) do
         _ = Omashiki.Runtime.PortAllocator.release(job_scope.id)
@@ -574,9 +578,7 @@ defmodule Omashiki.Runtime.ContainerManager do
 
             provision_result =
               if cancelled_scope?(group.id) do
-                do_destroy(container_id, %{
-                  "Config" => %{"Labels" => %{"omashiki.job_scope_id" => group.id}}
-                })
+                do_destroy(container_id, container_config)
 
                 {:error, :cancelled}
               else
@@ -1669,8 +1671,12 @@ defmodule Omashiki.Runtime.ContainerManager do
   defp do_destroy(container_id), do: do_destroy(container_id, nil)
 
   defp do_destroy(container_id, container) do
-    job_scope_id =
-      job_scope_id_from_container(container) || inspect_container_job_scope_id(container_id)
+    container =
+      if job_scope_id_from_container(container),
+        do: container,
+        else: inspect_container(container_id)
+
+    job_scope_id = job_scope_id_from_container(container)
 
     try do
       case docker_post_no_body("/containers/#{container_id}/stop?t=#{@stop_timeout}") do
@@ -1702,27 +1708,27 @@ defmodule Omashiki.Runtime.ContainerManager do
       if is_binary(job_scope_id) do
         release_cache_owner(job_scope_id)
         _ = Omashiki.Runtime.PortAllocator.release(job_scope_id)
-        HostCredentials.discard(job_scope_id)
+        HostCredentials.discard(label(container, @house_label), job_scope_id)
         clear_cancelled_scope(job_scope_id)
       end
     end
   end
 
-  defp inspect_container_job_scope_id(container_id) do
+  defp inspect_container(container_id) do
     case docker_get("/containers/#{container_id}/json") do
-      {:ok, container} -> job_scope_id_from_container(container)
-      _ -> nil
+      {:ok, container} when is_map(container) -> container
+      _ -> %{}
     end
   rescue
-    _ -> nil
+    _ -> %{}
   catch
-    _, _ -> nil
+    _, _ -> %{}
   end
 
   defp do_cleanup_orphans do
     with {:ok, containers} <- list_house_containers() do
       active_ids = active_job_scope_ids()
-      HostCredentials.sweep(active_ids)
+      HostCredentials.sweep(houses(), active_ids)
 
       orphans = Enum.filter(containers, &(orphan_status(&1, active_ids) == :orphan))
 

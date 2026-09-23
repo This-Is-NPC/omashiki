@@ -116,3 +116,5 @@ Each container that a house runs carries that id in the `omashiki.house` label.
 A house lists, counts, and removes only containers with its own id.
 A remote worker labels each container with the id of the house that offered the attempt.
 A container without the label belongs to no house, and no house removes it.
+The credential copy of an attempt carries the same id in its directory name, `omashiki-credentials-<scope>@<house>`.
+A house removes only its own credential copies of attempts that are not live.

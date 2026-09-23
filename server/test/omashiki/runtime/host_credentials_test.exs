@@ -7,6 +7,9 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
   alias Omashiki.Runtime.HostCredentials
   alias Omashiki.Runtime.Spec
 
+  @house "this-house"
+  @other "another-house"
+
   setup do
     origins =
       Path.join(System.tmp_dir!(), "omashiki-origins-#{System.unique_integer([:positive])}")
@@ -29,9 +32,9 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
     scope = scope()
 
     assert {:ok, materialized} =
-             HostCredentials.materialize(scope, environment(ctx.auth, ctx.config))
+             HostCredentials.materialize(@house, scope, environment(ctx.auth, ctx.config))
 
-    assert materialized.dir == HostCredentials.scope_dir(scope)
+    assert materialized.dir == HostCredentials.scope_dir(@house, scope)
     assert materialized.binds == ["#{materialized.dir}:/run/omashiki/state"]
 
     assert materialized.mounts == [
@@ -49,8 +52,8 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
     first = scope()
     second = scope()
 
-    assert {:ok, one} = HostCredentials.materialize(first, environment(ctx.auth))
-    assert {:ok, two} = HostCredentials.materialize(second, environment(ctx.auth))
+    assert {:ok, one} = HostCredentials.materialize(@house, first, environment(ctx.auth))
+    assert {:ok, two} = HostCredentials.materialize(@house, second, environment(ctx.auth))
 
     refute one.dir == two.dir
     File.write!(Path.join(one.dir, "auth.json"), ~s({"token":"refreshed"}))
@@ -60,12 +63,12 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
   end
 
   test "picks up a rotated origin without a reload", ctx do
-    assert {:ok, before} = HostCredentials.materialize(scope(), environment(ctx.auth))
+    assert {:ok, before} = HostCredentials.materialize(@house, scope(), environment(ctx.auth))
     assert File.read!(Path.join(before.dir, "auth.json")) == ~s({"token":"live"})
 
     File.write!(ctx.auth, ~s({"token":"rotated"}))
 
-    assert {:ok, later} = HostCredentials.materialize(scope(), environment(ctx.auth))
+    assert {:ok, later} = HostCredentials.materialize(@house, scope(), environment(ctx.auth))
     assert File.read!(Path.join(later.dir, "auth.json")) == ~s({"token":"rotated"})
   end
 
@@ -74,9 +77,9 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
     File.rm!(ctx.auth)
 
     assert {:error, {:host_credential_unavailable, "opencode-local", "auth.json"}} =
-             HostCredentials.materialize(scope, environment(ctx.auth))
+             HostCredentials.materialize(@house, scope, environment(ctx.auth))
 
-    refute File.exists?(HostCredentials.scope_dir(scope))
+    refute File.exists?(HostCredentials.scope_dir(@house, scope))
   end
 
   # `~/` resolves against the home of the process that copies — this one — so a
@@ -87,7 +90,7 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
 
     with_home(ctx.origins, fn ->
       assert {:ok, materialized} =
-               HostCredentials.materialize(scope(), environment("~/.harness/login.json"))
+               HostCredentials.materialize(@house, scope(), environment("~/.harness/login.json"))
 
       assert File.read!(Path.join(materialized.dir, "auth.json")) == ~s({"login":"worker"})
     end)
@@ -98,10 +101,10 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
 
     with_home(ctx.origins, fn ->
       assert {:error, {:host_credential_unavailable, "opencode-local", "auth.json"}} =
-               HostCredentials.materialize(scope, environment("~/.harness/login.json"))
+               HostCredentials.materialize(@house, scope, environment("~/.harness/login.json"))
     end)
 
-    refute File.exists?(HostCredentials.scope_dir(scope))
+    refute File.exists?(HostCredentials.scope_dir(@house, scope))
   end
 
   test "readable/1 checks an origin the way an attempt would copy it", ctx do
@@ -123,34 +126,58 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
     }
 
     assert {:error, {:host_credential_conflict, "auth.json"}} =
-             HostCredentials.materialize(scope(), environment)
+             HostCredentials.materialize(@house, scope(), environment)
   end
 
   test "materializes nothing for an environment without host credentials" do
     assert {:ok, %{dir: nil, binds: [], mounts: []}} =
-             HostCredentials.materialize(scope(), %{"host_credentials" => []})
+             HostCredentials.materialize(@house, scope(), %{"host_credentials" => []})
   end
 
-  test "discards one scope and sweeps every inactive scope", ctx do
+  test "discards one scope and sweeps every inactive scope of its house", ctx do
     active = scope()
     stale = scope()
+    theirs = scope()
 
-    assert {:ok, _} = HostCredentials.materialize(active, environment(ctx.auth))
-    assert {:ok, _} = HostCredentials.materialize(stale, environment(ctx.auth))
+    assert {:ok, _} = HostCredentials.materialize(@house, active, environment(ctx.auth))
+    assert {:ok, _} = HostCredentials.materialize(@house, stale, environment(ctx.auth))
+    assert {:ok, _} = HostCredentials.materialize(@other, theirs, environment(ctx.auth))
 
     # The root is shared with everything else in /dev/shm.
     foreign = Path.join(HostCredentials.root(), "not-omashiki")
     File.mkdir_p!(foreign)
 
-    HostCredentials.sweep([active])
+    HostCredentials.sweep([@house], [active])
 
-    assert File.dir?(HostCredentials.scope_dir(active))
-    refute File.exists?(HostCredentials.scope_dir(stale))
+    assert File.dir?(HostCredentials.scope_dir(@house, active))
+    refute File.exists?(HostCredentials.scope_dir(@house, stale))
+    assert File.dir?(HostCredentials.scope_dir(@other, theirs))
     assert File.dir?(foreign)
 
-    HostCredentials.discard(active)
-    refute File.exists?(HostCredentials.scope_dir(active))
-    assert HostCredentials.discard(active) == :ok
+    HostCredentials.discard(@house, active)
+    refute File.exists?(HostCredentials.scope_dir(@house, active))
+    assert HostCredentials.discard(@house, active) == :ok
+  end
+
+  test "sweeps each house a worker serves by its own attempts", ctx do
+    [mine, stale, kept_elsewhere] = Enum.map(1..3, fn _ -> scope() end)
+
+    assert {:ok, _} = HostCredentials.materialize(@house, mine, environment(ctx.auth))
+    assert {:ok, _} = HostCredentials.materialize(@house, stale, environment(ctx.auth))
+    assert {:ok, _} = HostCredentials.materialize(@other, stale, environment(ctx.auth))
+    assert {:ok, _} = HostCredentials.materialize("third", kept_elsewhere, environment(ctx.auth))
+
+    HostCredentials.sweep([@house, @other], [mine])
+
+    assert File.dir?(HostCredentials.scope_dir(@house, mine))
+    refute File.exists?(HostCredentials.scope_dir(@house, stale))
+    refute File.exists?(HostCredentials.scope_dir(@other, stale))
+    assert File.dir?(HostCredentials.scope_dir("third", kept_elsewhere))
+  end
+
+  test "refuses an owner that could not be read back from the directory name" do
+    assert_raise ArgumentError, fn -> HostCredentials.scope_dir("a@b", scope()) end
+    assert_raise ArgumentError, fn -> HostCredentials.scope_dir(@house, "../job") end
   end
 
   test "satisfies the Claude harness writable-credentials mount", ctx do
@@ -167,7 +194,7 @@ defmodule Omashiki.Runtime.HostCredentialsTest do
       ]
     }
 
-    assert {:ok, materialized} = HostCredentials.materialize(scope(), environment)
+    assert {:ok, materialized} = HostCredentials.materialize(@house, scope(), environment)
 
     context = %Context{
       job: %{payload: %{"instruction" => "go"}},

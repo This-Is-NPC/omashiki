@@ -3,6 +3,7 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
 
   alias Omashiki.Config
   alias Omashiki.Runtime.ContainerManager
+  alias Omashiki.Runtime.HostCredentials
   alias Omashiki.Harness.LaunchPlan
   alias Omashiki.Plugin.Preset
   alias Omashiki.Runtime.Spec
@@ -568,6 +569,18 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
              ]
     end
 
+    test "cleanup sweeps this house's credential copies and keeps another house's" do
+      mine = HostCredentials.scope_dir(Omashiki.House.id(), "job-#{Ecto.UUID.generate()}")
+      theirs = HostCredentials.scope_dir("another-house", "job-#{Ecto.UUID.generate()}")
+      File.mkdir_p!(mine)
+      File.mkdir_p!(theirs)
+
+      assert {:ok, _} = ContainerManager.op_cleanup_orphans()
+
+      refute File.exists?(mine)
+      assert File.dir?(theirs)
+    end
+
     test "the census counts only this house's containers" do
       assert {:ok, [%{id: "aaaaaaaaaaaa"}]} = ContainerManager.op_census()
     end
@@ -590,12 +603,20 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
 
       :ok = Omashiki.Worker.State.remember_house("localhost", "another-house")
 
+      served = HostCredentials.scope_dir("another-house", "job-#{Ecto.UUID.generate()}")
+      unserved = HostCredentials.scope_dir(Omashiki.House.id(), "job-#{Ecto.UUID.generate()}")
+      File.mkdir_p!(served)
+      File.mkdir_p!(unserved)
+
       assert {:ok, ["bbbbbbbbbbbb"]} = ContainerManager.op_cleanup_orphans()
 
       assert Enum.reverse(Agent.get(calls, & &1)) == [
                {"POST", ["bbbbbbbbbbbb", "stop"]},
                {"DELETE", ["bbbbbbbbbbbb"]}
              ]
+
+      refute File.exists?(served)
+      assert File.dir?(unserved)
     end
   end
 

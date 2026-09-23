@@ -80,10 +80,11 @@ The worker never removes a container it did not report to that manager.
 This reclaims the container of an attempt the manager failed while the worker kept running.
 
 Each offer carries the house id of the manager that sent it.
-The worker refuses an offer without one.
+The worker refuses an offer without one, or with one that is not a UUID.
 Before it runs the attempt, the worker stores that house id with the manager ID in its enrollment state file.
 It labels the attempt's container with the house id in `omashiki.house`, as the house labels its own containers.
 The census and the cleanup at start of a worker cover only containers of the house ids of its enrolled managers.
+The cleanup also removes the credential copies of those house ids, and only those.
 Manager IDs are local names and do not decide ownership.
 Other houses and other workers can share the Docker host, and a worker never lists or removes containers of a house it does not serve.
 Removing an enrollment also forgets that manager's house id.
