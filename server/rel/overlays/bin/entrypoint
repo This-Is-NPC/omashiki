@@ -5,6 +5,10 @@ set -e
 
 cd "$(dirname "$0")/.."
 
+# TMPDIR can name a directory in a mounted host path. Create it, since the
+# release falls back to /tmp when it is missing.
+mkdir -p "${TMPDIR:-/tmp}"
+
 case "${OMASHIKI_ROLE:-embedded}" in
   worker)
     exec ./bin/omashiki start "$@"

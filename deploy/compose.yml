@@ -48,6 +48,10 @@ services:
       # The host Docker daemon starts the agent containers and mounts paths
       # the house names, so the house uses the host's home directory.
       HOME: ${OMASHIKI_HOST_HOME:-${HOME}}
+      # Job work directories, file results and the sockets agents mount live
+      # in the temporary directory, which the daemon must see at the same
+      # path, so it sits in the mounted cache, one per house.
+      TMPDIR: ${OMASHIKI_HOST_HOME:-${HOME}}/.cache/omashiki/tmp/${COMPOSE_PROJECT_NAME}
       OMASHIKI_ROLE: embedded
       DATABASE_URL: ecto://postgres:postgres@db/omashiki
       SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set SECRET_KEY_BASE to a long random value}
