@@ -17,6 +17,7 @@ Admission captures resolved declarations in each job.
 | `job_events` | Append-only observations with contiguous per-job sequence. |
 | `execution_capacity` | Database execution capacity by machine for embedded coordination. |
 | `webhook_deliveries` | Terminal outbox and delivery retry state. |
+| `secret_allowances` | Secret-scan findings allowed by fingerprint, per environment and, for a git sink, repository, with file, rule, note, and creator. |
 | `usage_ledger` | Append-only usage attributed to a stable request and job. |
 | `token_audit_events` | Token actions: submit, cancel, retry, approve, reject, issue, rotate, revoke, redeliver. |
 | `oban_jobs` | Durable scheduler and notification work. |

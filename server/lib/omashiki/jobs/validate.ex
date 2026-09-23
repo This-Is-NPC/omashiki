@@ -8,11 +8,15 @@ defmodule Omashiki.Jobs.Validate do
   The protected directories `.git/`, `.ssh/` and `.aws/` are refused by path:
   output never writes there, whatever the content. Every other file is judged
   by its content, through `Omashiki.Jobs.SecretScan`. When the scanner is
-  unavailable the output is refused. `secret_scan: false` skips only the
-  secret scan: an operator approved output the scan refused.
+  unavailable the output is refused.
+
+  `:secret_scan` is required: the job's `Omashiki.Jobs.SecretScan.Policy`,
+  whose allowed findings are dropped, or `:skip` for output an operator
+  approved after the scan refused it.
   """
 
   alias Omashiki.Jobs.SecretScan
+  alias Omashiki.Jobs.SecretScan.Policy
 
   @max_bytes 100 * 1024 * 1024
 
@@ -32,19 +36,23 @@ defmodule Omashiki.Jobs.Validate do
       protected = Enum.find(paths, &protected_path?/1) ->
         {:error, {:protected_path, protected}}
 
-      Keyword.get(opts, :secret_scan, true) ->
-        secret_scan(path, paths)
-
       true ->
-        :ok
+        secret_scan(path, paths, Keyword.fetch!(opts, :secret_scan))
     end
   end
 
-  defp secret_scan(path, paths) do
-    case SecretScan.scan(path, paths) do
-      {:ok, []} -> :ok
-      {:ok, findings} -> {:error, {:secret_found, findings}}
-      {:error, reason} -> {:error, {:secret_scan_unavailable, reason}}
+  defp secret_scan(_path, _paths, :skip), do: :ok
+
+  defp secret_scan(path, paths, %Policy{} = policy) do
+    case SecretScan.scan(path, paths, policy.key) do
+      {:ok, findings} ->
+        case Enum.reject(findings, &Policy.allowed?(policy, &1.fingerprint)) do
+          [] -> :ok
+          refused -> {:error, {:secret_found, refused}}
+        end
+
+      {:error, reason} ->
+        {:error, {:secret_scan_unavailable, reason}}
     end
   end
 

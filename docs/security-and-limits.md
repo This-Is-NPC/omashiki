@@ -86,6 +86,19 @@ An operator decides in the task details, and a client decides with a token that 
 
 Jobs that depend on a job in review keep waiting.
 
+### Allowed findings
+
+In the review of a held job, **Allow in this environment** tells the secret scan to stop refusing one finding, with an optional note.
+The allowance applies to later jobs of the same environment and, for a `git` sink, of the same repository.
+It matches the same secret, in the same file, under the same gitleaks rule; the same secret in another file is refused.
+Approve the held job as usual after you allow its findings.
+When every finding of an output is allowed, the output publishes without review.
+The Config screen lists the allowances, with who created them and when, and removes them.
+
+A finding's fingerprint is an HMAC-SHA256 of the file, the rule, and the SHA-256 of the secret.
+Its key is derived from `SECRET_KEY_BASE` on the house and travels to the node with each job, so a fingerprint cannot be checked against guesses of a weak secret without that key.
+The raw secret never leaves gitleaks, and the key is never logged.
+
 The node keeps a record of each held output in `~/.cache/omashiki/held`, readable only by the house user.
 Recovery, container reclaim, boot cleanup, and a restart of the node leave the output and its record in place.
 Every few seconds the node asks the house what to do with each held output, over the attempt heartbeat that carries cancellation.
@@ -140,6 +153,7 @@ The house derives these values from `SECRET_KEY_BASE`. Changing it invalidates a
 | API tokens | Every token stops working. Issue new tokens. |
 | Terminal webhook secrets | Webhooks of jobs submitted before the change are not delivered, and failed deliveries cannot be redelivered. New tokens need their webhook secret again. |
 | Runtime claims | Running agents lose the gateway, the tools proxy, and the package proxy until their attempt ends. |
+| Secret allowances | Finding fingerprints change, so no allowance matches any more and the findings are refused again. Remove the old allowances on the Config screen and allow the findings again from the next review. |
 
 A worker signs runtime claims that its manager verifies, so it uses the same `SECRET_KEY_BASE` as the manager.
 Keep `SECRET_KEY_BASE` when you back up persistent state.

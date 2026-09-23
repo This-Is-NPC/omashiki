@@ -56,4 +56,51 @@ defmodule Omashiki.Worker.OfferTest do
 
     assert {:error, :missing_house_id} = Offer.from_map(%{map | "house_id" => 42})
   end
+
+  test "carries the job's secret-scan policy: the house key and its allowances" do
+    user = user_fixture()
+    {token, _} = api_token_fixture(user)
+
+    {job, attempt} =
+      job_fixture(user, token, %{
+        status: "provisioning",
+        repository: nil,
+        admitted_repository: nil,
+        admitted_repository_digest: nil,
+        environment: "notes",
+        admitted_environment: %{"name" => "notes", "sink" => "files"}
+      })
+
+    allowed = String.duplicate("a", 64)
+    other = String.duplicate("b", 64)
+
+    Repo.insert!(%Omashiki.Jobs.SecretAllowance{
+      fingerprint: allowed,
+      environment: "notes",
+      file: "notes.txt",
+      rule_id: "github-pat"
+    })
+
+    Repo.insert!(%Omashiki.Jobs.SecretAllowance{
+      fingerprint: other,
+      environment: "code",
+      repository: "app",
+      file: "notes.txt",
+      rule_id: "github-pat"
+    })
+
+    offer = Offer.from_claimed(job, attempt)
+    assert offer.secret_scan.allowed == [allowed]
+    assert byte_size(offer.secret_scan.key) == 32
+    refute inspect(offer) =~ Base.encode64(offer.secret_scan.key)
+
+    map = Offer.to_map(%{offer | house_id: Ecto.UUID.generate()})
+    assert {:ok, round} = Offer.from_map(map)
+    assert round.secret_scan == offer.secret_scan
+
+    assert {:error, :invalid_secret_scan} = Offer.from_map(Map.delete(map, "secret_scan"))
+
+    assert {:error, :invalid_secret_scan} =
+             Offer.from_map(put_in(map, ["secret_scan", "key"], "short"))
+  end
 end

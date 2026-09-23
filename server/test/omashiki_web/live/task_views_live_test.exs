@@ -369,6 +369,29 @@ defmodule OmashikiWeb.TaskViewsLiveTest do
       assert %{"decision" => "approve"} = Repo.get!(Job, job.id).review
     end
 
+    test "a finding can be allowed in the task's environment",
+         %{conn: conn, user: user, token: token} do
+      {job, _attempt} = insert_job(user, token, "review", "leaky-notes")
+
+      {:ok, lv, _html} = live(conn, ~p"/?job=#{job.id}")
+
+      text =
+        lv
+        |> form(~s(form[phx-submit="allow"]), %{"note" => "a fixture token"})
+        |> render_submit()
+        |> visible_text()
+
+      assert text =~ "Allowed notes.txt (github-pat) in opencode."
+      assert text =~ "allowed in opencode"
+      refute has_element?(lv, ~s(form[phx-submit="allow"]))
+      assert text =~ "Approve and publish"
+
+      assert [%{note: "a fixture token", repository: "omashiki", created_by_id: user_id}] =
+               Omashiki.Jobs.SecretAllowances.list()
+
+      assert user_id == user.id
+    end
+
     test "reject fails the task", %{conn: conn, user: user, token: token} do
       {job, _attempt} = insert_job(user, token, "review", "leaky-notes")
 

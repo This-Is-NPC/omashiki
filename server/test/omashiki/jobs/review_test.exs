@@ -12,6 +12,7 @@ defmodule Omashiki.Jobs.ReviewTest do
     JobAttempt,
     JobEvent,
     Runner,
+    SecretAllowances,
     WebhookDelivery,
     Webhooks
   }
@@ -276,6 +277,55 @@ defmodule Omashiki.Jobs.ReviewTest do
     end
   end
 
+  describe "an allowed finding" do
+    setup %{token: token} do
+      user = Repo.preload(token, :user).user
+      {job, _attempt} = run(token, "notes")
+      [finding] = job.review["error"]["details"]["findings"]
+      {:ok, job: job, finding: finding, user: user}
+    end
+
+    test "is recorded for the job's environment", %{job: job, finding: finding, user: user} do
+      assert {:ok, allowance} =
+               SecretAllowances.allow(job, finding["fingerprint"], user, "  test fixture  ")
+
+      assert allowance.environment == "notes"
+      assert is_nil(allowance.repository)
+      assert allowance.file == "leak.txt"
+      assert allowance.rule_id == "github-pat"
+      assert allowance.note == "test fixture"
+      assert allowance.created_by_id == user.id
+
+      assert {:ok, same} = SecretAllowances.allow(job, finding["fingerprint"], user, nil)
+      assert same.id == allowance.id
+      assert SecretAllowances.fingerprints("notes", nil) == [finding["fingerprint"]]
+      assert SecretAllowances.fingerprints("code", "app") == []
+
+      assert {:error, :unknown_finding} =
+               SecretAllowances.allow(job, String.duplicate("0", 64), user, nil)
+    end
+
+    test "lets the next job with the same secret publish normally",
+         %{token: token, job: job, finding: finding, user: user} do
+      {:ok, _allowance} = SecretAllowances.allow(job, finding["fingerprint"], user, nil)
+
+      {next, _attempt} = run(token, "notes")
+
+      assert next.status == "succeeded"
+      assert is_nil(next.review)
+      assert HeldOutput.list() |> Enum.map(& &1.job_id) == [job.id]
+    end
+
+    test "is refused again once removed", %{token: token, job: job, finding: finding, user: user} do
+      {:ok, allowance} = SecretAllowances.allow(job, finding["fingerprint"], user, nil)
+      assert {:ok, _deleted} = SecretAllowances.delete(allowance.id)
+      assert {:error, :not_found} = SecretAllowances.delete(allowance.id)
+
+      {next, _attempt} = run(token, "notes")
+      assert next.status == "review"
+    end
+  end
+
   test "only the attempt's own fence is told to keep the output", %{token: token} do
     {_job, attempt} = run(token, "notes")
 
@@ -294,7 +344,14 @@ defmodule Omashiki.Jobs.ReviewTest do
   defp run(token, environment) do
     {:ok, _, job} = Admission.admit_once(token, request(environment))
     {:ok, attempt} = Jobs.claim(job, "review-test")
-    {:ok, _job} = Runner.run(attempt, container: LeakyContainer, adapter: FakeHarness)
+
+    {:ok, _job} =
+      Runner.run(attempt,
+        container: LeakyContainer,
+        adapter: FakeHarness,
+        secret_scan: SecretAllowances.policy(job)
+      )
+
     {Repo.get!(Job, job.id), attempt}
   end
 

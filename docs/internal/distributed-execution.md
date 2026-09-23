@@ -52,6 +52,8 @@ The worker resolves permitted host credential origins on its own machine.
 
 Worker authentication is separate from operator API authentication.
 Offers carry admitted snapshots and the data-plane connection for that house.
+Each offer also carries the job's secret-scan policy: the house key for finding fingerprints and the fingerprints allowed for the job's environment and repository.
+The worker drops allowed findings from its scan and never logs the key.
 The worker checks the offer before it executes the job.
 A missing image or invalid snapshot must not produce successful execution.
 

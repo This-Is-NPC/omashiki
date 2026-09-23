@@ -10,7 +10,8 @@ defmodule Omashiki.Jobs.SecretScan do
 
   gitleaks never prints a secret: its report is rendered through a template
   that replaces the secret in the match with `REDACTED` and keeps only the
-  secret's SHA-256.
+  secret's SHA-256. That hash never leaves this module; a finding carries a
+  fingerprint keyed with the house key instead.
 
   The executable is `gitleaks` in `PATH`; the `:gitleaks_cli` application
   setting names another.
@@ -21,9 +22,11 @@ defmodule Omashiki.Jobs.SecretScan do
     One secret gitleaks found.
 
     `file` is relative to the scanned root and `match` has the secret replaced
-    with `REDACTED`. `fingerprint` is the lowercase hex SHA-256 of the file,
-    the rule, and the secret's SHA-256: it stays the same when the same secret
-    is found in the same file again, wherever the line moves.
+    with `REDACTED`. `fingerprint` is the lowercase hex HMAC-SHA256, keyed with
+    the house key, of the file, the rule, and the secret's SHA-256. It stays
+    the same when the same secret is found in the same file again, wherever
+    the line moves, and without the key it cannot be checked against guesses
+    of a weak secret.
     """
 
     @enforce_keys [:file, :line, :rule_id, :description, :match, :fingerprint]
@@ -50,18 +53,19 @@ defmodule Omashiki.Jobs.SecretScan do
   """
 
   @doc """
-  Scan the regular files among `paths`, relative to `root`.
+  Scan the regular files among `paths`, relative to `root`, and fingerprint
+  the findings with `key`.
 
   Paths that are not regular files inside `root` are skipped. Returns
   `{:error, reason}` when gitleaks is missing, fails, or times out.
   """
-  @spec scan(String.t(), [String.t()]) :: {:ok, [Finding.t()]} | {:error, term()}
-  def scan(root, paths) do
+  @spec scan(String.t(), [String.t()], binary()) :: {:ok, [Finding.t()]} | {:error, term()}
+  def scan(root, paths, key) when is_binary(key) do
     root = Path.expand(root)
 
     case Enum.filter(paths, &regular?(root, &1)) do
       [] -> {:ok, []}
-      files -> in_workspace(&scan_files(&1, root, files))
+      files -> in_workspace(&scan_files(&1, root, files, key))
     end
   end
 
@@ -75,7 +79,7 @@ defmodule Omashiki.Jobs.SecretScan do
     end
   end
 
-  defp scan_files(workspace, root, files) do
+  defp scan_files(workspace, root, files, key) do
     # gitleaks reads its configuration from the root of the scanned directory,
     # so the output sits one level below it.
     target = Path.join(workspace, "target")
@@ -106,19 +110,19 @@ defmodule Omashiki.Jobs.SecretScan do
     ]
 
     case run(args) do
-      {:ok, {_output, status}} when status in [0, @leaks_exit] -> findings(report, stage)
+      {:ok, {_output, status}} when status in [0, @leaks_exit] -> findings(report, stage, key)
       {:ok, {output, status}} -> {:error, {:exit, status, excerpt(output)}}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp findings(report, stage) do
+  defp findings(report, stage, key) do
     report
     |> File.read!()
     |> String.split("\n", trim: true)
     |> Enum.reduce_while({:ok, []}, fn line, {:ok, acc} ->
       case Jason.decode(line) do
-        {:ok, raw} -> {:cont, {:ok, [finding(raw, stage) | acc]}}
+        {:ok, raw} -> {:cont, {:ok, [finding(raw, stage, key) | acc]}}
         {:error, _error} -> {:halt, {:error, :unreadable_report}}
       end
     end)
@@ -128,7 +132,7 @@ defmodule Omashiki.Jobs.SecretScan do
     end
   end
 
-  defp finding(raw, stage) do
+  defp finding(raw, stage, key) do
     file = Path.relative_to(raw["file"], stage)
     rule_id = raw["rule_id"]
 
@@ -139,8 +143,8 @@ defmodule Omashiki.Jobs.SecretScan do
       description: raw["description"],
       match: raw["match"],
       fingerprint:
-        :sha256
-        |> :crypto.hash([file, 0, rule_id, 0, raw["secret_sha256"]])
+        :hmac
+        |> :crypto.mac(:sha256, key, [file, 0, rule_id, 0, raw["secret_sha256"]])
         |> Base.encode16(case: :lower)
     }
   end

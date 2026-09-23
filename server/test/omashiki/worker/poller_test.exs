@@ -838,7 +838,8 @@ defmodule Omashiki.Worker.PollerTest do
       "admitted_repository" => nil,
       "admitted_plugin" => nil,
       "registry_digest" => nil,
-      "timeout_ms" => 60_000
+      "timeout_ms" => 60_000,
+      "secret_scan" => Omashiki.Jobs.SecretScan.Policy.to_map(Omashiki.Fixtures.scan_policy())
     }
   end
 

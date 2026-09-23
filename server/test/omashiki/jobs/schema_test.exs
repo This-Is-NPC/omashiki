@@ -21,7 +21,7 @@ defmodule Omashiki.Jobs.SchemaTest do
       |> List.flatten()
 
     assert tables ==
-             ~w(api_tokens execution_capacity house job_attempts job_dependencies job_events job_steps jobs token_audit_events usage_ledger users webhook_deliveries)
+             ~w(api_tokens execution_capacity house job_attempts job_dependencies job_events job_steps jobs secret_allowances token_audit_events usage_ledger users webhook_deliveries)
 
     oban_tables =
       Repo.query!(

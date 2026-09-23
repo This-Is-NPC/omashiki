@@ -4,14 +4,15 @@ defmodule OmashikiWeb.TaskViewsLive do
 
   The screen reads jobs and the views file, and the views file never reaches
   admission, dispatch, or the registry. Selecting a view or a task only
-  patches the URL. The one action is the decision on output held for review,
-  in the task details: approve publishes it, reject fails the job.
+  patches the URL. The actions are on output held for review, in the task
+  details: allow a finding in the job's environment, approve the output to
+  publish it, or reject it to fail the job.
   """
 
   use OmashikiWeb, :live_view
 
   alias Omashiki.Jobs
-  alias Omashiki.Jobs.Api
+  alias Omashiki.Jobs.{Api, SecretAllowances}
   alias Omashiki.Worker.Presence
   alias OmashikiWeb.Layouts
   alias OmashikiWeb.OperationHelpers, as: Ops
@@ -96,6 +97,25 @@ defmodule OmashikiWeb.TaskViewsLive do
   def handle_event("reject", %{"id" => id}, socket),
     do: {:noreply, decide(socket, id, &Jobs.reject/2, "Rejected. The output is removed from")}
 
+  def handle_event("allow", %{"job" => id, "fingerprint" => fingerprint} = params, socket) do
+    user = socket.assigns.current_user
+
+    socket =
+      with {:ok, job} <- Api.get(id, user),
+           {:ok, allowance} <- SecretAllowances.allow(job, fingerprint, user, params["note"]) do
+        socket
+        |> put_flash(
+          :info,
+          "Allowed #{allowance.file} (#{allowance.rule_id}) in #{job.environment}."
+        )
+        |> refresh_screen()
+      else
+        {:error, reason} -> put_flash(socket, :error, "Finding not allowed: #{inspect(reason)}.")
+      end
+
+    {:noreply, socket}
+  end
+
   defp decide(socket, id, decide, done) do
     user = socket.assigns.current_user
 
@@ -177,12 +197,19 @@ defmodule OmashikiWeb.TaskViewsLive do
         steps =
           if attempt, do: Enum.filter(detail.steps, &(&1.attempt_id == attempt.id)), else: []
 
-        Map.put(detail, :row, %{job: detail.job, attempt: attempt, steps: steps})
+        detail
+        |> Map.put(:row, %{job: detail.job, attempt: attempt, steps: steps})
+        |> Map.put(:allowed, allowed_fingerprints(detail.job))
 
       {:error, _reason} ->
         :not_found
     end
   end
+
+  defp allowed_fingerprints(%{review: nil}), do: []
+
+  defp allowed_fingerprints(job),
+    do: SecretAllowances.fingerprints(job.environment, job.repository)
 
   defp view_path(view_name, job_id \\ nil) do
     params = Enum.reject([view: view_name, job: job_id], fn {_key, value} -> is_nil(value) end)
@@ -738,7 +765,7 @@ defmodule OmashikiWeb.TaskViewsLive do
     </.detail_section>
 
     <.detail_section :if={@detail.job.review} title="Review">
-      <.review job={@detail.job} />
+      <.review job={@detail.job} allowed={@detail.allowed} />
     </.detail_section>
 
     <.detail_section
@@ -803,6 +830,7 @@ defmodule OmashikiWeb.TaskViewsLive do
   end
 
   attr :job, :map, required: true
+  attr :allowed, :list, required: true
 
   defp review(assigns) do
     assigns =
@@ -828,7 +856,25 @@ defmodule OmashikiWeb.TaskViewsLive do
             <td data-label="file" class="py-1 pr-3 break-all text-on-surface">{finding["file"]}</td>
             <td data-label="line" class="py-1 pr-3 tabular-nums">{finding["line"]}</td>
             <td data-label="rule" class="py-1 pr-3 break-all">{finding["rule_id"]}</td>
-            <td data-label="match" class="py-1 break-all text-status-failed">{finding["match"]}</td>
+            <td data-label="match" class="py-1 break-all text-status-failed">
+              {finding["match"]}
+              <span :if={finding["fingerprint"] in @allowed} class="block text-status-succeeded">
+                allowed in {@job.environment}
+              </span>
+              <form
+                :if={@job.status == "review" and finding["fingerprint"] not in @allowed}
+                phx-submit="allow"
+                class="mt-2 flex flex-wrap items-center gap-2"
+              >
+                <input type="hidden" name="job" value={@job.id} />
+                <input type="hidden" name="fingerprint" value={finding["fingerprint"]} />
+                <.text_input name="note" kind={:mono} placeholder="why it is safe" maxlength="500" />
+                <button
+                  type="submit"
+                  class="border border-outline-variant px-3 py-1 font-label text-label-sm uppercase tracking-[0.2em] text-on-surface-variant hover:border-on-surface-variant pointer-coarse:min-h-10"
+                >Allow in this environment</button>
+              </form>
+            </td>
           </tr>
         </tbody>
       </table>

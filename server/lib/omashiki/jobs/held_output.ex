@@ -115,7 +115,7 @@ defmodule Omashiki.Jobs.HeldOutput do
   """
   @spec publish(t()) :: {:ok, t()} | {:error, term()}
   def publish(%__MODULE__{complete: nil} = record) do
-    opts = [update_task_branch: true, secret_scan: false, manager_id: record.manager_id]
+    opts = [update_task_branch: true, secret_scan: :skip, manager_id: record.manager_id]
 
     complete =
       case finalize(record, opts) do

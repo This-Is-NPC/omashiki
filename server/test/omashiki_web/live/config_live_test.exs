@@ -129,6 +129,35 @@ defmodule OmashikiWeb.ConfigLiveTest do
     end
   end
 
+  describe "secret allowances" do
+    test "lists allowances and removes one", %{conn: conn, user: user} do
+      {:ok, _view, html} = live(conn, ~p"/config")
+      assert visible_text(html) =~ "No findings allowed."
+
+      allowance =
+        Omashiki.Repo.insert!(%Omashiki.Jobs.SecretAllowance{
+          fingerprint: String.duplicate("f", 64),
+          environment: "notes",
+          file: "fixtures/token.txt",
+          rule_id: "github-pat",
+          note: "a documented example token",
+          created_by_id: user.id
+        })
+
+      {:ok, view, html} = live(conn, ~p"/config")
+      text = visible_text(html)
+      assert text =~ "fixtures/token.txt"
+      assert text =~ "a documented example token"
+      assert text =~ "by #{user.username}"
+
+      html = view |> element("#allowance-#{allowance.id} button", "Remove") |> render_click()
+
+      assert visible_text(html) =~ "Removed the allowance for fixtures/token.txt in notes."
+      assert Omashiki.Jobs.SecretAllowances.list() == []
+      refute has_element?(view, "#allowance-#{allowance.id}")
+    end
+  end
+
   describe "configuration reload" do
     setup do
       root = Path.join(System.tmp_dir!(), "omashiki-live-#{System.unique_integer([:positive])}")

@@ -186,6 +186,9 @@ A job that is not in `review` returns `409` with `code` `invalid_transition`.
 `POST /jobs/{id}/cancel` also works on a job in review, and the node removes the output.
 [Output checks](security-and-limits.md#output-held-for-review) explains where the output waits.
 
+Allowing a finding for later jobs is an operator action on the Home and Config screens.
+The API does not create or remove allowances: an allowance changes the secret scan for every token's jobs in an environment, and a token only acts on its own jobs.
+
 The job emits a `job.review` event with `error_code` and `error_message` when it enters review.
 The webhook comes when the job ends.
 
@@ -204,7 +207,7 @@ The object has a stable `code`, a readable `message`, and structured `details`.
 | `harness_unreachable_no_network` | An HTTP harness runs in a container without a network. |
 | `harness_exit` | The agent harness exited with a non-zero code. |
 | `agent_waiting_for_permission` | The agent or one of its subagents asked for an approval. `details` has the permission, its patterns, and `subagent`. |
-| `secret_found` | gitleaks found secrets in the output, which was not published: the environment blocks such output, or an operator rejected it. The message names up to three findings. `details.findings` lists up to 50, each with `file`, `line`, `rule_id`, `description`, a `match` with the secret replaced by `REDACTED`, and a stable `fingerprint`. `details.finding_count` counts them all. |
+| `secret_found` | gitleaks found secrets in the output, which was not published: the environment blocks such output, or an operator rejected it. The message names up to three findings. `details.findings` lists up to 50, each with `file`, `line`, `rule_id`, `description`, a `match` with the secret replaced by `REDACTED`, and a `fingerprint` that identifies the secret in that file under that rule. `details.finding_count` counts them all. Allowed findings are not listed. |
 | `protected_path` | The output writes under `.git/`, `.ssh/`, or `.aws/`. `details.path` names the file. |
 | `symlink_path` | The output contains a symbolic link. `details.path` names it. |
 | `oversized_output` | The output changes more than the size limit. `details` has `changed_bytes` and `max_bytes`. |

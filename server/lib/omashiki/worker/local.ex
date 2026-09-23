@@ -59,7 +59,7 @@ defmodule Omashiki.Worker.Local do
     attempt = Repo.get!(JobAttempt, attempt_id)
     timeout_ms = Keyword.get(opts, :await_timeout_ms, offer.timeout_ms)
 
-    case runner().run(attempt, await_timeout_ms: timeout_ms) do
+    case runner().run(attempt, await_timeout_ms: timeout_ms, secret_scan: offer.secret_scan) do
       {:ok, %Job{status: status}} when is_released(status) ->
         job = Repo.get!(Job, offer.job_id)
         complete = Complete.from_job(job)

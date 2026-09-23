@@ -1,5 +1,5 @@
 defmodule OmashikiWeb.ConfigLive do
-  @moduledoc "Repository, environment, runtime, cache, and API token operations."
+  @moduledoc "Repository, environment, runtime, cache, API token, and secret allowance operations."
 
   use OmashikiWeb, :live_view
 
@@ -8,6 +8,7 @@ defmodule OmashikiWeb.ConfigLive do
   alias Omashiki.Config
   alias Omashiki.Config.Rollout
   alias Omashiki.HostSettings
+  alias Omashiki.Jobs.SecretAllowances
   alias Omashiki.Runtimes.CacheMaintenance
   alias OmashikiWeb.OperationHelpers, as: Ops
 
@@ -20,7 +21,8 @@ defmodule OmashikiWeb.ConfigLive do
      |> assign(:reload_result, nil)
      |> assign(:issued_token, nil)
      |> assign_config()
-     |> assign_tokens()}
+     |> assign_tokens()
+     |> assign_allowances()}
   end
 
   @impl true
@@ -101,6 +103,22 @@ defmodule OmashikiWeb.ConfigLive do
     end
   end
 
+  def handle_event("delete_allowance", %{"id" => id}, socket) when is_binary(id) do
+    case SecretAllowances.delete(id) do
+      {:ok, allowance} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           "Removed the allowance for #{allowance.file} in #{allowance.environment}."
+         )
+         |> assign_allowances()}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "No such allowance to remove.")}
+    end
+  end
+
   defp assign_config(socket) do
     socket
     |> assign(:repositories, Config.repositories())
@@ -109,6 +127,8 @@ defmodule OmashikiWeb.ConfigLive do
     |> assign(:max_containers, HostSettings.get_max_concurrent_containers())
     |> assign(:cache_rows, cache_rows())
   end
+
+  defp assign_allowances(socket), do: assign(socket, :allowances, SecretAllowances.list())
 
   defp assign_tokens(socket),
     do: assign(socket, :tokens, ApiTokens.list_for_user(socket.assigns.current_user))
@@ -398,9 +418,60 @@ defmodule OmashikiWeb.ConfigLive do
           </div>
         </form>
       </section>
+
+      <section id="secret-allowances" class="border border-outline-variant bg-surface-container p-5">
+        <header class="mb-5 flex flex-wrap items-baseline justify-between gap-3">
+          <h2 class="font-label text-label-md tracking-[0.25em] uppercase text-on-surface-variant">
+            Secret allowances
+          </h2>
+          <span class="font-mono text-xs text-on-surface-variant">
+            findings the secret scan no longer refuses
+          </span>
+        </header>
+        <div :if={@allowances == []} class="font-mono text-xs text-on-surface-variant">
+          No findings allowed. Allow one from the review of a held task.
+        </div>
+        <table :if={@allowances != []} class="stack-table w-full font-mono text-xs">
+          <thead class="text-left text-on-surface-variant">
+            <tr>
+              <th class="py-2 pr-4 font-normal">environment</th>
+              <th class="py-2 pr-4 font-normal">repository</th>
+              <th class="py-2 pr-4 font-normal">file</th>
+              <th class="py-2 pr-4 font-normal">rule</th>
+              <th class="py-2 pr-4 font-normal">note</th>
+              <th class="py-2 pr-4 font-normal">allowed</th>
+              <th class="py-2 font-normal"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-outline-variant/40 text-on-surface">
+            <tr :for={allowance <- @allowances} id={"allowance-#{allowance.id}"}>
+              <td data-label="environment" class="py-2 pr-4">{allowance.environment}</td>
+              <td data-label="repository" class="py-2 pr-4">{allowance.repository || "—"}</td>
+              <td data-label="file" class="py-2 pr-4 break-all">{allowance.file}</td>
+              <td data-label="rule" class="py-2 pr-4">{allowance.rule_id}</td>
+              <td data-label="note" class="py-2 pr-4 break-words">{allowance.note || "—"}</td>
+              <td data-label="allowed" class="py-2 pr-4">
+                {Ops.timestamp(allowance.inserted_at)} by {allowance_author(allowance)}
+              </td>
+              <td class="py-2 text-right">
+                <button
+                  type="button"
+                  phx-click="delete_allowance"
+                  phx-value-id={allowance.id}
+                  data-confirm="Remove this allowance? The finding is refused again."
+                  class="border border-status-failed/50 px-3 py-1 font-label text-label-sm uppercase tracking-[0.2em] text-status-failed hover:border-status-failed pointer-coarse:min-h-10"
+                >Remove</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
     </div>
     """
   end
+
+  defp allowance_author(%{created_by: %{username: username}}), do: username
+  defp allowance_author(_allowance), do: "a removed operator"
 
   attr :label, :string, required: true
   attr :value, :any, required: true

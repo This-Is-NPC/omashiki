@@ -36,7 +36,7 @@ defmodule Omashiki.Worker.Snapshot do
   end
 
   defp execute(job, attempt, environment, offer, opts) do
-    opts = provision_opts(opts, offer)
+    opts = offer_opts(opts, offer)
     pre_steps = Map.get(environment, "pre_steps", [])
     post_steps = Map.get(environment, "post_steps", [])
     timeout_ms = Map.get(environment, "timeout_ms", offer.timeout_ms)
@@ -283,8 +283,9 @@ defmodule Omashiki.Worker.Snapshot do
 
   defp check_dependency_base(_), do: :ok
 
-  defp provision_opts(opts, %Offer{manager_url: url, manager_id: id, house_id: house}) do
+  defp offer_opts(opts, %Offer{manager_url: url, manager_id: id, house_id: house} = offer) do
     opts
+    |> Keyword.put(:secret_scan, offer.secret_scan)
     |> maybe_kw(:host_base_url, url)
     |> maybe_kw(:manager_id, id)
     |> maybe_kw(:house, house)

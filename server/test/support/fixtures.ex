@@ -102,6 +102,13 @@ defmodule Omashiki.Fixtures do
     put_config_map!(merged)
   end
 
+  @doc """
+  A secret-scan policy with a fixed key, so fingerprints repeat within a
+  test run, allowing the fingerprints in `allowed`.
+  """
+  def scan_policy(allowed \\ []),
+    do: %Omashiki.Jobs.SecretScan.Policy{key: String.duplicate("k", 32), allowed: allowed}
+
   def user_fixture(attrs \\ %{}) do
     n = System.unique_integer([:positive])
 

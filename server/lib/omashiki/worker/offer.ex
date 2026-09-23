@@ -6,9 +6,14 @@ defmodule Omashiki.Worker.Offer do
   (`house_id`, `Omashiki.House.id/0`). The worker labels the attempt's
   container with it; an offer without it, or with one that is not a UUID, is
   refused.
+
+  Every offer carries the job's secret-scan policy (`secret_scan`): the house
+  key for finding fingerprints and the fingerprints the environment allows.
+  An offer without a valid policy is refused.
   """
 
-  alias Omashiki.Jobs.{Job, JobAttempt}
+  alias Omashiki.Jobs.{Job, JobAttempt, SecretAllowances}
+  alias Omashiki.Jobs.SecretScan.Policy
 
   @type t :: %__MODULE__{
           job_id: String.t(),
@@ -28,6 +33,7 @@ defmodule Omashiki.Worker.Offer do
           admitted_environment_digest: String.t(),
           admitted_repository_digest: String.t() | nil,
           admitted_plugin_digest: String.t(),
+          secret_scan: Policy.t(),
           house_id: String.t() | nil,
           manager_id: String.t() | nil,
           manager_url: String.t() | nil
@@ -51,6 +57,7 @@ defmodule Omashiki.Worker.Offer do
     :admitted_environment_digest,
     :admitted_repository_digest,
     :admitted_plugin_digest,
+    :secret_scan,
     :house_id,
     :manager_id,
     :manager_url
@@ -77,7 +84,8 @@ defmodule Omashiki.Worker.Offer do
       environment: job.environment,
       admitted_environment_digest: job.admitted_environment_digest,
       admitted_repository_digest: job.admitted_repository_digest,
-      admitted_plugin_digest: job.admitted_plugin_digest
+      admitted_plugin_digest: job.admitted_plugin_digest,
+      secret_scan: SecretAllowances.policy(job)
     }
   end
 
@@ -100,7 +108,8 @@ defmodule Omashiki.Worker.Offer do
       "environment" => offer.environment,
       "admitted_environment_digest" => offer.admitted_environment_digest,
       "admitted_repository_digest" => offer.admitted_repository_digest,
-      "admitted_plugin_digest" => offer.admitted_plugin_digest
+      "admitted_plugin_digest" => offer.admitted_plugin_digest,
+      "secret_scan" => Policy.to_map(offer.secret_scan)
     }
 
     base
@@ -111,7 +120,10 @@ defmodule Omashiki.Worker.Offer do
 
   @doc "Decode an offer from JSON transport."
   def from_map(map) when is_map(map) do
-    with {:ok, house_id} <- house_id(map), do: {:ok, decode(map, house_id)}
+    with {:ok, house_id} <- house_id(map),
+         {:ok, policy} <- Policy.from_map(map["secret_scan"]) do
+      {:ok, %{decode(map, house_id) | secret_scan: policy}}
+    end
   end
 
   # The id names the worker's containers and credential copies, so nothing
