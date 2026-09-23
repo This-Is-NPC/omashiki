@@ -1,5 +1,5 @@
 defmodule Omashiki.FleetTest do
-  use ExUnit.Case, async: false
+  use Omashiki.DataCase, async: false
 
   alias Omashiki.Fleet
   alias Omashiki.Worker.{Poller, Presence}
