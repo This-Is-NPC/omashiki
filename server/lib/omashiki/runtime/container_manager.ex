@@ -325,7 +325,13 @@ defmodule Omashiki.Runtime.ContainerManager do
       end
 
     # Runtime delivery is admitted from the immutable job snapshot only.
-    {repo_root, _subpath} = parent_repo_and_subpath(worktree_path)
+    # A git worktree mounts its parent repository; a work directory (sink
+    # files/none) names itself as `:mount_root` and mounts nothing around it.
+    repo_root =
+      Keyword.get_lazy(opts, :mount_root, fn ->
+        worktree_path |> parent_repo_and_subpath() |> elem(0)
+      end)
+
     container_workdir = Path.expand(worktree_path)
     {host_uid, host_gid} = host_owner_ids(repo_root)
 
@@ -569,7 +575,7 @@ defmodule Omashiki.Runtime.ContainerManager do
                   host_port,
                   protocol,
                   launch,
-                  container_workdir,
+                  {container_workdir, repo_root},
                   cache_groups,
                   runtime_job && runtime_job.id
                 )
@@ -951,7 +957,7 @@ defmodule Omashiki.Runtime.ContainerManager do
          host_port,
          protocol,
          launch_plan,
-         worktree_path,
+         {worktree_path, mount_root},
          cache_groups,
          task_id
        )
@@ -964,7 +970,7 @@ defmodule Omashiki.Runtime.ContainerManager do
           Omashiki.Runtime.ContainerEvents.publish(:started, container_id)
 
           with :ok <- verify_supply_chain_proxy(container_id, cache_groups),
-               :ok <- run_supply_chain_preflight(worktree_path, cache_groups, task_id) do
+               :ok <- run_supply_chain_preflight(worktree_path, mount_root, cache_groups, task_id) do
             bootstrap_started_at = System.monotonic_time(:millisecond)
             bootstrap_result = run_launch_startup(container_id, launch_plan)
             bootstrap_duration_ms = elapsed_ms(bootstrap_started_at)
@@ -1054,11 +1060,11 @@ defmodule Omashiki.Runtime.ContainerManager do
        ),
        do: {:error, :unsupported_agent_protocol}
 
-  defp run_supply_chain_preflight(_root, [], _job_id), do: :ok
+  defp run_supply_chain_preflight(_root, _mount_root, [], _job_id), do: :ok
 
-  defp run_supply_chain_preflight(root, cache_groups, job_id) do
-    {repo_root, _subpath} = parent_repo_and_subpath(root)
-
+  # `mount_root` is what the container mounts around `root`: the parent
+  # repository of a worktree, or the work directory itself for files/none.
+  defp run_supply_chain_preflight(root, mount_root, cache_groups, job_id) do
     Enum.reduce_while(cache_groups, :ok, fn
       %{policy: nil}, :ok ->
         {:cont, :ok}
@@ -1067,7 +1073,7 @@ defmodule Omashiki.Runtime.ContainerManager do
         case Preflight.run(root, policy,
                job_id: job_id,
                cache_group: name,
-               mounted_roots: [repo_root]
+               mounted_roots: [mount_root]
              ) do
           {:ok, _report} -> {:cont, :ok}
           {:error, report} -> {:halt, {:error, {:supply_chain_preflight, report}}}
@@ -1876,15 +1882,10 @@ defmodule Omashiki.Runtime.ContainerManager do
     internal_port = Keyword.get(opts, :internal_port)
     runtime_handler = Keyword.get(opts, :runtime_handler)
 
-    base_binds = [
-      # Parent repo RO so the agent can read sibling code if needed.
-      "#{repo_root}:#{repo_root}:ro",
-      # Nested RW for git plumbing (objects, refs, worktrees/<group>/).
-      "#{git_dir}:#{git_dir}",
-      # Nested RW for the worktree itself; mounted at its absolute host
-      # path so `.git` pointer files resolve.
-      "#{worktree_path}:#{worktree_path}"
-    ]
+    base_binds =
+      if Path.expand(repo_root) == Path.expand(worktree_path),
+        do: ["#{worktree_path}:#{worktree_path}"],
+        else: git_binds(repo_root, git_dir, worktree_path)
 
     binds =
       if is_binary(secret_host_path) and is_binary(secret_target) do
@@ -2006,8 +2007,20 @@ defmodule Omashiki.Runtime.ContainerManager do
     Application.get_env(:omashiki, :harness_host, "127.0.0.1")
   end
 
-  # Splits a worktree path into its repository root and relative worktree path.
+  defp git_binds(repo_root, git_dir, worktree_path) do
+    [
+      # Parent repo RO so the agent can read sibling code if needed.
+      "#{repo_root}:#{repo_root}:ro",
+      # Nested RW for git plumbing (objects, refs, worktrees/<group>/).
+      "#{git_dir}:#{git_dir}",
+      # Nested RW for the worktree itself; mounted at its absolute host
+      # path so `.git` pointer files resolve.
+      "#{worktree_path}:#{worktree_path}"
+    ]
+  end
+
   @doc false
+  # Splits a worktree path into its repository root and relative worktree path.
   def parent_repo_and_subpath(worktree_path) do
     abs = Path.expand(worktree_path)
     parent = abs |> Path.dirname() |> Path.dirname()

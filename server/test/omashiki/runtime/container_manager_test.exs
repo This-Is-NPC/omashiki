@@ -126,6 +126,20 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
            ]
   end
 
+  test "a work directory that is its own mount root mounts only itself, never /tmp" do
+    work = "/tmp/omashiki-work/job-1"
+
+    config =
+      ContainerManager.build_host_config(work, work, nil, 1000, 1000,
+        network_mode: "none",
+        internal_port: nil,
+        runtime_handler: "runc"
+      )
+
+    assert config["Binds"] == ["#{work}:#{work}"]
+    assert Map.has_key?(config["Tmpfs"], "/tmp")
+  end
+
   test "CLI transport does not create an HTTP port binding" do
     config =
       ContainerManager.build_host_config(

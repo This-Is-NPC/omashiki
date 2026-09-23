@@ -21,7 +21,10 @@ defmodule Omashiki.Jobs.Runner.DockerContainer do
 
     with {:ok, sink} <- environment_sink(environment) do
       provision_fn(job, attempt, sink, opts, fn artifact ->
-        opts = Keyword.put(opts, :worktree_path, artifact.path)
+        opts =
+          opts
+          |> Keyword.put(:worktree_path, artifact.path)
+          |> put_mount_root(artifact)
 
         case ContainerManager.provision_for_job(job, attempt, environment, opts) do
           {:ok, container} ->
@@ -40,6 +43,13 @@ defmodule Omashiki.Jobs.Runner.DockerContainer do
       end)
     end
   end
+
+  @doc false
+  # A work directory is not a worktree: it has no repository around it to mount.
+  def put_mount_root(opts, %{sink: sink, path: path}) when sink in ["files", "none"],
+    do: Keyword.put(opts, :mount_root, path)
+
+  def put_mount_root(opts, _artifact), do: opts
 
   defp provision_fn(job, attempt, "git", opts, callback),
     do: GitArtifact.provision(job, attempt, opts, callback)

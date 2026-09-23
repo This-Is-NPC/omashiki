@@ -114,6 +114,18 @@ defmodule Omashiki.Jobs.SinkTest do
              Omashiki.Jobs.Runner.DockerContainer.provision(job, attempt, environment, [])
   end
 
+  test "a files/none work directory is its own mount root; a git worktree is not" do
+    alias Omashiki.Jobs.Runner.DockerContainer
+
+    work = "/tmp/omashiki-work/job-1"
+
+    for sink <- ["files", "none"] do
+      assert DockerContainer.put_mount_root([], %{sink: sink, path: work}) == [mount_root: work]
+    end
+
+    assert DockerContainer.put_mount_root([], %{branch: "task/x", path: "/repo/wt/x"}) == []
+  end
+
   test "validate still fails files sink on secret in blob" do
     job = %Job{id: Ecto.UUID.generate(), current_attempt: 1}
 

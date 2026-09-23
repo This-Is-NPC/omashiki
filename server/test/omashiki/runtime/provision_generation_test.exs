@@ -106,8 +106,9 @@ defmodule Omashiki.Runtime.ProvisionGenerationTest do
     assert credential.model == "swapped-before-admission"
   end
 
-  # `Jobs.Runner.DockerContainer.provision/4` passes `:worktree_path` and
-  # `:preset` and nothing else. If it ever started passing
+  # `Jobs.Runner.DockerContainer.provision/4` passes `:worktree_path`,
+  # `:preset` and, for a files/none work directory, `:mount_root`, and nothing
+  # else. If it ever started passing
   # `:credential`, line 269 would short-circuit and the pin would stop being
   # reachable — so the production caller's option set is part of the contract.
   defp provision(job, repo_path) do
