@@ -61,6 +61,19 @@ defmodule Omashiki.Identities.Broker do
       }
     },
     %{
+      "name" => "github_close_issue",
+      "description" => "Close an issue or pull request as the agent's GitHub App.",
+      "inputSchema" => %{
+        "type" => "object",
+        "required" => ["repository", "number"],
+        "properties" => %{
+          "repository" => %{"type" => "string", "description" => "owner/name"},
+          "number" => %{"type" => "integer"},
+          "reason" => %{"type" => "string", "enum" => ["completed", "not_planned"]}
+        }
+      }
+    },
+    %{
       "name" => "github_create_pull_request",
       "description" => "Open a pull request as the agent's GitHub App.",
       "inputSchema" => %{
@@ -189,6 +202,14 @@ defmodule Omashiki.Identities.Broker do
     end
   end
 
+  defp tool_call(id, identity, "github_close_issue", args) do
+    with {:ok, repo, number} <- issue_ref(args),
+         {:ok, reason} <- close_reason(args) do
+      body = maybe_put(%{"state" => "closed"}, "state_reason", reason)
+      github(id, identity, :patch, "/repos/#{repo}/issues/#{number}", body)
+    end
+  end
+
   defp tool_call(id, identity, "github_create_pull_request", args) do
     with {:ok, repo} <- repository(args),
          {:ok, title} <- string(args, "title"),
@@ -277,6 +298,14 @@ defmodule Omashiki.Identities.Broker do
 
       _ ->
         invalid("#{key} must be a non-empty array")
+    end
+  end
+
+  defp close_reason(args) do
+    case Map.get(args, "reason") do
+      nil -> {:ok, nil}
+      reason when reason in ["completed", "not_planned"] -> {:ok, reason}
+      _ -> invalid("reason must be completed or not_planned")
     end
   end
 

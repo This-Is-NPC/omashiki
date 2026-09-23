@@ -1,6 +1,6 @@
 # How to configure an agent identity
 
-Use a GitHub App identity when the running agent must read, comment, label, or create a pull request.
+Use a GitHub App identity when the running agent must read, comment, label, close, or create a pull request.
 The house performs these operations for the agent.
 
 ## Before you start
@@ -55,6 +55,7 @@ Use individual capability names when the job needs fewer operations.
 | `github_get_issue` | Read an issue or pull request. |
 | `github_comment` | Add a comment. |
 | `github_add_labels` | Add labels. |
+| `github_close_issue` | Close an issue or pull request, optionally as `completed` or `not_planned`. |
 | `github_create_pull_request` | Create a pull request. |
 
 ## 4. Submit a small task

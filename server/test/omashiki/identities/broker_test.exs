@@ -97,6 +97,32 @@ defmodule Omashiki.Identities.BrokerTest do
     assert {:ok, %{"result" => %{"isError" => false}}} = Proxy.handle_rpc("ana-bot", rpc, claims)
   end
 
+  test "a preset wearing ana-bot closes an issue with the reason it gives", ctx do
+    expect_installation_token(ctx, "ghs_close")
+
+    Bypass.expect_once(ctx.bypass, "PATCH", "/repos/acme/app/issues/7", fn conn ->
+      assert ["token ghs_close"] = Plug.Conn.get_req_header(conn, "authorization")
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      assert Jason.decode!(body) == %{"state" => "closed", "state_reason" => "not_planned"}
+      Plug.Conn.resp(conn, 200, ~s({"number": 7, "state": "closed"}))
+    end)
+
+    claims = claims_for(job(ctx, ["github_*"]))
+
+    assert {:ok, %{"result" => %{"isError" => false, "content" => [%{"text" => text}]}}} =
+             Proxy.handle_rpc(
+               "ana-bot",
+               call("github_close_issue", %{
+                 "repository" => "acme/app",
+                 "number" => 7,
+                 "reason" => "not_planned"
+               }),
+               claims
+             )
+
+    assert %{"state" => "closed"} = Jason.decode!(text)
+  end
+
   test "a GitHub error is reported to the agent as a tool error, not a crash", ctx do
     expect_installation_token(ctx, "ghs_err")
 
@@ -182,6 +208,17 @@ defmodule Omashiki.Identities.BrokerTest do
              Proxy.handle_rpc(
                "ana-bot",
                call("github_comment", %{"repository" => "../etc", "number" => 1, "body" => "x"}),
+               claims
+             )
+
+    assert {:error, %{message: "invalid_params"}} =
+             Proxy.handle_rpc(
+               "ana-bot",
+               call("github_close_issue", %{
+                 "repository" => "acme/app",
+                 "number" => 1,
+                 "reason" => "spam"
+               }),
                claims
              )
 
