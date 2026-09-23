@@ -343,6 +343,26 @@ defmodule Omashiki.Jobs.ClaimsTest do
     end
   end
 
+  test "a node lost mid-run leaves no dispatch that blocks the retry", %{token: token} do
+    {:ok, _, job} = Admission.admit_once(token, request("lost-node"))
+
+    # The node picked the dispatch up and died: its row stays `executing`.
+    dispatches = from(o in Oban.Job, where: fragment("(?->>'job_id')", o.args) == ^job.id)
+    {1, _} = Repo.update_all(dispatches, set: [state: "executing"])
+    {:ok, attempt} = Jobs.claim(job, "lost-node", lease_ms: 1)
+
+    assert {:ok, 1} = Jobs.recover_stale(DateTime.add(attempt.lease_expires_at, 1, :millisecond))
+    assert Repo.all(from(o in dispatches, select: o.state)) == ["cancelled"]
+
+    assert {:ok, retried} = Jobs.retry(job)
+    assert retried.status == "queued"
+
+    assert [state] =
+             Repo.all(from(o in dispatches, where: o.state != "cancelled", select: o.state))
+
+    assert state in ["available", "scheduled"]
+  end
+
   test "retry preserves the job and numbers attempts after cancellation", %{token: token} do
     {:ok, _, job} = Admission.admit_once(token, request("retry-number"))
     assert {:ok, _} = Jobs.cancel(job)

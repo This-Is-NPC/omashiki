@@ -791,6 +791,7 @@ defmodule Omashiki.Jobs do
           })
 
         release_capacity_if_reserved!(attempt)
+        release_dead_dispatch!(job.id, now)
 
         record_event!(
           updated,
@@ -1082,6 +1083,17 @@ defmodule Omashiki.Jobs do
     |> order_by([o], desc: o.id)
     |> limit(1)
     |> Repo.one()
+  end
+
+  # The dispatch that ran a stale attempt died with it: the expired lease is the
+  # proof, the same one that fails the attempt. Left `executing`, it would count
+  # as live for `DispatchWorker` uniqueness until Lifeline's 60 minutes, and a
+  # retry's new dispatch would be dropped as its duplicate.
+  defp release_dead_dispatch!(job_id, now) do
+    job_id
+    |> dispatch_query()
+    |> where([o], o.state == "executing")
+    |> Repo.update_all(set: [state: "cancelled", cancelled_at: now])
   end
 
   defp dispatch_query(job_id) do
