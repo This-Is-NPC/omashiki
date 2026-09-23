@@ -356,7 +356,7 @@ defmodule OmashikiWeb.TaskViewsLiveTest do
       {:ok, lv, html} = live(conn, ~p"/?job=#{job.id}")
       text = visible_text(html)
 
-      assert text =~ "notes.txt"
+      assert html =~ "docs/<wbr/>notes.txt:3"
       assert text =~ "github-pat"
       assert text =~ "export GH=REDACTED"
       assert text =~ "Approve and publish"
@@ -381,7 +381,7 @@ defmodule OmashikiWeb.TaskViewsLiveTest do
         |> render_submit()
         |> visible_text()
 
-      assert text =~ "Allowed notes.txt (github-pat) in opencode."
+      assert text =~ "Allowed docs/notes.txt (github-pat) in opencode."
       assert text =~ "allowed in opencode"
       refute has_element?(lv, ~s(form[phx-submit="allow"]))
       assert text =~ "Approve and publish"

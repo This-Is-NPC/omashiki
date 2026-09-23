@@ -842,42 +842,40 @@ defmodule OmashikiWeb.TaskViewsLive do
     ~H"""
     <div class="space-y-3 font-mono text-xs">
       <p class="whitespace-pre-wrap break-words text-on-surface">{@review["error"]["message"]}</p>
-      <table class="stack-table w-full">
-        <thead>
-          <tr class="text-left text-on-surface-variant">
-            <th scope="col" class="py-1 pr-3 font-normal">file</th>
-            <th scope="col" class="py-1 pr-3 font-normal">line</th>
-            <th scope="col" class="py-1 pr-3 font-normal">rule</th>
-            <th scope="col" class="py-1 font-normal">match</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-outline-variant/40">
-          <tr :for={finding <- @findings}>
-            <td data-label="file" class="py-1 pr-3 break-all text-on-surface">{finding["file"]}</td>
-            <td data-label="line" class="py-1 pr-3 tabular-nums">{finding["line"]}</td>
-            <td data-label="rule" class="py-1 pr-3 break-all">{finding["rule_id"]}</td>
-            <td data-label="match" class="py-1 break-all text-status-failed">
-              {finding["match"]}
-              <span :if={finding["fingerprint"] in @allowed} class="block text-status-succeeded">
-                allowed in {@job.environment}
-              </span>
-              <form
-                :if={@job.status == "review" and finding["fingerprint"] not in @allowed}
-                phx-submit="allow"
-                class="mt-2 flex flex-wrap items-center gap-2"
-              >
-                <input type="hidden" name="job" value={@job.id} />
-                <input type="hidden" name="fingerprint" value={finding["fingerprint"]} />
-                <.text_input name="note" kind={:mono} placeholder="why it is safe" maxlength="500" />
-                <button
-                  type="submit"
-                  class="border border-outline-variant px-3 py-1 font-label text-label-sm uppercase tracking-[0.2em] text-on-surface-variant hover:border-on-surface-variant pointer-coarse:min-h-10"
-                >Allow in this environment</button>
-              </form>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <ul class="space-y-2">
+        <li
+          :for={finding <- @findings}
+          class="space-y-1 border border-outline-variant/60 bg-surface p-3"
+        >
+          <p class="text-on-surface">{path_breaks(finding["file"])}:{finding["line"]}</p>
+          <p class="flex flex-wrap gap-x-3">
+            <span class="whitespace-nowrap text-on-surface-variant">{finding["rule_id"]}</span>
+            <span class="text-status-failed">{finding["match"]}</span>
+          </p>
+          <p :if={finding["fingerprint"] in @allowed} class="text-status-succeeded">
+            allowed in {@job.environment}
+          </p>
+          <form
+            :if={@job.status == "review" and finding["fingerprint"] not in @allowed}
+            phx-submit="allow"
+            class="flex flex-wrap items-center gap-2 pt-2"
+          >
+            <input type="hidden" name="job" value={@job.id} />
+            <input type="hidden" name="fingerprint" value={finding["fingerprint"]} />
+            <.text_input
+              name="note"
+              kind={:mono}
+              placeholder="why it is safe"
+              maxlength="500"
+              class="min-w-0 flex-1 basis-48"
+            />
+            <button
+              type="submit"
+              class="border border-outline-variant px-3 py-1 font-label text-label-sm uppercase tracking-[0.2em] text-on-surface-variant hover:border-on-surface-variant pointer-coarse:min-h-10"
+            >Allow in this environment</button>
+          </form>
+        </li>
+      </ul>
       <p class="text-on-surface-variant">{review_note(@review, @job.status)}</p>
       <div :if={@job.status == "review"} class="flex flex-wrap gap-3">
         <button
@@ -928,6 +926,15 @@ defmodule OmashikiWeb.TaskViewsLive do
   end
 
   defp detail_fields, do: @detail_fields
+
+  # A `<wbr>` after each `/` lets a long path wrap between its directories,
+  # never inside a file or directory name.
+  defp path_breaks(path) do
+    path
+    |> String.split("/")
+    |> Enum.map(&html_escape/1)
+    |> Enum.intersperse({:safe, "/<wbr>"})
+  end
 
   defp review_note(%{"decision" => nil, "node" => node}, "review"),
     do: "Waiting for review · output held on #{node}"

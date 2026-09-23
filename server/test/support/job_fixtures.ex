@@ -70,10 +70,10 @@ defmodule Omashiki.JobFixtures do
   defp fixture_error("cancelled"), do: Failure.error(:cancelled)
   defp fixture_error(_status), do: nil
 
-  # A held job: gitleaks found one GitHub token in notes.txt.
+  # A held job: gitleaks found one GitHub token in docs/notes.txt.
   defp fixture_review("review") do
     finding = %SecretScan.Finding{
-      file: "notes.txt",
+      file: "docs/notes.txt",
       line: 3,
       rule_id: "github-pat",
       description: "GitHub Personal Access Token",
