@@ -51,7 +51,9 @@ defmodule Omashiki.Jobs.RunnerTest do
   end
 
   defmodule ProvisionFailureContainer do
-    def provision(_job, _attempt, _environment, _opts), do: {:error, :docker_provision_failed}
+    def provision(_job, _attempt, _environment, _opts),
+      do: {:error, %{"message" => "Duplicate mount point: /tmp"}}
+
     def exec(_container, _argv, _timeout_ms), do: {:error, :not_reached}
     def finalize(_container, _job, _opts), do: {:error, :not_reached}
     def destroy(_container), do: :ok
@@ -295,6 +297,33 @@ defmodule Omashiki.Jobs.RunnerTest do
     assert failed.status == "failed"
     assert capacity_row().active == 0
     assert Repo.aggregate(JobStep, :count, :id) == 8
+  end
+
+  test "the provision reason reaches the job, its step, and the failed event", %{token: token} do
+    {:ok, _, job} = Admission.admit_once(token, request("provision-reason"))
+    {:ok, attempt} = Jobs.claim(job, "runner-test")
+
+    assert {:ok, failed} =
+             Runner.run(attempt, container: ProvisionFailureContainer, adapter: FakeHarness)
+
+    message = "Docker refused the request: Duplicate mount point: /tmp"
+
+    assert %{"code" => "docker_error", "message" => ^message, "details" => details} =
+             failed.terminal_error
+
+    assert details["step"] == "provision"
+
+    provision =
+      Repo.one!(from(s in JobStep, where: s.attempt_id == ^attempt.id and s.key == "provision"))
+
+    assert provision.error == failed.terminal_error
+
+    event =
+      Repo.one!(
+        from(e in Omashiki.Jobs.JobEvent, where: e.job_id == ^job.id and e.type == "job.failed")
+      )
+
+    assert event.data == %{"error_code" => "docker_error", "error_message" => message}
   end
 
   test "Git finalization failure does not duplicate terminal completion", %{token: token} do

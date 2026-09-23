@@ -139,7 +139,8 @@ defmodule Omashiki.Worker.Complete do
     {:ok, %__MODULE__{kind: :none, changed_bytes: changed_bytes}}
   end
 
-  def from_map(%{"kind" => "error", "code" => code, "message" => message} = map) do
+  def from_map(%{"kind" => "error", "code" => code, "message" => message} = map)
+      when is_binary(code) and is_binary(message) do
     {:ok,
      %__MODULE__{
        kind: :error,

@@ -60,5 +60,10 @@ It does not provide an archive-download endpoint.
 Ask the house operator to retrieve the archive from manager storage.
 Do not assume that a manager storage path is readable from the client.
 
-A failed job has an error record. Keep its code and details for diagnosis.
+A failed or cancelled job has an `error` object with `code`, `message`, and `details`.
+The `message` says why the job stopped.
+`details` names the failing step and keeps the internal reason.
+The Home task details show the same code, message, and details.
+Keep the code and details for diagnosis.
+The [API reference](api.md#job-errors) lists the codes.
 Use [cancel and retry](how-to-cancel-and-retry-a-job.md) when another attempt is appropriate.

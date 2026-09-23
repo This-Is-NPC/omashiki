@@ -354,7 +354,8 @@ defmodule OmashikiWeb.Api.JobsController do
       submitted_at: iso(job.inserted_at),
       queued_at: iso(job.queued_at),
       started_at: iso(job.started_at),
-      finished_at: iso(job.finished_at)
+      finished_at: iso(job.finished_at),
+      error: job.terminal_error
     }
   end
 

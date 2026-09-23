@@ -108,6 +108,28 @@ The page size is 50.
 Filter by `status`, `environment`, `repository`, `worker`, `correlation_id`, and `since`.
 An unknown `status` value returns HTTP `422` with `code` `invalid_status`.
 
+## Job errors
+
+A `failed` or `cancelled` job has an `error` object in `GET /jobs/{id}` and in its result.
+The object has a stable `code`, a readable `message`, and structured `details`.
+`details.step` names the step that failed.
+`details.reason` keeps the internal reason.
+
+| Code | Cause |
+| --- | --- |
+| `docker_error` | Docker refused a container request. The message repeats the Docker message. |
+| `bootstrap_failed` | The container startup command failed. `details` has the exit code and output. |
+| `harness_not_ready` | The agent harness did not pass its readiness check in time. |
+| `harness_unreachable_no_network` | An HTTP harness runs in a container without a network. |
+| `harness_exit` | The agent harness exited with a non-zero code. |
+| `timeout` | A call to Docker or to the harness did not finish in time. |
+| `stale_attempt` | The attempt stopped renewing its lease. |
+| `cancelled` | An operator or a client cancelled the job. |
+| `attempt_failed` | Any other cause. The message shows the internal reason. |
+
+The `job.failed` and `job.cancelled` events carry `error_code` and `error_message` in `data`.
+The event message is cut to 255 bytes.
+
 ## Webhook redelivery
 
 `POST /jobs/{id}/webhook-deliveries/{delivery_id}/redeliver` requeues a `failed` or `dead` delivery with the same signature material and `idempotency_key`.

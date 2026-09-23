@@ -3,7 +3,16 @@ defmodule Omashiki.Jobs.Dependencies do
 
   import Ecto.Query
 
-  alias Omashiki.Jobs.{DispatchWorker, Job, JobAttempt, JobDependency, JobEvent, Statuses}
+  alias Omashiki.Jobs.{
+    DispatchWorker,
+    Failure,
+    Job,
+    JobAttempt,
+    JobDependency,
+    JobEvent,
+    Statuses
+  }
+
   alias Omashiki.Repo
 
   import Omashiki.Jobs.Statuses, only: [is_terminal: 1, is_unsuccessful: 1]
@@ -167,16 +176,11 @@ defmodule Omashiki.Jobs.Dependencies do
         lease_expires_at: nil
       })
 
-    record_event!(updated, "cancelled", %{"error_code" => error["code"]}, completed_attempt)
+    record_event!(updated, "cancelled", Failure.event_data(error), completed_attempt)
   end
 
-  defp dependency_terminal_error(%Job{} = dep) do
-    %{
-      "code" => "dependency_failed",
-      "message" => "dependency job #{dep.id} reached #{dep.status}",
-      "details" => %{"dependency_job_id" => dep.id, "dependency_status" => dep.status}
-    }
-  end
+  defp dependency_terminal_error(%Job{} = dep),
+    do: Failure.error({:dependency_failed, dep.id, dep.status})
 
   defp current_attempt!(%Job{id: job_id, current_attempt: number}) do
     Repo.one!(from(a in JobAttempt, where: a.job_id == ^job_id and a.number == ^number))

@@ -24,7 +24,7 @@ defmodule Omashiki.Jobs.DispatchWorker do
     ]
 
   alias Omashiki.Jobs
-  alias Omashiki.Jobs.Job
+  alias Omashiki.Jobs.{Failure, Job}
   alias Omashiki.Repo
   alias Omashiki.Worker.Offer
 
@@ -146,16 +146,7 @@ defmodule Omashiki.Jobs.DispatchWorker do
     end
   end
 
-  defp dispatch_error(reason) do
-    %{
-      "code" => "dispatch_failed",
-      "message" =>
-        reason
-        |> inspect(limit: 5, printable_limit: 200)
-        |> String.slice(0, 240),
-      "details" => %{}
-    }
-  end
+  defp dispatch_error(reason), do: Failure.error({:dispatch_failed, reason})
 
   defp transport,
     do: Application.get_env(:omashiki, :worker_transport, Omashiki.Worker.Local)

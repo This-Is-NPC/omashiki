@@ -1,7 +1,6 @@
 defmodule Omashiki.Worker.PollerTest do
   use ExUnit.Case, async: false
 
-  alias Omashiki.Jobs.AttemptResult
   alias Omashiki.Worker.{Complete, Offer, Poller, Slots}
 
   import Omashiki.Await, only: [until: 1]
@@ -376,12 +375,12 @@ defmodule Omashiki.Worker.PollerTest do
 
       expect_complete(bypass, parent, fn body ->
         assert body["complete"]["kind"] == "error"
-        assert body["complete"]["code"] == "executor_failed"
-        assert is_binary(body["complete"]["message"])
-        assert byte_size(body["complete"]["message"]) == AttemptResult.max_summary_bytes()
+        assert body["complete"]["code"] == "docker_error"
+        assert body["complete"]["message"] =~ "Duplicate mount point: /tmp"
+        assert is_binary(body["complete"]["details"]["reason"])
       end)
 
-      put_env(:fake_executor_result, {:error, String.duplicate("x", 20_000)})
+      put_env(:fake_executor_result, {:error, %{"message" => "Duplicate mount point: /tmp"}})
 
       assert {:ok, _pid} = start_poller(slots)
       assert_receive {:accept, _}, 2_000

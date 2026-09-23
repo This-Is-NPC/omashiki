@@ -309,6 +309,20 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     assert_schema(body, "JobResultResponse", @api_spec)
   end
 
+  test "a failed job shows its error code and message", %{conn: conn, user: user, token: token} do
+    error = Omashiki.Jobs.Failure.error(:harness_not_ready, "provision")
+
+    {job, _attempt} =
+      Omashiki.JobFixtures.job_fixture(user, token, %{status: "failed", terminal_error: error})
+
+    body = conn |> get("/api/v1/jobs/#{job.id}") |> json_response(200)
+    assert body["data"]["error"] == error
+    assert_schema(body, "JobResponse", @api_spec)
+
+    result = conn |> get("/api/v1/jobs/#{job.id}/result") |> json_response(200)
+    assert_schema(result, "JobResultResponse", @api_spec)
+  end
+
   test "an expired token is 401", %{user: user} do
     expires = DateTime.add(DateTime.utc_now(:microsecond), -1, :second)
 

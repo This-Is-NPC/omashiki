@@ -116,7 +116,7 @@ defmodule Omashiki.Jobs.Runner do
   import Ecto.Query
 
   alias Omashiki.Harness.CliJson
-  alias Omashiki.Jobs.{Job, JobAttempt, JobStep}
+  alias Omashiki.Jobs.{Failure, Job, JobAttempt, JobStep}
   alias Omashiki.Repo
 
   @unsafe_executables ~w(sh bash dash zsh fish cmd powershell pwsh env xargs python python2 python3 node perl ruby php lua busybox make awk)
@@ -210,7 +210,7 @@ defmodule Omashiki.Jobs.Runner do
 
     case result do
       {:ok, container} -> %{state | container: container}
-      {:error, reason} -> fail_state(state, reason)
+      {:error, reason} -> fail_state(state, reason, step.key)
     end
   end
 
@@ -270,7 +270,7 @@ defmodule Omashiki.Jobs.Runner do
 
     case result do
       {:ok, output} -> %{state | harness_result: output}
-      {:error, reason} -> fail_state(state, reason)
+      {:error, reason} -> fail_state(state, reason, step.key)
     end
   end
 
@@ -306,7 +306,7 @@ defmodule Omashiki.Jobs.Runner do
         state
 
       {:error, reason} ->
-        fail_state(state, reason)
+        fail_state(state, reason, step.key)
     end
   end
 
@@ -321,7 +321,9 @@ defmodule Omashiki.Jobs.Runner do
         end
       end)
 
-    if match?({:error, _}, result), do: fail_state(state, elem(result, 1)), else: state
+    if match?({:error, _}, result),
+      do: fail_state(state, elem(result, 1), step.key),
+      else: state
   end
 
   defp complete_attempt(%{outcome: :success} = state) do
@@ -356,7 +358,7 @@ defmodule Omashiki.Jobs.Runner do
         end
 
       {:error, reason} ->
-        error = error_map("finalization_failed", reason)
+        error = Failure.error({:finalization_failed, reason}, "finalization")
         _ = Omashiki.Jobs.complete(state.attempt, lease_token(state), :failed, %{error: error})
         {:error, reason}
     end
@@ -374,7 +376,7 @@ defmodule Omashiki.Jobs.Runner do
         false
       end
 
-    error = state.error || error_map("attempt_failed", "attempt did not complete")
+    error = state.error || Failure.error(:failed)
 
     case Omashiki.Jobs.complete(state.attempt, lease_token(state), :failed, %{error: error}) do
       {:ok, _attempt} -> {:ok, %{"status" => "failed", "preserve_artifact" => preserve}}
@@ -383,7 +385,7 @@ defmodule Omashiki.Jobs.Runner do
   end
 
   defp complete_attempt(state) do
-    error = state.error || error_map("attempt_failed", "attempt did not complete")
+    error = state.error || Failure.error(:failed)
 
     case Omashiki.Jobs.complete(state.attempt, lease_token(state), :failed, %{error: error}) do
       {:ok, _attempt} -> {:ok, %{"status" => "failed"}}
@@ -404,7 +406,7 @@ defmodule Omashiki.Jobs.Runner do
     |> then(fn {state, result} ->
       case result do
         {:ok, _output} -> {state, :ok}
-        {:error, reason} -> {fail_state(state, reason), reason}
+        {:error, reason} -> {fail_state(state, reason, step.key), reason}
       end
     end)
   end
@@ -432,7 +434,7 @@ defmodule Omashiki.Jobs.Runner do
 
       {:error, reason} ->
         emit_step_telemetry(step, monotonic_started_at, "error")
-        error = error_map("step_failed", reason)
+        error = Failure.error(reason, step.key)
         step = update_step!(step, %{status: "failed", error: error, finished_at: finished_at})
         {%{state | steps: replace_step(state.steps, step)}, {:error, reason}}
     end
@@ -632,10 +634,13 @@ defmodule Omashiki.Jobs.Runner do
     end
   end
 
-  defp fail_state(%{outcome: :success} = state, reason),
-    do: %{state | outcome: :failure, error: error_map("attempt_failed", reason)}
+  # The first failure is the cause; later ones are its consequences.
+  defp fail_state(state, reason, step \\ nil)
 
-  defp fail_state(state, _reason), do: state
+  defp fail_state(%{outcome: :success} = state, reason, step),
+    do: %{state | outcome: :failure, error: Failure.error(reason, step)}
+
+  defp fail_state(state, _reason, _step), do: state
 
   defp cancellation_reason(state) do
     case Repo.get(Job, state.job.id) do
@@ -651,7 +656,7 @@ defmodule Omashiki.Jobs.Runner do
     if attempt.status in ["provisioning", "running"] and is_binary(attempt.lease_token) do
       _ =
         Omashiki.Jobs.complete(attempt, attempt.lease_token, :failed, %{
-          error: error_map("runner_crash", reason)
+          error: Failure.error(reason)
         })
     end
 
@@ -739,13 +744,6 @@ defmodule Omashiki.Jobs.Runner do
   end
 
   def harness_summary(_), do: nil
-
-  defp error_map(code, reason) when is_binary(code),
-    do: %{
-      "code" => code,
-      "message" => truncate(reason),
-      "details" => %{"reason" => truncate(reason)}
-    }
 
   defp truncate(value) when is_binary(value), do: String.slice(value, 0, @max_output_bytes)
   defp truncate(value), do: value |> inspect() |> String.slice(0, @max_output_bytes)

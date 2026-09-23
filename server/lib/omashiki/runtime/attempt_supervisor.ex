@@ -5,7 +5,7 @@ defmodule Omashiki.Runtime.AttemptSupervisor do
 
   import Ecto.Query
 
-  alias Omashiki.Jobs.JobAttempt
+  alias Omashiki.Jobs.{Failure, JobAttempt}
   alias Omashiki.Repo
   alias Omashiki.Runtime.Attempt
 
@@ -99,11 +99,7 @@ defmodule Omashiki.Runtime.AttemptSupervisor do
     case Repo.get(JobAttempt, original.id) do
       %JobAttempt{status: status} = attempt when status in ["provisioning", "running"] ->
         Omashiki.Jobs.complete(attempt, attempt.lease_token, :failed, %{
-          error: %{
-            "code" => "attempt_process_exit",
-            "message" => inspect(reason),
-            "details" => %{}
-          }
+          error: Failure.error({:attempt_process_exit, reason})
         })
 
       _ ->

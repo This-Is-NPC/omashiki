@@ -5,7 +5,7 @@ defmodule Omashiki.Worker.Poller do
 
   require Logger
 
-  alias Omashiki.Jobs.AttemptResult
+  alias Omashiki.Jobs.{AttemptResult, Failure}
   alias Omashiki.Runtime.ContainerTracker
   alias Omashiki.Worker.{Client, Complete, Execution, Managers, Offer, Slots}
 
@@ -197,10 +197,13 @@ defmodule Omashiki.Worker.Poller do
         complete
 
       {:error, reason} ->
+        error = Failure.error(reason)
+
         %Complete{
           kind: :error,
-          code: "executor_failed",
-          message: AttemptResult.truncate_summary(Exception.format(:error, reason, []))
+          code: error["code"],
+          message: error["message"],
+          details: error["details"]
         }
     end
   end

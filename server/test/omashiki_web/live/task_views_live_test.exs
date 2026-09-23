@@ -260,6 +260,35 @@ defmodule OmashikiWeb.TaskViewsLiveTest do
     assert text =~ "agent"
   end
 
+  test "a failed task shows why it failed", %{conn: conn, user: user, token: token} do
+    {job, attempt} = insert_job(user, token, "failed", "broken-mount")
+
+    error =
+      Omashiki.Jobs.Failure.error(%{"message" => "Duplicate mount point: /tmp"}, "provision")
+
+    job |> Ecto.Changeset.change(terminal_error: error) |> Repo.update!()
+
+    %JobStep{}
+    |> JobStep.changeset(%{
+      attempt_id: attempt.id,
+      sequence: 1,
+      key: "provision",
+      kind: "provision",
+      status: "failed",
+      error: error,
+      started_at: DateTime.utc_now(),
+      finished_at: DateTime.utc_now()
+    })
+    |> Repo.insert!()
+
+    {:ok, _lv, html} = live(conn, ~p"/?job=#{job.id}")
+    text = visible_text(html)
+
+    assert text =~ "docker_error"
+    assert text =~ "Docker refused the request: Duplicate mount point: /tmp"
+    assert text =~ ~s("step": "provision")
+  end
+
   test "a task of another operator is not visible", %{conn: conn} do
     other = user_fixture()
     {other_token, _plaintext} = api_token_fixture(other)

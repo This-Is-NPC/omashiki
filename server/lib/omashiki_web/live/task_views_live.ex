@@ -697,6 +697,9 @@ defmodule OmashikiWeb.TaskViewsLive do
             {Rows.span(step.started_at, step.finished_at || @now) || "—"}
           </span>
           <span class={["uppercase", Ops.status_class(step.status)]}>{step.status}</span>
+          <span :if={step.error} class="col-span-3 min-w-0 break-words text-status-failed">
+            {step.error["message"]}
+          </span>
         </li>
       </ol>
     </.detail_section>
@@ -709,10 +712,22 @@ defmodule OmashikiWeb.TaskViewsLive do
         :if={@detail.job.terminal_result}
         class="term-scroll max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-status-succeeded"
       >{Ops.json(@detail.job.terminal_result)}</pre>
-      <pre
-        :if={@detail.job.terminal_error}
-        class="term-scroll max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-status-failed"
-      >{Ops.json(@detail.job.terminal_error)}</pre>
+      <div :if={@detail.job.terminal_error} class="space-y-2">
+        <dl class="grid grid-cols-[8rem_minmax(0,1fr)] gap-y-2 font-mono text-xs">
+          <dt class="text-on-surface-variant">Code</dt>
+          <dd class="min-w-0 break-words text-status-failed">
+            {@detail.job.terminal_error["code"] || "—"}
+          </dd>
+          <dt class="text-on-surface-variant">Message</dt>
+          <dd class="min-w-0 whitespace-pre-wrap break-words text-on-surface">
+            {@detail.job.terminal_error["message"] || "—"}
+          </dd>
+        </dl>
+        <pre
+          :if={@detail.job.terminal_error["details"] not in [nil, %{}]}
+          class="term-scroll max-h-64 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-on-surface-variant"
+        >{Ops.json(@detail.job.terminal_error["details"])}</pre>
+      </div>
     </.detail_section>
 
     <.detail_section title="Events">

@@ -130,9 +130,28 @@ defmodule OmashikiWeb.ApiSpec.Schemas.JobBatchRequest do
   })
 end
 
+defmodule OmashikiWeb.ApiSpec.Schemas.JobError do
+  require OpenApiSpex
+  alias OpenApiSpex.Schema
+
+  OpenApiSpex.schema(%{
+    title: "JobError",
+    description: "Why a job failed or was cancelled.",
+    type: :object,
+    additionalProperties: false,
+    required: [:code, :message, :details],
+    properties: %{
+      code: %Schema{type: :string, description: "Stable failure code."},
+      message: %Schema{type: :string, description: "Readable cause of the failure."},
+      details: %Schema{type: :object, description: "Structured cause, such as the step."}
+    }
+  })
+end
+
 defmodule OmashikiWeb.ApiSpec.Schemas.Job do
   require OpenApiSpex
   alias OpenApiSpex.Schema
+  alias OmashikiWeb.ApiSpec.Schemas.JobError
 
   OpenApiSpex.schema(%{
     title: "Job",
@@ -167,7 +186,8 @@ defmodule OmashikiWeb.ApiSpec.Schemas.Job do
       submitted_at: %Schema{type: :string, format: :"date-time"},
       queued_at: %Schema{type: :string, format: :"date-time", nullable: true},
       started_at: %Schema{type: :string, format: :"date-time", nullable: true},
-      finished_at: %Schema{type: :string, format: :"date-time", nullable: true}
+      finished_at: %Schema{type: :string, format: :"date-time", nullable: true},
+      error: %Schema{allOf: [JobError], nullable: true}
     }
   })
 end
@@ -239,7 +259,7 @@ end
 defmodule OmashikiWeb.ApiSpec.Schemas.JobResult do
   require OpenApiSpex
   alias OpenApiSpex.Schema
-  alias OmashikiWeb.ApiSpec.Schemas.JobChanges
+  alias OmashikiWeb.ApiSpec.Schemas.{JobChanges, JobError}
 
   OpenApiSpex.schema(%{
     title: "JobResult",
@@ -258,7 +278,7 @@ defmodule OmashikiWeb.ApiSpec.Schemas.JobResult do
       changes: %Schema{allOf: [JobChanges], nullable: true},
       compare_url: %Schema{type: :string, nullable: true},
       result: %Schema{type: :object, nullable: true},
-      error: %Schema{type: :object, nullable: true},
+      error: %Schema{allOf: [JobError], nullable: true},
       finished_at: %Schema{type: :string, format: :"date-time", nullable: true}
     }
   })

@@ -15,6 +15,7 @@ defmodule Omashiki.Jobs do
     AttemptResult,
     DispatchWorker,
     ExecutionCapacity,
+    Failure,
     Job,
     JobAttempt,
     JobEvent,
@@ -60,8 +61,8 @@ defmodule Omashiki.Jobs do
     "provisioning" => ~w(runner_id),
     "running" => [],
     "succeeded" => ~w(branch base_sha head_sha),
-    "failed" => ~w(error_code recovered),
-    "cancelled" => ~w(error_code recovered)
+    "failed" => ~w(error_code error_message recovered),
+    "cancelled" => ~w(error_code error_message recovered)
   }
 
   @doc "Claim one queued job and reserve one of the global local execution slots."
@@ -574,7 +575,7 @@ defmodule Omashiki.Jobs do
       })
 
     release_capacity_if_reserved!(attempt)
-    record_event!(updated, status, %{"error_code" => error_code(error)}, completed_attempt)
+    record_event!(updated, status, Failure.event_data(error), completed_attempt)
     Omashiki.Jobs.Dependencies.notify_dependents!(updated, nil)
     updated
   end
@@ -764,11 +765,7 @@ defmodule Omashiki.Jobs do
 
       if attempt && Statuses.active?(attempt.status) and attempt.lease_expires_at < at and
            job.current_attempt == attempt.number and Statuses.active?(job.status) do
-        error = %{
-          "code" => "stale_attempt",
-          "message" => "attempt lease expired",
-          "details" => %{"attempt" => attempt.number}
-        }
+        error = Failure.error({:stale_attempt, attempt.number})
 
         now = now()
 
@@ -796,7 +793,7 @@ defmodule Omashiki.Jobs do
         record_event!(
           updated,
           "failed",
-          %{"error_code" => "stale_attempt", "recovered" => true},
+          Map.put(Failure.event_data(error), "recovered", true),
           completed_attempt
         )
 
@@ -886,11 +883,7 @@ defmodule Omashiki.Jobs do
   end
 
   defp cancel_orphaned!(%Job{} = job, %JobAttempt{} = attempt) do
-    error = %{
-      "code" => "orphaned_dispatch",
-      "message" => "no dispatch remains for this queued job",
-      "details" => %{"attempt" => attempt.number}
-    }
+    error = Failure.error({:orphaned_dispatch, attempt.number})
 
     now = now()
 
@@ -917,7 +910,7 @@ defmodule Omashiki.Jobs do
     record_event!(
       updated,
       "cancelled",
-      %{"error_code" => "orphaned_dispatch", "recovered" => true},
+      Map.put(Failure.event_data(error), "recovered", true),
       completed_attempt
     )
 
@@ -1200,12 +1193,8 @@ defmodule Omashiki.Jobs do
 
   defp get_attr(attrs, key), do: Map.get(attrs, key, Map.get(attrs, Atom.to_string(key)))
 
-  defp error_code(error) when is_map(error),
-    do: Map.get(error, "code", Map.get(error, :code, "failed"))
-
-  defp error_code(_), do: "failed"
-
-  defp default_error(status), do: %{"code" => status, "message" => status, "details" => %{}}
+  defp default_error("cancelled"), do: Failure.error(:cancelled)
+  defp default_error("failed"), do: Failure.error(:failed)
 
   defp sanitize_event_data(status, data) do
     allowed = Map.fetch!(@event_data_keys, status)
