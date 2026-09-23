@@ -31,6 +31,10 @@ Create the cache and state directories, so that they belong to your account:
 mkdir -p ~/.cache/omashiki ~/.local/state/omashiki
 ```
 
+If a directory is missing when the house starts, Docker creates it for the root user, and the house cannot write to it.
+When `~/.cache/omashiki` belongs to root, the house stops at start and prints the commands that fix it.
+The doctor reports each other directory that the house cannot write to or create, with the command that fixes it.
+
 ## 2. Prepare the agent image
 
 The agent image is not published. Build it from the repository, at the release that you run:
@@ -92,7 +96,7 @@ curl --fail-with-body http://127.0.0.1:4010/api/v1/health
 docker compose exec omashiki bin/doctor
 ```
 
-The doctor checks Docker, the agent image, the network, and the host credential files.
+The doctor checks Docker, the agent image, the network, the directories that the house writes to, and the host credential files.
 Each check prints `ok`, `warn`, or `error`, and each problem has a fix.
 
 The house and its agent containers share a Docker network that `compose.yml` creates.

@@ -1,7 +1,8 @@
 defmodule Omashiki.Doctor.HostProbe do
   @moduledoc """
   `Omashiki.Doctor.Probe` against the real host: the Docker socket the
-  container manager uses, the house endpoint, host files, and GitHub.
+  container manager uses, the house endpoint, host files and directories, and
+  GitHub.
 
   Docker calls consume the caller's mailbox while in flight (see
   `Omashiki.Runtime.ContainerManager`), so run this from a dedicated process.
@@ -139,6 +140,19 @@ defmodule Omashiki.Doctor.HostProbe do
 
   @impl true
   def readable(origin), do: HostCredentials.readable(origin)
+
+  # Creates a file rather than reading mode bits, which say nothing about a
+  # read-only mount or a user in the owning group.
+  @impl true
+  def directory(path) do
+    probe = Path.join(path, ".omashiki-doctor.#{System.unique_integer([:positive])}")
+
+    cond do
+      File.dir?(path) -> with :ok <- File.write(probe, ""), do: File.rm(probe)
+      File.exists?(path) -> {:error, :enotdir}
+      true -> {:error, :enoent}
+    end
+  end
 
   @impl true
   def identity(identity) do

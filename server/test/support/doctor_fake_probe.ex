@@ -25,6 +25,8 @@ defmodule Omashiki.Doctor.FakeProbe do
   @impl true
   def readable(origin), do: answer(:readable, [origin])
   @impl true
+  def directory(path), do: answer(:directory, [path])
+  @impl true
   def identity(identity), do: answer(:identity, [identity])
 
   defp answer(callback, args) do

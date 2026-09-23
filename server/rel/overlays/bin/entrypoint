@@ -5,9 +5,13 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-# TMPDIR can name a directory in a mounted host path. Create it, since the
-# release falls back to /tmp when it is missing.
-mkdir -p "${TMPDIR:-/tmp}"
+# TMPDIR can name a directory in a mounted host path. Create it, and stop
+# when that fails: the release would fall back to the container's /tmp,
+# where the Docker daemon never looks.
+if ! mkdir -p "${TMPDIR:-/tmp}" 2>/dev/null; then
+  echo "omashiki: cannot create TMPDIR ${TMPDIR:-/tmp}. On the host, run \`mkdir -p ~/.cache/omashiki ~/.local/state/omashiki\` and \`sudo chown -R \$(id -u):\$(id -g) ~/.cache/omashiki\`, then start again (step 1 of docs/how-to-install-from-the-image.md, step 3 of docs/how-to-add-a-worker.md)." >&2
+  exit 1
+fi
 
 case "${OMASHIKI_ROLE:-embedded}" in
   worker)

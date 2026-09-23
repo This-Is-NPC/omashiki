@@ -76,9 +76,10 @@ defmodule Omashiki.Cli.DoctorTest do
     FakeProbe.set(%{runtime: {:error, :econnrefused}})
 
     assert {1, output} = DoctorCli.run([])
-    assert [problem, fix] = String.split(output, "\n", trim: true)
+    assert [problem, fix | others] = String.split(output, "\n", trim: true)
     assert problem =~ ~r/^error  docker  Docker does not answer/
     assert fix =~ ~r/^       fix: Start Docker/
+    assert Enum.all?(others, &String.starts_with?(&1, "ok "))
   end
 
   test "reports a configuration it cannot load as the config check", %{path: path} do

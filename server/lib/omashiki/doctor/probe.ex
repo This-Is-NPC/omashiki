@@ -32,6 +32,13 @@ defmodule Omashiki.Doctor.Probe do
   @doc "The host file at `origin` (absolute or `~/`) can be read."
   @callback readable(origin :: String.t()) :: result()
 
+  @doc """
+  The directory at `path` exists and this process can create files in it.
+  `{:error, :enoent}` when nothing is there, `{:error, :enotdir}` when it is
+  not a directory, the file system's reason when it refuses a new file.
+  """
+  @callback directory(path :: String.t()) :: result()
+
   @doc "The identity can mint an installation token."
   @callback identity(identity :: Omashiki.Config.Identity.t()) :: result()
 end

@@ -264,6 +264,119 @@ defmodule Omashiki.DoctorTest do
              find(run(host_credentials: [credential]), "host-credential:opencode-local")
   end
 
+  test "a directory the house writes to is ok when the house can write there" do
+    checks = run(directories: [{"cache", "/home/operator/.cache/omashiki"}])
+
+    assert %{status: :ok, summary: summary} = find(checks, "directory:cache")
+    assert summary =~ "/home/operator/.cache/omashiki"
+  end
+
+  test "a missing directory the house can create on first use is ok" do
+    FakeProbe.set(%{
+      directory: fn
+        "/home/operator/.local/state/omashiki" -> {:error, :enoent}
+        "/home/operator/.local/state" -> {:error, :enoent}
+        "/home/operator/.local" -> :ok
+      end
+    })
+
+    directories = [{"state", "/home/operator/.local/state/omashiki"}]
+
+    for install <- [:checkout, :release] do
+      assert %{status: :ok, summary: summary} =
+               find(run(install: install, directories: directories), "directory:state")
+
+      assert summary =~ "creates /home/operator/.local/state/omashiki for cache use records"
+    end
+  end
+
+  test "a missing directory the house cannot create is created for its account" do
+    FakeProbe.set(%{
+      directory: fn
+        "/home/operator/.local/state/omashiki" -> {:error, :enoent}
+        "/home/operator/.local/state" -> {:error, :eacces}
+      end
+    })
+
+    directories = [{"state", "/home/operator/.local/state/omashiki"}]
+
+    [checkout, release] =
+      for install <- [:checkout, :release] do
+        assert %{status: :error, summary: summary, fix: fix} =
+                 find(run(install: install, directories: directories), "directory:state")
+
+        assert summary =~ "/home/operator/.local/state/omashiki does not exist"
+        assert summary =~ "cannot create it in /home/operator/.local/state (:eacces)"
+        assert summary =~ "cache use records"
+        fix
+      end
+
+    command =
+      "`sudo mkdir -p /home/operator/.local/state/omashiki && " <>
+        "sudo chown -R $(id -u):$(id -g) /home/operator/.local/state/omashiki`"
+
+    assert checkout =~ "Run #{command} as the account"
+
+    assert release =~ "On the host, run #{command}"
+    assert release =~ "`docker compose restart omashiki`"
+
+    assert release =~
+             "/blob/v#{Application.spec(:omashiki, :vsn)}/docs/how-to-install-from-the-image.md" <>
+               "#1-download-the-files"
+
+    refute release =~ "mise"
+  end
+
+  test "a directory the house cannot write to is given to its account" do
+    FakeProbe.set(%{directory: {:error, :eacces}})
+
+    checks =
+      run(
+        install: :release,
+        directories: [
+          {"work", "/home/operator/.cache/omashiki/tmp/omashiki"},
+          {"config", "/config"},
+          {"credentials", "/dev/shm"}
+        ]
+      )
+
+    assert %{status: :error, summary: summary, fix: work} = find(checks, "directory:work")
+    assert summary =~ "cannot write to /home/operator/.cache/omashiki/tmp/omashiki (:eacces)"
+    assert work =~ "`sudo chown -R $(id -u):$(id -g) /home/operator/.cache/omashiki/tmp/omashiki`"
+
+    # Compose mounts the configuration directory at /config, not at its host path.
+    assert %{status: :error, fix: config} = find(checks, "directory:config")
+    assert config =~ "In the host directory mounted at /config"
+    assert config =~ "`sudo chown -R $(id -u):$(id -g) .`"
+
+    # Every user's house creates its own entries in /dev/shm: never chown it.
+    assert %{status: :error, fix: credentials} = find(checks, "directory:credentials")
+    assert credentials =~ "`sudo chmod 1777 /dev/shm`"
+  end
+
+  test "the work directory is TMPDIR as set, even when the VM would fall back" do
+    previous = System.get_env("TMPDIR")
+
+    refused = "/home/operator/.cache/omashiki/tmp/omashiki"
+    System.put_env("TMPDIR", refused)
+
+    on_exit(fn ->
+      if previous, do: System.put_env("TMPDIR", previous), else: System.delete_env("TMPDIR")
+    end)
+
+    FakeProbe.set(%{
+      directory: fn path -> if path == refused, do: {:error, :eacces}, else: :ok end
+    })
+
+    checks = Doctor.run(probe: FakeProbe, environments: [], host_credentials: [], identities: [])
+
+    assert %{status: :error, summary: summary} = find(checks, "directory:work")
+    assert summary =~ refused
+
+    for id <- ["cache", "state", "config", "credentials"],
+        do: assert(%{status: :ok} = find(checks, "directory:#{id}"))
+  end
+
   test "each identity must mint an installation token" do
     FakeProbe.set(%{
       identity: fn
@@ -315,7 +428,13 @@ defmodule Omashiki.DoctorTest do
   defp run(opts) do
     Doctor.run(
       Keyword.merge(
-        [probe: FakeProbe, environments: [], host_credentials: [], identities: []],
+        [
+          probe: FakeProbe,
+          environments: [],
+          host_credentials: [],
+          identities: [],
+          directories: []
+        ],
         opts
       )
     )

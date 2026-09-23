@@ -71,7 +71,7 @@ mise run doctor
 ```
 
 The doctor checks Docker, the agent images, and the network of each `restricted` environment.
-It also checks the host credential files and each GitHub App identity.
+It also checks that the house can write to its directories, the host credential files, and each GitHub App identity.
 When the house runs, it starts a short-lived container to check that containers reach `[app].port` on the host.
 Each check prints `ok`, `warn`, or `error`. Each problem has a fix.
 The task exits with a non-zero status when a check reports an error.

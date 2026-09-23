@@ -69,6 +69,7 @@ mkdir -p ~/.cache/omashiki ~/.local/state/omashiki
 The worker keeps its mirrors and job directories in `~/.cache/omashiki`.
 It keeps its enrollment in `~/.local/state/omashiki/workers/`, in a file named after the Compose project.
 The files that it writes there belong to your account.
+If Docker created `~/.cache/omashiki` for the root user first, the worker stops at start and prints the commands that fix it.
 
 The worker reads host credential origins inside its container.
 If an environment uses host credentials, first [mount their origins](how-to-configure-model-access.md#mount-the-origins-into-a-container) into the worker.

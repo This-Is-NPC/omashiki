@@ -16,11 +16,21 @@ defmodule Omashiki.Doctor do
   """
 
   alias Omashiki.Config
-  alias Omashiki.Runtime.{ContainerManager, HouseUrl}
+  alias Omashiki.Runtime.{ContainerManager, HostCredentials, HouseUrl}
   alias Omashiki.Runtimes
+  alias Omashiki.Runtimes.CacheGc
 
   @type status :: :ok | :warn | :error
   @type check :: %{id: String.t(), status: status(), summary: String.t(), fix: String.t() | nil}
+
+  # What the house keeps in each directory it writes to.
+  @directories %{
+    "cache" => "mirrors, caches, and job directories",
+    "state" => "cache use records",
+    "work" => "job work directories, file results, and agent sockets",
+    "config" => "the history of the Config screen",
+    "credentials" => "the credential copies of running attempts"
+  }
 
   @doc """
   Run the checks. Options:
@@ -31,6 +41,8 @@ defmodule Omashiki.Doctor do
       (default false)
     * `:environments`, `:host_credentials`, `:identities` — default to the
       live configuration
+    * `:directories` — `{id, path}` of every directory the house writes to;
+      defaults to the live ones
     * `:port` — the house HTTP port; defaults to the endpoint's
     * `:house_url` — where containers reach the house; defaults to
       `Omashiki.Runtime.HouseUrl.base_url/0`
@@ -47,11 +59,13 @@ defmodule Omashiki.Doctor do
     environments = Keyword.get_lazy(opts, :environments, &Config.environments/0)
     host_credentials = Keyword.get_lazy(opts, :host_credentials, &Config.host_credentials/0)
     identities = Keyword.get_lazy(opts, :identities, &Config.identities/0)
+    directories = Keyword.get_lazy(opts, :directories, &directories/0)
 
     opts =
       Keyword.put_new_lazy(opts, :install, fn -> Application.fetch_env!(:omashiki, :install) end)
 
     docker_checks(probe, environments, opts) ++
+      directory_checks(probe, directories, opts[:install]) ++
       host_credential_checks(probe, host_credentials, environments, opts[:install]) ++
       identity_checks(probe, identities)
   end
@@ -345,12 +359,106 @@ defmodule Omashiki.Doctor do
 
   defp host_credential_fix(credential, :release) do
     "Mount the directory of each origin read-only into the house container, then " <>
-      "restart the house (see https://github.com/This-Is-NPC/omashiki/blob/" <>
-      "v#{Application.spec(:omashiki, :vsn)}/docs/how-to-configure-model-access.md" <>
-      "#mount-the-origins-into-a-container). If an origin is missing on this machine " <>
-      "too, log in with #{credential.kind} first. Or correct " <>
-      "[host_credentials.#{credential.name}] in omashiki.toml."
+      "restart the house (see " <>
+      docs_url("how-to-configure-model-access.md#mount-the-origins-into-a-container") <>
+      "). If an origin is missing on this machine too, log in with #{credential.kind} " <>
+      "first. Or correct [host_credentials.#{credential.name}] in omashiki.toml."
   end
+
+  # Every directory the house writes to.
+  defp directories do
+    [
+      {"cache", CacheGc.cache_root()},
+      {"state", Path.dirname(CacheGc.metadata_root())},
+      {"work", work_dir()},
+      {"config", Path.dirname(Config.default_path())},
+      {"credentials", HostCredentials.root()}
+    ]
+  end
+
+  # `TMPDIR` as set, not the /tmp the VM falls back to when it cannot use it.
+  defp work_dir do
+    case System.get_env("TMPDIR") do
+      dir when dir in [nil, ""] -> System.tmp_dir!()
+      dir -> dir
+    end
+  end
+
+  # A missing directory is fine when the house can create it on first use:
+  # its nearest existing ancestor accepts new files.
+  defp directory_checks(probe, directories, install) do
+    Enum.map(directories, fn {id, path} ->
+      check = "directory:#{id}"
+      holds = Map.fetch!(@directories, id)
+
+      case nearest_existing(probe, path) do
+        {^path, :ok} ->
+          ok(check, "The house keeps #{holds} in #{path}.")
+
+        {_ancestor, :ok} ->
+          ok(check, "The house creates #{path} for #{holds} on first use.")
+
+        {^path, {:error, reason}} ->
+          error(
+            check,
+            "The house cannot write to #{path} (#{inspect(reason)}), so it cannot keep #{holds} there.",
+            directory_fix(id, path, :unwritable, install)
+          )
+
+        {ancestor, {:error, reason}} ->
+          error(
+            check,
+            "#{path} does not exist, and the house cannot create it in #{ancestor} " <>
+              "(#{inspect(reason)}), so it cannot keep #{holds} there.",
+            directory_fix(id, path, :missing, install)
+          )
+      end
+    end)
+  end
+
+  # `{directory, probe answer}` for `path`, or for its nearest ancestor that
+  # exists when `path` does not.
+  defp nearest_existing(probe, path) do
+    parent = Path.dirname(path)
+
+    case probe.directory(path) do
+      {:error, :enoent} when parent != path -> nearest_existing(probe, parent)
+      result -> {path, result}
+    end
+  end
+
+  defp directory_command(:missing, id, target),
+    do: "sudo mkdir -p #{target} && " <> directory_command(:unwritable, id, target)
+
+  # /dev/shm and its kin belong to nobody: every user's house creates its own
+  # directories in them.
+  defp directory_command(:unwritable, "credentials", target), do: "sudo chmod 1777 #{target}"
+
+  defp directory_command(:unwritable, _id, target),
+    do: "sudo chown -R $(id -u):$(id -g) #{target}"
+
+  defp directory_fix(id, path, problem, :checkout),
+    do: "Run `#{directory_command(problem, id, path)}` as the account that runs the house."
+
+  # Compose mounts each directory at its host path, except the configuration
+  # directory, which it mounts at /config.
+  defp directory_fix(id, path, problem, :release) do
+    where =
+      if id == "config",
+        do:
+          "In the host directory mounted at #{path}, the one that holds omashiki.toml, " <>
+            "run `#{directory_command(problem, id, ".")}`",
+        else: "On the host, run `#{directory_command(problem, id, path)}`"
+
+    "#{where} as your account, then restart the house with " <>
+      "`docker compose restart omashiki` (see " <>
+      docs_url("how-to-install-from-the-image.md#1-download-the-files") <> ")."
+  end
+
+  defp docs_url(page),
+    do:
+      "https://github.com/This-Is-NPC/omashiki/blob/v#{Application.spec(:omashiki, :vsn)}/docs/" <>
+        page
 
   defp identity_checks(probe, identities) do
     Enum.map(identities, fn identity ->
