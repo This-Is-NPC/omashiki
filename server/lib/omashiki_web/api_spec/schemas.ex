@@ -156,11 +156,17 @@ defmodule OmashikiWeb.ApiSpec.Schemas.JobReview do
   OpenApiSpex.schema(%{
     title: "JobReview",
     description:
-      "Output held because gitleaks found secrets in it. It stays on the node that produced it until an operator approves or rejects it.",
+      "Output held because gitleaks found secrets in it. It stays on the node that produced it until an operator approves or rejects it, or until expires_at.",
     type: :object,
     additionalProperties: false,
-    required: [:error, :node, :decision],
+    required: [:error, :node, :decision, :expires_at],
     properties: %{
+      expires_at: %Schema{
+        type: :string,
+        format: :"date-time",
+        description:
+          "When the job fails with review_expired unless its output was published first."
+      },
       error: %Schema{
         allOf: [JobError],
         description:
@@ -425,6 +431,11 @@ defmodule OmashikiWeb.ApiSpec.Schemas.Environment do
         enum: ["review", "block"],
         description:
           "What a secret found in the output does: review holds the job for an operator, block fails it."
+      },
+      review_timeout_ms: %Schema{
+        type: :integer,
+        description:
+          "How long held output waits for review before the job fails with review_expired."
       },
       capabilities: %Schema{type: :array, items: %Schema{type: :string}},
       resources: %Schema{type: :object}

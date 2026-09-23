@@ -17,6 +17,7 @@ defmodule Omashiki.Jobs do
     DispatchWorker,
     ExecutionCapacity,
     Failure,
+    HeldOutput,
     Job,
     JobAttempt,
     JobEvent,
@@ -55,7 +56,7 @@ defmodule Omashiki.Jobs do
   # mistake destroys user work, whereas delaying an already-stranded row by half
   # a minute costs nothing. The asymmetry justifies the wait.
   @orphan_grace_ms 30_000
-  @orphan_batch_size 100
+  @sweep_batch_size 100
 
   @event_data_keys %{
     "blocked" => ~w(depends_on),
@@ -339,14 +340,7 @@ defmodule Omashiki.Jobs do
 
           %Job{status: "review"} = job ->
             job = decide!(job, "reject", reviewer)
-
-            complete_locked(
-              job,
-              current_attempt!(job),
-              "failed",
-              %{error: job.review["error"]},
-              now()
-            )
+            fail_review!(job, job.review["error"])
 
           %Job{status: status} ->
             Repo.rollback({:invalid_transition, status, "failed"})
@@ -359,8 +353,8 @@ defmodule Omashiki.Jobs do
   @doc """
   The answer to a node that holds an attempt's output: `:publish` once the
   job is approved, `:ok` while it waits or the attempt still runs, and
-  `:cancel` when the output must go — the job was rejected or cancelled, or
-  the token is not the attempt's.
+  `:cancel` when the output must go — the job was rejected, cancelled or
+  expired, or the house knows no such attempt with that token.
   """
   def held_command(attempt_id, lease_token)
       when is_binary(attempt_id) and is_binary(lease_token) do
@@ -373,6 +367,23 @@ defmodule Omashiki.Jobs do
       end
     else
       _ -> :cancel
+    end
+  end
+
+  @doc """
+  Fail the jobs whose held output waited past its review deadline, approved
+  or not, with `review_expired`, as a rejection would. The node that holds the
+  output removes it when it next asks.
+
+  At most `#{@sweep_batch_size}` jobs are expired per call; the caller's tick
+  drains any larger backlog across successive passes.
+  """
+  def expire_reviews(at \\ nil) do
+    at = at || now()
+
+    with {:ok, job_ids} <- Tx.run(fn -> expire_reviews_locked(at) end) do
+      Enum.each(job_ids, &broadcast_updated/1)
+      {:ok, length(job_ids)}
     end
   end
 
@@ -452,7 +463,7 @@ defmodule Omashiki.Jobs do
   goal is that a lost dispatch be *visible* (NFR-001); `retry/1` is the
   deliberate, operator-driven way back into the queue.
 
-  At most `#{@orphan_batch_size}` rows are cancelled per call; the caller's tick
+  At most `#{@sweep_batch_size}` rows are cancelled per call; the caller's tick
   drains any larger backlog across successive passes.
   """
   def recover_orphaned_dispatches(at \\ nil) do
@@ -623,11 +634,37 @@ defmodule Omashiki.Jobs do
     updated =
       update_job!(job, %{
         status: "review",
-        review: %{"error" => error, "node" => attempt.machine_id, "decision" => nil}
+        review: %{
+          "error" => error,
+          "node" => attempt.machine_id,
+          "decision" => nil,
+          "expires_at" =>
+            DateTime.to_iso8601(HeldOutput.deadline(job.admitted_environment, now()))
+        }
       })
 
     record_event!(updated, "review", Failure.event_data(error), held)
     held
+  end
+
+  defp fail_review!(job, error),
+    do: complete_locked(job, current_attempt!(job), "failed", %{error: error}, now())
+
+  defp expire_reviews_locked(at) do
+    from(j in Job,
+      where:
+        j.status == "review" and
+          fragment("(?->>'expires_at')::timestamptz <= ?", j.review, ^at),
+      order_by: [asc: j.id],
+      lock: "FOR UPDATE SKIP LOCKED",
+      limit: @sweep_batch_size
+    )
+    |> Repo.all()
+    |> Enum.map(fn job ->
+      timeout_ms = Map.fetch!(job.admitted_environment, "review_timeout_ms")
+      fail_review!(job, Failure.error({:review_expired, timeout_ms}))
+      job.id
+    end)
   end
 
   defp decide!(%Job{review: review} = job, decision, reviewer) do
@@ -1007,7 +1044,7 @@ defmodule Omashiki.Jobs do
       # full queue behind it) would otherwise lock and rewrite every row in a
       # single transaction; oldest-first order plus the 1s tick drains the
       # backlog across ticks instead, bounding how long those locks are held.
-      limit: @orphan_batch_size
+      limit: @sweep_batch_size
     )
     |> Repo.all()
   end

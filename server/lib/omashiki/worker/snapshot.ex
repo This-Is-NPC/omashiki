@@ -96,6 +96,7 @@ defmodule Omashiki.Worker.Snapshot do
       HeldOutput.hold(state.job, state.attempt,
         token: offer.lease_token,
         manager_id: offer.manager_id,
+        environment: state.environment,
         sink: state.sink,
         artifact: state.container.artifact,
         summary: summary

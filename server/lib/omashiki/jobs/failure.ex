@@ -104,6 +104,11 @@ defmodule Omashiki.Jobs.Failure do
       {"orphaned_dispatch", "No dispatch remained to run this queued job.",
        %{"attempt" => number}}
 
+  defp describe({:review_expired, timeout_ms}),
+    do:
+      {"review_expired", "Output waited for review for #{period(timeout_ms)} and was discarded.",
+       %{"review_timeout_ms" => timeout_ms}}
+
   defp describe({:dependency_failed, job_id, status}),
     do:
       {"dependency_failed", "Dependency job #{job_id} ended #{status}.",
@@ -217,6 +222,24 @@ defmodule Omashiki.Jobs.Failure do
   end
 
   defp size(value, [_unit | rest]), do: size(value / 1024, rest)
+
+  # A duration in the largest unit that measures it exactly.
+  defp period(ms) do
+    units = [
+      {86_400_000, "day"},
+      {3_600_000, "hour"},
+      {60_000, "minute"},
+      {1_000, "second"},
+      {1, "millisecond"}
+    ]
+
+    {unit_ms, unit} = Enum.find(units, fn {unit_ms, _unit} -> rem(ms, unit_ms) == 0 end)
+
+    case div(ms, unit_ms) do
+      1 -> "1 #{unit}"
+      count -> "#{count} #{unit}s"
+    end
+  end
 
   defp fallback(reason), do: {"attempt_failed", "The attempt failed: #{cause(reason)}", %{}}
 

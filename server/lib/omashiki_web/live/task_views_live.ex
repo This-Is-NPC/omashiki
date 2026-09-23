@@ -936,8 +936,8 @@ defmodule OmashikiWeb.TaskViewsLive do
     |> Enum.intersperse({:safe, "/<wbr>"})
   end
 
-  defp review_note(%{"decision" => nil, "node" => node}, "review"),
-    do: "Waiting for review · output held on #{node}"
+  defp review_note(%{"decision" => nil, "node" => node, "expires_at" => expires_at}, "review"),
+    do: "Waiting for review · output held on #{node} · expires #{at(expires_at)}"
 
   defp review_note(%{"decision" => nil}, status), do: "Not reviewed · the job was #{status}"
 
@@ -946,14 +946,14 @@ defmodule OmashikiWeb.TaskViewsLive do
 
   defp review_note(review, _status), do: decision(review)
 
-  defp decision(%{"decision" => "approve", "decided_by" => by} = review),
-    do: "Approved by #{by} #{decided_at(review)}"
+  defp decision(%{"decision" => "approve", "decided_by" => by, "decided_at" => decided_at}),
+    do: "Approved by #{by} #{at(decided_at)}"
 
-  defp decision(%{"decision" => "reject", "decided_by" => by} = review),
-    do: "Rejected by #{by} #{decided_at(review)}"
+  defp decision(%{"decision" => "reject", "decided_by" => by, "decided_at" => decided_at}),
+    do: "Rejected by #{by} #{at(decided_at)}"
 
-  defp decided_at(%{"decided_at" => at}) do
-    case DateTime.from_iso8601(at) do
+  defp at(iso8601) do
+    case DateTime.from_iso8601(iso8601) do
       {:ok, at, _offset} -> "at " <> Ops.timestamp(at)
       _ -> ""
     end

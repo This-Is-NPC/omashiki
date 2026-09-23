@@ -16,7 +16,7 @@ curl --fail-with-body -sS -H "Authorization: Bearer $OMASHIKI_API_TOKEN" \
 A waiting job can have status `blocked` or `queued`.
 An active job can have status `provisioning` or `running`.
 A job in `review` holds output in which gitleaks found a secret, until an operator approves or rejects it.
-Its `review` object lists the findings and names the node that holds the output.
+Its `review` object lists the findings, names the node that holds the output, and gives the `expires_at` after which the job fails with `review_expired`.
 Terminal statuses are `succeeded`, `failed`, and `cancelled`.
 
 ## 2. Follow the events

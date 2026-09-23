@@ -35,7 +35,7 @@ stateDiagram-v2
     running --> cancelled: cancellation
     running --> review: only the secret scan refused the output
     review --> succeeded: approved output published
-    review --> failed: rejection or publishing failure
+    review --> failed: rejection, expiry, or publishing failure
     review --> cancelled: cancellation
     failed --> queued: retry with next attempt
     cancelled --> queued: retry with next attempt
@@ -101,6 +101,10 @@ After an approval the node runs the sink's finalization without the secret scan,
 A restart resends a stored complete instead of publishing again.
 After a rejection or a cancellation the node removes the output and its run branch.
 
+The house records a deadline in the job's `review`, the admitted environment's `review_timeout_ms` after the hold, and the node copies it into its record.
+`Omashiki.Jobs.Recovery` calls `Omashiki.Jobs.expire_reviews/1`, which fails every job in `review` past its deadline, approved or not, with `review_expired`, through the same completion as a rejection.
+The node removes the output when the house answers `cancel`, when a manager refuses the worker with `401` or `403`, and an hour after its own deadline whatever the answer, so an unreachable or removed manager cannot keep output forever.
+
 ### Git branch names
 
 Each attempt uses `<task-branch>-run-NNN` and a separate worktree.
@@ -121,7 +125,7 @@ The event ID supports receiver deduplication across retries.
 
 ## Recovery
 
-Recovery finds expired active leases and stranded dispatch state.
+Recovery finds expired active leases, stranded dispatch state, and reviews past their deadline.
 It records failure once and releases the reservation.
 A stale worker cannot complete with an expired fence.
 An embedded house removes the containers of attempts that are not live when it starts and after it recovers stale attempts.

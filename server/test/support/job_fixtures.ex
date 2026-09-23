@@ -20,7 +20,11 @@ defmodule Omashiki.JobFixtures do
           payload_hash: String.duplicate("a", 64),
           admitted_repository: %{"name" => "omashiki", "task_branch" => "feat-fixture"},
           admitted_repository_digest: String.duplicate("b", 64),
-          admitted_environment: %{"name" => "opencode", "sink" => "git"},
+          admitted_environment: %{
+            "name" => "opencode",
+            "sink" => "git",
+            "review_timeout_ms" => 604_800_000
+          },
           admitted_environment_digest: String.duplicate("c", 64),
           admitted_plugin: %{
             "path" => "plugins/opencode.toml",
@@ -85,7 +89,8 @@ defmodule Omashiki.JobFixtures do
       "error" =>
         Failure.error({:finalization_failed, {:secret_found, [finding]}}, "finalization"),
       "node" => "worker-a",
-      "decision" => nil
+      "decision" => nil,
+      "expires_at" => DateTime.utc_now() |> DateTime.add(7, :day) |> DateTime.to_iso8601()
     }
   end
 

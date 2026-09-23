@@ -86,6 +86,11 @@ An operator decides in the task details, and a client decides with a token that 
 
 Jobs that depend on a job in review keep waiting.
 
+Held output waits for the environment's `review_timeout_ms`, 7 days by default.
+The house fixes the deadline when the job enters review, and the task details show it.
+When it passes before the output is published, approved or not, the house fails the job with `review_expired`, with the same event and webhook as a rejection, and the node removes the output.
+The System screen counts the jobs in review.
+
 ### Allowed findings
 
 In the review of a held job, **Allow in this environment** tells the secret scan to stop refusing one finding, with an optional note.
@@ -108,6 +113,12 @@ A worker asks the manager that offered the attempt, and publishes to that manage
 A decision is recorded in the house at once.
 Only the node that holds the output can publish it, so an approval waits for that node.
 While a worker is offline, its held output stays in `review`, and the task details say which node holds it.
+
+The node removes held output without waiting for the deadline when the house says the job was rejected, cancelled, or expired, or that it does not know the attempt, and when the manager refuses the worker's token with `401` or `403`.
+The record keeps its own copy of the deadline.
+An hour after that deadline the node removes the output in any case, even while the manager is unreachable or no longer configured on the worker.
+Before then, an unreachable manager only delays the next question.
+Each removal is logged with its reason.
 A rejection or a cancellation ends the job at once; the worker removes the output when it is back.
 If the node never comes back, reject or cancel the job.
 

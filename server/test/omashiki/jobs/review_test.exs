@@ -49,7 +49,8 @@ defmodule Omashiki.Jobs.ReviewTest do
         "environments" => %{
           "notes" => environment("files", %{}),
           "code" => environment("git", %{}),
-          "strict" => environment("files", %{"secret_scan" => "block"})
+          "strict" => environment("files", %{"secret_scan" => "block"}),
+          "brief" => environment("files", %{"review_timeout_ms" => 90 * 60_000})
         },
         "webhooks" => %{"allow_private_destinations" => true},
         "limits" => %{}
@@ -231,7 +232,7 @@ defmodule Omashiki.Jobs.ReviewTest do
       assert failed.error["code"] == "secret_found"
 
       assert {:error, {:invalid_transition, "failed", "succeeded"}} = Jobs.approve(job, "bob")
-      assert Sweeper.settle(record) == :discarded
+      assert Sweeper.settle(record) == {:discarded, :cancelled}
       refute File.exists?(record.artifact.path)
       assert HeldOutput.list() == []
     end
@@ -241,7 +242,7 @@ defmodule Omashiki.Jobs.ReviewTest do
       [record] = HeldOutput.list()
 
       assert {:ok, %Job{status: "cancelled"}} = Jobs.cancel(job)
-      assert Sweeper.settle(record) == :discarded
+      assert Sweeper.settle(record) == {:discarded, :cancelled}
       refute File.exists?(record.artifact.path)
     end
 
@@ -250,7 +251,7 @@ defmodule Omashiki.Jobs.ReviewTest do
       [record] = HeldOutput.list()
 
       {:ok, _rejected} = Jobs.reject(job, "alice")
-      assert Sweeper.settle(record) == :discarded
+      assert Sweeper.settle(record) == {:discarded, :cancelled}
 
       refute File.exists?(record.artifact.path)
 
@@ -274,6 +275,64 @@ defmodule Omashiki.Jobs.ReviewTest do
 
       Omashiki.Await.until(fn -> Repo.get!(Job, job.id).status == "succeeded" end)
       assert HeldOutput.list() == []
+    end
+  end
+
+  describe "a review past its deadline" do
+    test "fails the job with review_expired, as a rejection would", %{token: token} do
+      {:ok, token} =
+        Webhooks.configure(token, %{destination: "http://127.0.0.1:9/hook", secret: "hook-secret"})
+
+      {job, attempt} = run(token, "notes")
+      [record] = HeldOutput.list()
+      {:ok, deadline, _offset} = DateTime.from_iso8601(job.review["expires_at"])
+      assert_in_delta DateTime.diff(deadline, DateTime.utc_now(), :day), 7, 1
+      assert abs(DateTime.diff(deadline, record.expires_at, :second)) < 60
+
+      assert {:ok, 0} = Jobs.expire_reviews(DateTime.add(deadline, -1, :second))
+      assert Repo.get!(Job, job.id).status == "review"
+
+      assert {:ok, 1} = Jobs.expire_reviews(deadline)
+
+      expired = Repo.get!(Job, job.id)
+      assert expired.status == "failed"
+      assert expired.terminal_error["code"] == "review_expired"
+
+      assert expired.terminal_error["message"] ==
+               "Output waited for review for 7 days and was discarded."
+
+      failed = Repo.get!(JobAttempt, attempt.id)
+      assert failed.status == "failed"
+      assert failed.error["code"] == "review_expired"
+
+      event = Repo.one!(from(e in JobEvent, where: e.job_id == ^job.id and e.status == "failed"))
+      assert %JobEvent{type: "job.failed", data: %{"error_code" => "review_expired"}} = event
+
+      assert [%WebhookDelivery{payload: %{"status" => "failed"}}] =
+               Repo.all(from(d in WebhookDelivery, where: d.event_id == ^event.event_id))
+
+      assert {:ok, 0} = Jobs.expire_reviews(DateTime.add(deadline, 1, :day))
+      assert Sweeper.settle(record) == {:discarded, :cancelled}
+      refute File.exists?(record.artifact.path)
+    end
+
+    test "expires approved output the node never published", %{token: token} do
+      {job, _attempt} = run(token, "notes")
+      {:ok, _approved} = Jobs.approve(job, "alice")
+
+      assert {:ok, 1} = Jobs.expire_reviews(DateTime.add(DateTime.utc_now(), 8, :day))
+      assert Repo.get!(Job, job.id).terminal_error["code"] == "review_expired"
+    end
+
+    test "comes from the environment's review_timeout_ms", %{token: token} do
+      {job, _attempt} = run(token, "brief")
+      {:ok, deadline, _offset} = DateTime.from_iso8601(job.review["expires_at"])
+      assert_in_delta DateTime.diff(deadline, DateTime.utc_now(), :second), 90 * 60, 60
+
+      assert {:ok, 1} = Jobs.expire_reviews(DateTime.add(DateTime.utc_now(), 2, :hour))
+
+      assert Repo.get!(Job, job.id).terminal_error["message"] ==
+               "Output waited for review for 90 minutes and was discarded."
     end
   end
 

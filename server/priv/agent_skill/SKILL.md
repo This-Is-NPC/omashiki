@@ -119,6 +119,8 @@ lists each finding's file, line, rule, and redacted match. Report the findings
 to the user. `POST /api/v1/jobs/{id}/approve` publishes the output and
 `POST /api/v1/jobs/{id}/reject` fails the job. Both are mutations: perform one
 only when the user decided it for that job. Never approve to get past the check.
+Output not published by `review.expires_at` is removed and the job fails with
+`review_expired`.
 
 ## Cancel, Retry, And Errors
 

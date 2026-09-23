@@ -410,6 +410,7 @@ defmodule Omashiki.Jobs.Runner do
     held =
       HeldOutput.hold(state.job, state.attempt,
         token: token,
+        environment: state.environment,
         sink: state.environment["sink"],
         artifact: state.container.artifact,
         summary: harness_summary(state.harness_result)

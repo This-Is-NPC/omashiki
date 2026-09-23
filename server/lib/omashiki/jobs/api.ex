@@ -167,6 +167,12 @@ defmodule Omashiki.Jobs.Api do
     end
   end
 
+  @doc "Count the operator's jobs in `status`."
+  def count(%User{} = user, status) do
+    from(j in Job, where: j.user_id == ^user.id and j.status == ^status)
+    |> Repo.aggregate(:count)
+  end
+
   @doc "Return recent terminal events belonging to the operator."
   def recent_terminal_events(%User{} = user, limit \\ 8) do
     terminal = Statuses.terminal()

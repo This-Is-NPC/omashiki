@@ -6,12 +6,17 @@ defmodule Omashiki.Jobs.HeldOutput.Sweeper do
   asks the house about each record in `Omashiki.Jobs.HeldOutput` through the
   attempt heartbeat, the channel that carries cancellation to a node. The
   answer keeps the output, publishes it (the job was approved), or removes it
-  (the job was rejected or cancelled, or the attempt is gone). A published
-  record's complete goes back through the same completion as any attempt.
+  (the job was rejected, cancelled or expired, or the house no longer knows
+  the attempt). A published record's complete goes back through the same
+  completion as any attempt.
 
   An embedded house asks its own `Omashiki.Worker.Inbox`; a worker asks the
-  manager that offered the attempt, over HTTP. A record whose manager the
-  worker no longer serves waits until it is enrolled again.
+  manager that offered the attempt, over HTTP. A manager that refuses the
+  worker's token (401 or 403) will never decide, so the output goes at once.
+  Otherwise a record waits while its manager is unreachable or no longer
+  configured, until an hour past the record's own deadline: then the output
+  goes whether or not the house answers, since the house has failed the job
+  by then.
   """
 
   use GenServer
@@ -23,6 +28,9 @@ defmodule Omashiki.Jobs.HeldOutput.Sweeper do
 
   @interval_ms 5_000
   @debounce_ms 250
+  # Covers clock skew between the node and the house, and the house's own
+  # expiry tick, so the house fails the job before the node drops its output.
+  @grace_ms :timer.hours(1)
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -30,18 +38,21 @@ defmodule Omashiki.Jobs.HeldOutput.Sweeper do
 
   @doc """
   Take one step for `record`: ask, then publish, deliver, or discard.
-  Returns what happened; anything but `:held` removed or advanced the record.
+  Returns what happened; `:held` and `{:error, reason}` keep the record,
+  anything else removed or advanced it. `{:discarded, reason}` says why the
+  output went: `:cancelled` (the house told it to), `:unauthorized` (the
+  manager refused the worker), `:expired` (past the deadline and its grace),
+  or `{:complete_refused, reason}`.
   """
   @spec settle(HeldOutput.t()) ::
-          :held | :published | :delivered | :discarded | {:error, term()}
+          :held | :published | :delivered | {:discarded, term()} | {:error, term()}
   def settle(%HeldOutput{complete: nil} = record) do
     case command(record) do
-      :ok ->
-        :held
-
       :cancel ->
-        HeldOutput.discard(record)
-        :discarded
+        discard(record, :cancelled)
+
+      {:error, :unauthorized} ->
+        discard(record, :unauthorized)
 
       :publish ->
         with {:ok, record} <- HeldOutput.publish(record) do
@@ -51,12 +62,34 @@ defmodule Omashiki.Jobs.HeldOutput.Sweeper do
           end
         end
 
-      {:error, reason} ->
-        {:error, reason}
+      answer ->
+        wait(record, answer)
     end
   end
 
-  def settle(%HeldOutput{} = record), do: deliver(record)
+  def settle(%HeldOutput{} = record) do
+    case deliver(record) do
+      {:error, _reason} = error -> wait(record, error)
+      other -> other
+    end
+  end
+
+  # Past its deadline and the grace, the output goes whatever the house says:
+  # the house has failed the job by then, or cannot be asked.
+  defp wait(record, answer) do
+    removal_at = DateTime.add(record.expires_at, @grace_ms, :millisecond)
+
+    cond do
+      DateTime.after?(DateTime.utc_now(), removal_at) -> discard(record, :expired)
+      answer == :ok -> :held
+      true -> answer
+    end
+  end
+
+  defp discard(record, reason) do
+    HeldOutput.discard(record)
+    {:discarded, reason}
+  end
 
   @impl true
   def init(opts) do
@@ -119,10 +152,20 @@ defmodule Omashiki.Jobs.HeldOutput.Sweeper do
   defp log(attempt_id, :published),
     do: Logger.info("published the approved output of attempt #{attempt_id}")
 
-  defp log(attempt_id, :discarded),
-    do: Logger.info("removed the held output of attempt #{attempt_id}")
+  # A house that decided is routine; any other end of held output is not.
+  defp log(attempt_id, {:discarded, reason}) do
+    level = if reason == :cancelled, do: :info, else: :warning
+    Logger.log(level, "removed the held output of attempt #{attempt_id}: #{why(reason)}")
+  end
 
   defp log(_attempt_id, _result), do: :ok
+
+  defp why(:cancelled),
+    do: "the house rejected, cancelled or expired the job, or no longer knows the attempt"
+
+  defp why(:unauthorized), do: "the manager refused this worker's token"
+  defp why(:expired), do: "its review deadline passed and the house did not settle it"
+  defp why({:complete_refused, reason}), do: "the house refused its complete: #{inspect(reason)}"
 
   defp command(%HeldOutput{manager_id: nil} = record) do
     {:ok, command} = Inbox.held(record.attempt_id, record.token)
@@ -134,12 +177,12 @@ defmodule Omashiki.Jobs.HeldOutput.Sweeper do
   end
 
   # A complete the house turns down for good cannot succeed later: the output
-  # goes. Any other failure is retried on the next sweep.
+  # goes. Any other failure is retried on the next sweep, up to the deadline.
   defp deliver(%HeldOutput{manager_id: nil} = record) do
     case Inbox.complete(record.attempt_id, record.token, Complete.to_map(record.complete)) do
       {:ok, _attempt} -> finish(record)
       {:error, :busy} -> {:error, :busy}
-      {:error, reason} -> refused(record, reason)
+      {:error, reason} -> discard(record, {:complete_refused, reason})
     end
   end
 
@@ -151,11 +194,11 @@ defmodule Omashiki.Jobs.HeldOutput.Sweeper do
         :ok ->
           finish(record)
 
-        {:error, reason} when reason == :unauthorized ->
-          refused(record, reason)
+        {:error, :unauthorized} ->
+          discard(record, :unauthorized)
 
         {:error, {:http, status, _body} = reason} when status in 400..499 ->
-          refused(record, reason)
+          discard(record, {:complete_refused, reason})
 
         {:error, reason} ->
           {:error, reason}
@@ -166,15 +209,6 @@ defmodule Omashiki.Jobs.HeldOutput.Sweeper do
   defp finish(record) do
     HeldOutput.finish(record)
     :delivered
-  end
-
-  defp refused(record, reason) do
-    Logger.warning(
-      "house refused the complete of held attempt #{record.attempt_id}: #{inspect(reason)}"
-    )
-
-    HeldOutput.discard(record)
-    :discarded
   end
 
   defp client(%HeldOutput{manager_id: manager_id}) do

@@ -105,8 +105,9 @@ A failed manager connection does not remove another house's work.
 
 Output held for review stays on the worker that produced it.
 The worker completes the attempt with a `review` complete, and keeps a record of the output.
-The answer to a heartbeat with `held: true` says `publish` after an approval and `cancel` after a rejection or a cancellation.
+The answer to a heartbeat with `held: true` says `publish` after an approval, and `cancel` after a rejection, a cancellation, or an expiry, or when the manager does not know the attempt.
 The worker then publishes to the manager that offered the attempt, or removes the output.
+It also removes the output when the manager answers `401` or `403`, and an hour after the deadline in its record even when it cannot reach the manager.
 
 A files completion cannot refer only to a worker-local path.
 The manager must have the blob before it accepts success.

@@ -346,7 +346,7 @@ defmodule OmashikiWeb.TaskViewsLiveTest do
       text = visible_text(html)
 
       assert text =~ "leaky-notes"
-      assert text =~ "Waiting for review · output held on worker-a"
+      assert text =~ "Waiting for review · output held on worker-a · expires at "
     end
 
     test "the details show the findings and approve records the decision",

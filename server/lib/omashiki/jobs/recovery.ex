@@ -1,5 +1,9 @@
 defmodule Omashiki.Jobs.Recovery do
-  @moduledoc "Periodically reconciles expired local leases after worker or server death."
+  @moduledoc """
+  Periodically reconciles expired local leases after worker or server death,
+  queued jobs whose dispatch was lost, and held output past its review
+  deadline.
+  """
 
   use GenServer
 
@@ -32,6 +36,12 @@ defmodule Omashiki.Jobs.Recovery do
       &Omashiki.Jobs.recover_orphaned_dispatches/0,
       "cancelled ~s job(s) whose dispatch was lost",
       "orphaned dispatch recovery failed"
+    )
+
+    sweep(
+      &Omashiki.Jobs.expire_reviews/0,
+      "failed ~s job(s) whose output waited too long for review",
+      "review expiry failed"
     )
 
     Process.send_after(self(), :recover, @interval_ms)

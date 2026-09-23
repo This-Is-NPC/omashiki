@@ -48,6 +48,7 @@ defmodule OmashikiWeb.OverviewLive do
     |> assign(:queued, Enum.count(jobs, &(&1.status == "queued")))
     |> assign(:blocked, Enum.count(jobs, &(&1.status == "blocked")))
     |> assign(:running, Enum.count(jobs, &(&1.status in ["provisioning", "running"])))
+    |> assign(:review, Api.count(user, "review"))
     |> assign(:terminal_events, Api.recent_terminal_events(user))
     |> assign(:webhook_failures, Api.recent_webhook_failures(user))
     |> assign(:token_audit, Omashiki.ApiTokens.Audit.recent_for_user(user))
@@ -107,7 +108,7 @@ defmodule OmashikiWeb.OverviewLive do
         <span class="font-mono text-xs text-on-surface-variant">updates every 2s</span>
       </header>
 
-      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <.metric
           label="SLOTS"
           value={"#{@slots.in_use} / #{@slots.capacity}"}
@@ -115,6 +116,12 @@ defmodule OmashikiWeb.OverviewLive do
         />
         <.metric label="ACTIVE CONTAINERS" value={@running} note="provisioning + running jobs" />
         <.metric label="QUEUED" value={@queued} note={"#{@blocked} blocked"} />
+        <.metric
+          label="IN REVIEW"
+          value={@review}
+          note="output held for an operator"
+          value_class={if @review > 0, do: "text-status-awaiting", else: "text-on-surface"}
+        />
         <.metric
           label="CACHE"
           value={if @cache.healthy, do: "healthy", else: "degraded"}

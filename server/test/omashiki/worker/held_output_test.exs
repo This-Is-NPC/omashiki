@@ -96,7 +96,7 @@ defmodule Omashiki.Worker.HeldOutputTest do
         "priority" => 0
       })
 
-    {:ok, job: job, worker_token: worker_token}
+    {:ok, job: job, worker_token: worker_token, bypass: bypass}
   end
 
   test "the worker holds the output and publishes it once approved", %{
@@ -111,6 +111,12 @@ defmodule Omashiki.Worker.HeldOutputTest do
     assert job.review["node"] == "worker-a"
     assert record.manager_id == "house-a"
     assert record.token == offer.lease_token
+
+    # Node and house take the deadline from the same admitted environment.
+    {:ok, house_deadline, _offset} = DateTime.from_iso8601(job.review["expires_at"])
+    assert abs(DateTime.diff(house_deadline, record.expires_at, :second)) < 60
+
+    assert_in_delta DateTime.diff(record.expires_at, DateTime.utc_now(), :day), 7, 1
 
     assert Sweeper.settle(record) == :held
     assert File.exists?(record.artifact.path)
@@ -133,7 +139,72 @@ defmodule Omashiki.Worker.HeldOutputTest do
     {_offer, record} = hold_on_worker(conn, worker_token)
 
     {:ok, %Job{status: "failed"}} = Jobs.reject(job, "alice")
-    assert Sweeper.settle(record) == :discarded
+    assert Sweeper.settle(record) == {:discarded, :cancelled}
+    refute File.exists?(record.artifact.path)
+    assert HeldOutput.list() == []
+  end
+
+  test "the worker removes the output when the manager refuses its token", %{
+    conn: conn,
+    job: job,
+    worker_token: worker_token
+  } do
+    {_offer, record} = hold_on_worker(conn, worker_token)
+    [manager] = Application.get_env(:omashiki, :worker_managers)
+    Application.put_env(:omashiki, :worker_managers, [%{manager | "token" => "revoked"}])
+
+    assert Sweeper.settle(record) == {:discarded, :unauthorized}
+    refute File.exists?(record.artifact.path)
+    assert HeldOutput.list() == []
+    assert Repo.get!(Job, job.id).status == "review"
+  end
+
+  test "the worker removes the output when the manager no longer knows the attempt", %{
+    conn: conn,
+    job: job,
+    worker_token: worker_token
+  } do
+    {_offer, record} = hold_on_worker(conn, worker_token)
+    Repo.delete!(Repo.get!(Job, job.id))
+
+    assert Sweeper.settle(record) == {:discarded, :cancelled}
+    refute File.exists?(record.artifact.path)
+    assert HeldOutput.list() == []
+  end
+
+  test "the worker keeps the output while the manager is unreachable before the deadline", %{
+    conn: conn,
+    worker_token: worker_token,
+    bypass: bypass
+  } do
+    {_offer, record} = hold_on_worker(conn, worker_token)
+    Bypass.down(bypass)
+
+    assert {:error, _unreachable} = Sweeper.settle(record)
+    assert File.exists?(record.artifact.path)
+    assert HeldOutput.list() == [record]
+
+    # A manager the worker no longer serves is no answer either.
+    Application.put_env(:omashiki, :worker_managers, [])
+    assert {:error, {:manager_not_enrolled, "house-a"}} = Sweeper.settle(record)
+    assert File.exists?(record.artifact.path)
+  end
+
+  test "the worker removes the output past its deadline while the manager is unreachable", %{
+    conn: conn,
+    worker_token: worker_token,
+    bypass: bypass
+  } do
+    {_offer, record} = hold_on_worker(conn, worker_token)
+    Bypass.down(bypass)
+
+    # Past the deadline but within the grace, the house may still decide.
+    record = expire(record, DateTime.add(DateTime.utc_now(), -5, :minute))
+    assert {:error, _unreachable} = Sweeper.settle(record)
+    assert File.exists?(record.artifact.path)
+
+    record = expire(record, DateTime.add(DateTime.utc_now(), -2, :hour))
+    assert Sweeper.settle(record) == {:discarded, :expired}
     refute File.exists?(record.artifact.path)
     assert HeldOutput.list() == []
   end
@@ -186,6 +257,20 @@ defmodule Omashiki.Worker.HeldOutputTest do
 
     assert json_response(response, 200) == %{"ok" => true}
     {offer, record}
+  end
+
+  # Rewrite the record on disk with another deadline and read it back.
+  defp expire(record, expires_at) do
+    file = Path.join(HeldOutput.root(), "#{record.attempt_id}.json")
+
+    file
+    |> File.read!()
+    |> Jason.decode!()
+    |> Map.put("expires_at", DateTime.to_iso8601(expires_at))
+    |> then(&File.write!(file, Jason.encode!(&1)))
+
+    [record] = HeldOutput.list()
+    record
   end
 
   defp heartbeat(conn, worker_token, body) do

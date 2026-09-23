@@ -39,7 +39,7 @@ Their enrollment state persists manager IDs, URLs, and worker tokens.
 | Scheduling | `queue`, `priority`, `dependency_artifacts`. |
 | Lifecycle | `status`, `current_attempt`, `queued_at`, `started_at`, `finished_at`. |
 | Terminal record | `terminal_result`, `terminal_error`. |
-| Review | `review`: the `secret_found` error of held output, the node that holds it, and the decision. |
+| Review | `review`: the `secret_found` error of held output, the node that holds it, the decision, and the deadline `expires_at`. |
 
 The database protects admitted identity fields from later updates.
 A non-Git job can have a null repository and repository snapshot.
@@ -74,7 +74,7 @@ erDiagram
 Only one attempt for a job can be provisioning or running.
 An active attempt has a lease and a capacity reservation.
 An attempt in `review` has no lease and no reservation, but keeps its lease token as the fence of the node that holds its output.
-A job in `review` has a `review` record.
+A job in `review` has a `review` record with an `expires_at`.
 Terminal transitions clear active lease and reservation state.
 
 Git success requires branch, base SHA, head SHA, clean-worktree status, and result metadata.

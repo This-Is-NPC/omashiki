@@ -127,6 +127,7 @@ Both require the `read` scope.
       "timeout_ms": 1800000,
       "network": "restricted",
       "secret_scan": "review",
+      "review_timeout_ms": 604800000,
       "capabilities": [],
       "resources": {"cpus": 2.0, "memory": "2GB", "pids": 256}
     }
@@ -145,6 +146,7 @@ It decides whether a job for that environment takes `repo`:
 
 [Result sinks](configuration.md#result-sinks) describes the output of each sink.
 `secret_scan` is `review` or `block`: whether output with a secret waits for review or fails the job.
+`review_timeout_ms` is how long output waits for review before the job fails with `review_expired`.
 
 ## Wait and listing
 
@@ -170,6 +172,7 @@ Its `review` object in `GET /jobs/{id}` has:
 | `node` | The node that holds the output. |
 | `decision` | `null` until a decision, then `approve` or `reject`. |
 | `decided_by`, `decided_at` | Who decided, and when. |
+| `expires_at` | When the job fails with `review_expired` if the output was not published by then: the environment's `review_timeout_ms` after the job entered review. |
 
 The object stays on the job after the decision.
 A retry clears it.
@@ -184,6 +187,7 @@ Approving again returns the job unchanged.
 Both require the `review` scope and return the job.
 A job that is not in `review` returns `409` with `code` `invalid_transition`.
 `POST /jobs/{id}/cancel` also works on a job in review, and the node removes the output.
+At `expires_at`, approved or not, the job fails with `review_expired` and the node removes the output.
 [Output checks](security-and-limits.md#output-held-for-review) explains where the output waits.
 
 Allowing a finding for later jobs is an operator action on the Home and Config screens.
@@ -212,6 +216,7 @@ The object has a stable `code`, a readable `message`, and structured `details`.
 | `symlink_path` | The output contains a symbolic link. `details.path` names it. |
 | `oversized_output` | The output changes more than the size limit. `details` has `changed_bytes` and `max_bytes`. |
 | `secret_scan_unavailable` | gitleaks was missing or failed, so the output could not be scanned and was not published. |
+| `review_expired` | Output held for review was not published within the environment's `review_timeout_ms` and was removed. `details.review_timeout_ms` has the timeout. |
 | `timeout` | A call to Docker or to the harness did not finish in time. |
 | `stale_attempt` | The attempt stopped renewing its lease. |
 | `cancelled` | An operator or a client cancelled the job. |

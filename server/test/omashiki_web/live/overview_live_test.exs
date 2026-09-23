@@ -91,6 +91,18 @@ defmodule OmashikiWeb.OverviewLiveTest do
     refute text =~ "Runtime"
   end
 
+  test "counts the jobs whose output waits for review", %{conn: conn, user: user, token: token} do
+    {:ok, _lv, html} = live(conn, ~p"/system")
+    assert visible_text(html) =~ ~r/IN REVIEW\s*0\s*output held for an operator/
+
+    for status <- ~w(review review running) do
+      Omashiki.JobFixtures.job_fixture(user, token, %{status: status})
+    end
+
+    {:ok, _lv, html} = live(conn, ~p"/system")
+    assert visible_text(html) =~ ~r/IN REVIEW\s*2\s*output held for an operator/
+  end
+
   test "system does not link into a job page", %{conn: conn} do
     {:ok, _lv, html} = live(conn, ~p"/system")
     refute html =~ ~s(href="/jobs/)

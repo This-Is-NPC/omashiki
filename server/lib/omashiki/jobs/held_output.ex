@@ -10,9 +10,10 @@ defmodule Omashiki.Jobs.HeldOutput do
 
   A record is a JSON file in `root/0`, readable only by the house user. It
   names the attempt, the fence the house gave it, the manager that offered it
-  (none on an embedded house), and where the output is. Container reclaim,
-  stale-attempt recovery and boot cleanup never touch the output, so a record
-  and its output survive a restart of the node.
+  (none on an embedded house), where the output is, and when it stops
+  waiting: the environment's `review_timeout_ms` after the hold. Container
+  reclaim, stale-attempt recovery and boot cleanup never touch the output, so
+  a record and its output survive a restart of the node.
 
   `Omashiki.Jobs.HeldOutput.Sweeper` asks the house what to do with each
   record, then calls `publish/1` and `finish/1`, or `discard/1`.
@@ -32,7 +33,8 @@ defmodule Omashiki.Jobs.HeldOutput do
     :manager_id,
     :sink,
     :artifact,
-    :summary
+    :summary,
+    :expires_at
   ]
   defstruct @enforce_keys ++ [complete: nil]
 
@@ -46,6 +48,7 @@ defmodule Omashiki.Jobs.HeldOutput do
           sink: String.t(),
           artifact: map(),
           summary: String.t() | nil,
+          expires_at: DateTime.t(),
           complete: Complete.t() | nil
         }
 
@@ -54,6 +57,11 @@ defmodule Omashiki.Jobs.HeldOutput do
     do: Map.get(environment, "secret_scan") == "review"
 
   def review?(_environment, _reason), do: false
+
+  @doc "When output held at `now` in `environment` stops waiting for review."
+  @spec deadline(map(), DateTime.t()) :: DateTime.t()
+  def deadline(environment, now),
+    do: DateTime.add(now, Map.fetch!(environment, "review_timeout_ms"), :millisecond)
 
   @doc "Directory of the records: `:held_output_root`, or `~/.cache/omashiki/held`."
   def root do
@@ -66,8 +74,9 @@ defmodule Omashiki.Jobs.HeldOutput do
   @doc """
   Record the output of `attempt`, refused only by the secret scan.
 
-  `opts` carries `:token` (the attempt's fence), `:sink`, `:artifact`,
-  `:summary` and, on a worker, the `:manager_id` that offered the attempt.
+  `opts` carries `:token` (the attempt's fence), the admitted `:environment`,
+  `:sink`, `:artifact`, `:summary` and, on a worker, the `:manager_id` that
+  offered the attempt.
   """
   @spec hold(Job.t(), JobAttempt.t(), keyword()) :: {:ok, t()} | {:error, term()}
   def hold(%Job{} = job, %JobAttempt{} = attempt, opts) do
@@ -80,7 +89,8 @@ defmodule Omashiki.Jobs.HeldOutput do
       manager_id: Keyword.get(opts, :manager_id),
       sink: Keyword.fetch!(opts, :sink),
       artifact: Keyword.fetch!(opts, :artifact),
-      summary: Keyword.get(opts, :summary)
+      summary: Keyword.get(opts, :summary),
+      expires_at: deadline(Keyword.fetch!(opts, :environment), DateTime.utc_now())
     }
 
     # The attempt id names the record file.
@@ -141,7 +151,7 @@ defmodule Omashiki.Jobs.HeldOutput do
   def finish(%__MODULE__{complete: %Complete{kind: kind}} = record),
     do: remove(record, kind != :error)
 
-  @doc "Remove the output and its record: the job was rejected or cancelled."
+  @doc "Remove the output and its record: it will never be published."
   @spec discard(t()) :: :ok
   def discard(%__MODULE__{} = record), do: remove(record, false)
 
@@ -180,6 +190,7 @@ defmodule Omashiki.Jobs.HeldOutput do
         "sink" => record.sink,
         "artifact" => record.artifact,
         "summary" => record.summary,
+        "expires_at" => DateTime.to_iso8601(record.expires_at),
         "complete" => record.complete && Complete.to_map(record.complete)
       })
 
@@ -197,6 +208,7 @@ defmodule Omashiki.Jobs.HeldOutput do
   defp read(file) do
     with {:ok, raw} <- File.read(file),
          {:ok, map} <- Jason.decode(raw),
+         {:ok, expires_at, _offset} <- DateTime.from_iso8601(map["expires_at"] || ""),
          {:ok, complete} <- decode_complete(map["complete"]) do
       %__MODULE__{
         attempt_id: map["attempt_id"],
@@ -209,6 +221,7 @@ defmodule Omashiki.Jobs.HeldOutput do
         artifact:
           Map.new(map["artifact"], fn {key, value} -> {String.to_existing_atom(key), value} end),
         summary: map["summary"],
+        expires_at: expires_at,
         complete: complete
       }
     else

@@ -1083,6 +1083,24 @@ defmodule Omashiki.Config.RegistryTest do
     end
   end
 
+  test "review_timeout_ms defaults to 7 days and stays within 30", ctx do
+    path = Path.join(ctx.root, "omashiki.toml")
+    assert :ok = Config.load_map!(fixture(ctx), path: path)
+    assert [%Environment{review_timeout_ms: 604_800_000}] = Config.environments()
+
+    hour = put_in(fixture(ctx), ["environments", "opencode", "review_timeout_ms"], 3_600_000)
+    assert :ok = Config.load_map!(hour, path: path)
+    assert [%Environment{review_timeout_ms: 3_600_000}] = Config.environments()
+
+    for invalid <- [0, 2_592_000_001, "7d"] do
+      config = put_in(fixture(ctx), ["environments", "opencode", "review_timeout_ms"], invalid)
+
+      assert_raise Error,
+                   ~r/environments.opencode.review_timeout_ms must be between 1 and 2592000000/,
+                   fn -> Config.load_map!(config, path: path) end
+    end
+  end
+
   defp put_env!(name, nil) do
     previous = System.get_env(name)
     System.delete_env(name)

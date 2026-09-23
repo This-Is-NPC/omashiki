@@ -60,7 +60,8 @@ defmodule Omashiki.Config.Environment do
     :network,
     :resources,
     :packages,
-    :secret_scan
+    :secret_scan,
+    :review_timeout_ms
   ]
   defstruct @enforce_keys
 end
@@ -98,6 +99,9 @@ defmodule Omashiki.Config.Registry do
   )
   @mount_roots ~w(/workspace /run/omashiki /omashiki-cache)
   @max_timeout_ms 24 * 60 * 60 * 1_000
+  @default_review_timeout_ms 7 * 24 * 60 * 60 * 1_000
+  # Held output waits no longer than a run branch is kept.
+  @max_review_timeout_ms 30 * 24 * 60 * 60 * 1_000
   @max_memory_bytes 1024 * 1024 * 1024 * 1024
   @env_reference ~r/^\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/
   @image_component ~r/\A[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*\z/
@@ -564,7 +568,7 @@ defmodule Omashiki.Config.Registry do
 
       reject_unknown!(
         attrs,
-        ~w(preset runtime sink packages executables credentials capabilities mcp_servers pre_steps post_steps timeout_ms caches mounts policy network resources secret_scan),
+        ~w(preset runtime sink packages executables credentials capabilities mcp_servers pre_steps post_steps timeout_ms caches mounts policy network resources secret_scan review_timeout_ms),
         where
       )
 
@@ -653,6 +657,11 @@ defmodule Omashiki.Config.Registry do
             "#{where}.secret_scan must be one of #{Enum.join(@secret_scans, ", ")}"
           )
 
+      review_timeout_ms =
+        if Map.has_key?(attrs, "review_timeout_ms"),
+          do: positive_integer!(attrs, "review_timeout_ms", where, @max_review_timeout_ms),
+          else: @default_review_timeout_ms
+
       %Environment{
         name: name,
         preset: preset,
@@ -672,7 +681,8 @@ defmodule Omashiki.Config.Registry do
         policy: policy,
         network: network,
         resources: build_resources!(Map.get(attrs, "resources", %{}), where),
-        secret_scan: secret_scan
+        secret_scan: secret_scan,
+        review_timeout_ms: review_timeout_ms
       }
     end)
     |> Enum.sort_by(& &1.name)
