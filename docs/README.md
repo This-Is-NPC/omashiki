@@ -13,7 +13,7 @@ This index identifies the procedure or reference for each task.
 6. [Follow a job and retrieve its result](how-to-follow-and-retrieve-a-job.md).
 
 Each procedure includes its prerequisites. Use names from your installation in place of the example names.
-A job with a `files` or `none` sink can operate without a repository.
+A job in a `files` or `none` environment runs without a repository and does not name one.
 
 ## Operate the installation
 
