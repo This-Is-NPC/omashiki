@@ -600,6 +600,7 @@ defmodule Omashiki.Runtime.ContainerManager do
             end
 
           {:error, reason} ->
+            reason = create_failure(reason, container_config["Image"])
             Logger.error("[ContainerManager] Provision failed at create: #{inspect(reason)}")
             {:error, reason}
         end
@@ -1456,6 +1457,17 @@ defmodule Omashiki.Runtime.ContainerManager do
 
   defp image_of(_),
     do: raise(ArgumentError, "preset must provide a resolved Docker runtime image")
+
+  # The Engine API never pulls on create: it answers 404 for a missing image
+  # (and for a missing network), so the image itself tells the two apart.
+  defp create_failure(:not_found, image) do
+    case docker_get("/images/#{image}/json") do
+      {:error, :not_found} -> {:image_missing, image}
+      _ -> :not_found
+    end
+  end
+
+  defp create_failure(reason, _image), do: reason
 
   defp transport_port_environment(%{transport: transport}, host_port),
     do:

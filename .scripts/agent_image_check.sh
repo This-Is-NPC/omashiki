@@ -102,7 +102,7 @@ exit $status
 '
 
 echo "      $IMAGE dependency contract:"
-if docker run --rm --entrypoint sh "$IMAGE" -c "$probe" probe "$@"; then
+if docker run --rm --pull never --entrypoint sh "$IMAGE" -c "$probe" probe "$@"; then
   echo "OK    $IMAGE provides $*"
 else
   echo "FAIL  $IMAGE is missing or cannot execute a required dependency" >&2

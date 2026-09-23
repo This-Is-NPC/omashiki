@@ -53,7 +53,7 @@ run_install() {
     go_proxy="off"
   fi
 
-  docker run --rm \
+  docker run --rm --pull never \
     --entrypoint bash \
     --user "$(stat -c '%u:%g' "${project}")" \
     --workdir "${project}" \

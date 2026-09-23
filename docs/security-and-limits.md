@@ -26,6 +26,7 @@ The runtime drops Linux capabilities and disables privilege escalation.
 It uses a read-only root filesystem, bounded temporary storage, and resource limits.
 Declared mounts and network settings remain part of the environment policy.
 A host-network environment has different isolation properties from a restricted environment.
+Omashiki never pulls an image. It runs only images already on the machine, and a missing image is an error that names it.
 
 The sandbox does not receive the host Docker socket.
 The worker controls Docker and is therefore a trusted execution component.

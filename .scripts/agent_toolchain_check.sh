@@ -77,7 +77,7 @@ echo "      ${IMAGE} toolchain capability: mise install --yes (erlang ${ERLANG_V
 
 started="$(date +%s)"
 
-if docker run --rm \
+if docker run --rm --pull never \
   --user 1000:1000 \
   --workdir /fixture \
   --entrypoint sh \

@@ -89,7 +89,7 @@ trap 'exit 143' TERM
 
 # Do not use --rm: explicit removal plus post-removal verification makes a
 # failed cleanup visible instead of hiding it behind Docker's auto-removal.
-CONTAINER_ID="$(docker run -d \
+CONTAINER_ID="$(docker run -d --pull never \
   --runtime kata \
   --name "$CONTAINER_NAME" \
   --label "${LABEL_KEY}=${LABEL_VALUE}" \

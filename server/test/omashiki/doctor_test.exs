@@ -56,6 +56,7 @@ defmodule Omashiki.DoctorTest do
     assert %{status: :error, summary: summary, fix: fix} = find(checks, "image:agent:missing")
     assert summary =~ "environments codex, opencode"
     assert fix =~ "mise run images"
+    assert fix =~ "docker pull agent:missing"
     assert %{status: :ok} = find(checks, "image:agent:present")
   end
 

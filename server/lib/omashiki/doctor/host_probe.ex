@@ -59,6 +59,8 @@ defmodule Omashiki.Doctor.HostProbe do
 
     name = "omashiki-doctor-#{System.unique_integer([:positive])}"
 
+    # The Engine API never pulls on create: a missing image is `:not_found`.
+
     case ContainerManager.docker_post("/containers/create?name=#{name}", config) do
       {:ok, %{"Id" => id}} ->
         try do

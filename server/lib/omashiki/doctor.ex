@@ -14,11 +14,10 @@ defmodule Omashiki.Doctor do
 
   alias Omashiki.Config
   alias Omashiki.Runtime.ContainerManager
+  alias Omashiki.Runtimes
 
   @type status :: :ok | :warn | :error
   @type check :: %{id: String.t(), status: status(), summary: String.t(), fix: String.t() | nil}
-
-  @images_fix "Build the agent images with `mise run images`, or pull them on this machine."
 
   @doc """
   Run the checks. Options:
@@ -102,7 +101,11 @@ defmodule Omashiki.Doctor do
           ok(id, "Image #{image} is present.")
 
         {:error, :not_found} ->
-          error(id, "Image #{image} is missing, so #{names(names)} cannot start.", @images_fix)
+          error(
+            id,
+            "Image #{image} is missing, so #{names(names)} cannot start.",
+            Runtimes.provide_image(image)
+          )
 
         {:error, reason} ->
           error(
@@ -192,7 +195,7 @@ defmodule Omashiki.Doctor do
     warn(
       "route:#{network}",
       "No agent image is present to check the route from network #{network}.",
-      @images_fix
+      "Provide the agent images that the image checks name."
     )
   end
 

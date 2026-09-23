@@ -43,6 +43,7 @@ Replace `v0.1.0` with your release.
 To use your own image, set its tag in `[runtimes.docker.runc.debian.images]` in `omashiki.toml`.
 The image must contain the `opencode` binary.
 The house checks each image when it loads the configuration. It does not start without the image.
+The house never pulls an agent image, so build it or pull it yourself with `docker pull`.
 
 ## 3. Give the agent model access
 

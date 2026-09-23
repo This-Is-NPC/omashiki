@@ -7,6 +7,9 @@ defmodule Omashiki.Jobs.FailureTest do
     {:harness_not_ready, "harness_not_ready", "readiness check"},
     {:harness_unreachable_no_network, "harness_unreachable_no_network", "has no network"},
     {:docker_unavailable, "docker_unavailable", "Docker is not available"},
+    {{:image_missing, "omashiki/agent:latest"}, "image_missing",
+     "Image omashiki/agent:latest is not on the node that ran the attempt. " <>
+       "Omashiki never pulls images."},
     {%{"message" => "Duplicate mount point: /tmp"}, "docker_error",
      "Docker refused the request: Duplicate mount point: /tmp"},
     {{:bootstrap_failed, 2, "npm ERR!"}, "bootstrap_failed", "exited with code 2"},

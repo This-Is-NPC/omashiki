@@ -5,11 +5,18 @@ defmodule Omashiki.Plugin.ImageProvides do
   `:plugin_image_provides` is `:inspect` (default, production), `:trust`
   (tests that never run Docker), a `%{image => [binary]}` map, or a
   1-arity function returning `:trust` or a list of binaries.
+
+  `:inspect` runs the image with `--pull never`, so a missing image is a
+  config error rather than a download. `:docker_cli` names the executable
+  (default `docker`).
   """
 
   alias Omashiki.Config.Error
+  alias Omashiki.Runtimes
 
   @inspect_timeout_ms 30_000
+  # `docker run` exits 125 when the daemon refuses the container itself.
+  @docker_run_error 125
 
   def cover!(image, required, packages, where)
       when is_binary(image) and is_list(required) and is_list(packages) do
@@ -70,16 +77,28 @@ defmodule Omashiki.Plugin.ImageProvides do
       |> Enum.map(&"command -v #{shell_escape(&1)} >/dev/null")
       |> Enum.join(" && ")
 
-    args = ["run", "--rm", "--network", "none", "--entrypoint", "sh", image, "-c", script]
-    task = Task.async(fn -> System.cmd("docker", args, stderr_to_stdout: true) end)
+    args = [
+      "run",
+      "--rm",
+      "--pull",
+      "never",
+      "--network",
+      "none",
+      "--entrypoint",
+      "sh",
+      image,
+      "-c",
+      script
+    ]
+
+    task = Task.async(fn -> System.cmd(docker_cli(), args, stderr_to_stdout: true) end)
 
     case Task.yield(task, @inspect_timeout_ms) || Task.shutdown(task, :brutal_kill) do
       {:ok, {_output, 0}} ->
         true
 
       {:ok, {output, status}} ->
-        raise Error,
-              "image #{inspect(image)} does not provide #{inspect(binaries)} (docker exit #{status}): #{String.slice(to_string(output), 0, 512)}"
+        raise Error, run_failure(image, binaries, status, output)
 
       nil ->
         raise Error, "timed out inspecting image #{inspect(image)} for #{inspect(binaries)}"
@@ -91,6 +110,15 @@ defmodule Omashiki.Plugin.ImageProvides do
     error ->
       raise Error, "failed to inspect image #{inspect(image)}: #{Exception.message(error)}"
   end
+
+  defp run_failure(image, binaries, status, output) do
+    if status == @docker_run_error and output =~ "No such image",
+      do: "image #{inspect(image)} is not on this machine. " <> Runtimes.provide_image(image),
+      else:
+        "image #{inspect(image)} does not provide #{inspect(binaries)} (docker exit #{status}): #{String.slice(output, 0, 512)}"
+  end
+
+  defp docker_cli, do: Application.get_env(:omashiki, :docker_cli, "docker")
 
   defp shell_escape(value) when is_binary(value) do
     "'" <> String.replace(value, "'", "'\"'\"'") <> "'"

@@ -52,6 +52,12 @@ defmodule Omashiki.Jobs.Failure do
   defp describe(:docker_unavailable),
     do: {"docker_unavailable", "Docker is not available on the node that ran the attempt.", %{}}
 
+  defp describe({:image_missing, image}),
+    do:
+      {"image_missing",
+       "Image #{image} is not on the node that ran the attempt. " <>
+         Omashiki.Runtimes.provide_image(image), %{"image" => image}}
+
   # The Docker Engine API answers a refused request with `{"message": ...}`.
   defp describe(%{"message" => message}) when is_binary(message),
     do: {"docker_error", "Docker refused the request: #{message}", %{}}
