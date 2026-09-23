@@ -17,6 +17,24 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     File.mkdir_p!(repo_path)
     {_, 0} = System.cmd("git", ["-C", repo_path, "init", "-q"])
 
+    safe = %{
+      "runtime" => "docker.runc.debian",
+      "sink" => "git",
+      "packages" => [],
+      "preset" => "opencode",
+      "executables" => ["git"],
+      "credentials" => [],
+      "capabilities" => [],
+      "caches" => [],
+      "mounts" => [],
+      "pre_steps" => [],
+      "post_steps" => [],
+      "policy" => %{"mode" => "off"},
+      "network" => "none",
+      "resources" => %{"cpus" => 1, "memory" => "1GB", "pids" => 32},
+      "timeout_ms" => 1_000
+    }
+
     Config.load_map!(
       %{
         "repositories" => %{"app" => %{"path" => "repo", "base_branch" => "main"}},
@@ -30,25 +48,7 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
             }
           }
         },
-        "environments" => %{
-          "safe" => %{
-            "runtime" => "docker.runc.debian",
-            "sink" => "git",
-            "packages" => [],
-            "preset" => "opencode",
-            "executables" => ["git"],
-            "credentials" => [],
-            "capabilities" => [],
-            "caches" => [],
-            "mounts" => [],
-            "pre_steps" => [],
-            "post_steps" => [],
-            "policy" => %{"mode" => "off"},
-            "network" => "none",
-            "resources" => %{"cpus" => 1, "memory" => "1GB", "pids" => 32},
-            "timeout_ms" => 1_000
-          }
-        },
+        "environments" => %{"safe" => safe, "notes" => %{safe | "sink" => "files"}},
         "limits" => %{}
       },
       path: Path.join(root, "omashiki.toml")
@@ -207,6 +207,57 @@ defmodule OmashikiWeb.Api.JobsControllerTest do
     response = post(conn, "/api/v1/jobs", request())
     assert response.status == 422
     assert json_response(response, 422)["code"] == "environment_not_allowed"
+    assert Repo.aggregate(Job, :count, :id) == 0
+  end
+
+  test "a repository sent to a files environment is a 422", %{conn: conn} do
+    for repo <- ["app", "omashiki"] do
+      response =
+        post(
+          conn,
+          "/api/v1/jobs",
+          request(%{
+            "repo" => repo,
+            "environment" => "notes",
+            "payload" => %{"instruction" => "run", "title" => "notes"}
+          })
+        )
+
+      body = json_response(response, 422)
+      assert body["code"] == "repository_not_allowed"
+      assert_schema(body, "Problem", @api_spec)
+    end
+
+    assert Repo.aggregate(Job, :count, :id) == 0
+  end
+
+  test "a files environment admits a title without a repository", %{conn: conn} do
+    request =
+      request(%{
+        "environment" => "notes",
+        "payload" => %{"instruction" => "run", "title" => "notes"}
+      })
+      |> Map.delete("repo")
+
+    assert post(conn, "/api/v1/jobs", request).status == 202
+  end
+
+  test "a git environment without a repository is a 422", %{conn: conn} do
+    response = post(conn, "/api/v1/jobs", Map.delete(request(), "repo"))
+
+    assert json_response(response, 422)["code"] == "repository_required"
+    assert Repo.aggregate(Job, :count, :id) == 0
+  end
+
+  test "a dependency on an unknown job is a 422", %{conn: conn} do
+    response =
+      post(
+        conn,
+        "/api/v1/jobs",
+        request(%{"depends_on" => [%{"id" => Ecto.UUID.generate()}]})
+      )
+
+    assert json_response(response, 422)["code"] == "unknown_dependency"
     assert Repo.aggregate(Job, :count, :id) == 0
   end
 

@@ -30,9 +30,9 @@ The sink decides the shape of the request:
 
 | Sink | Result | `repo` |
 | --- | --- | --- |
-| `files` | A file archive. | Not allowed. Leave it out. |
-| `none` | Completion metadata. | Not allowed. Leave it out. |
-| `git` | A committed task branch in a registered repository. | Required. |
+| `files` | A file archive. | Not allowed: `422 repository_not_allowed`. |
+| `none` | Completion metadata. | Not allowed: `422 repository_not_allowed`. |
+| `git` | A committed task branch in a registered repository. | Required: without it, `422 repository_required`. |
 
 For a `git` environment, list the registered repositories:
 

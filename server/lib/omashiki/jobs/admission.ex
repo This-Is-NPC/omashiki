@@ -386,7 +386,7 @@ defmodule Omashiki.Jobs.Admission do
       Tx.run(fn ->
         enforce_active_limit!(token, 1)
 
-        case resolve_depends_on(user_id, request, %{}, nil) do
+        case resolve_depends_on(user_id, request, %{}) do
           {:ok, edges} ->
             attrs = job_attrs(user_id, token.id, request, resolved, edges)
 
@@ -524,7 +524,7 @@ defmodule Omashiki.Jobs.Admission do
           nil ->
             request = Map.put(item.request, "correlation_id", correlation_id)
 
-            case resolve_depends_on(user_id, request, jobs_by_ref, item.request["ref"]) do
+            case resolve_depends_on(user_id, request, jobs_by_ref) do
               {:ok, edges} ->
                 attrs = job_attrs(user_id, token_id, request, item.resolved, edges)
 
@@ -571,11 +571,10 @@ defmodule Omashiki.Jobs.Admission do
     end)
   end
 
-  defp resolve_depends_on(user_id, request, jobs_by_ref, self_ref) do
+  defp resolve_depends_on(user_id, request, jobs_by_ref) do
     depends_on = Map.get(request, "depends_on", [])
 
     with {:ok, edges} <- build_depends_on_edges(depends_on, jobs_by_ref),
-         :ok <- check_self_dependency(depends_on, self_ref),
          :ok <- check_dependencies_exist(user_id, edges) do
       {:ok, edges}
     end
@@ -608,15 +607,6 @@ defmodule Omashiki.Jobs.Admission do
 
       true ->
         {:error, {:validation, [%{field: "depends_on", code: "id_or_ref_required"}]}}
-    end
-  end
-
-  defp check_self_dependency(depends_on, self_ref) do
-    if not is_nil(self_ref) and
-         Enum.any?(depends_on, fn dep -> Map.get(dep, "ref") == self_ref end) do
-      {:error, :self_dependency}
-    else
-      :ok
     end
   end
 

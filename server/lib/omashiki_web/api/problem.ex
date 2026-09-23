@@ -38,7 +38,10 @@ defmodule OmashikiWeb.Api.Problem do
     admission_paused
     busy
     unknown_repository
+    repository_required
+    repository_not_allowed
     unknown_environment
+    unknown_dependency
     invalid_reference
     idempotency_race
     environment_not_allowed
@@ -89,7 +92,10 @@ defmodule OmashikiWeb.Api.Problem do
     "admission_paused" => "Configuration rollout is draining active work",
     "busy" => "The server could not complete the request without a lock conflict",
     "unknown_repository" => "Repository is not registered",
+    "repository_required" => "Git environment requires repo",
+    "repository_not_allowed" => "Files and none environments do not accept repo",
     "unknown_environment" => "Environment is not registered",
+    "unknown_dependency" => "Dependency job does not exist",
     "invalid_reference" => "Repository and environment are invalid",
     "idempotency_race" => "Submission could not be safely deduplicated",
     "environment_not_allowed" => "Environment is not allowed for this token",
@@ -140,7 +146,10 @@ defmodule OmashikiWeb.Api.Problem do
     "admission_paused" => 503,
     "busy" => 503,
     "unknown_repository" => 422,
+    "repository_required" => 422,
+    "repository_not_allowed" => 422,
     "unknown_environment" => 422,
+    "unknown_dependency" => 422,
     "invalid_reference" => 422,
     "idempotency_race" => 409,
     "environment_not_allowed" => 422,
@@ -312,8 +321,17 @@ defmodule OmashikiWeb.Api.Problem do
       :unknown_repository ->
         "unknown_repository"
 
+      :repository_required ->
+        "repository_required"
+
+      :repository_not_allowed ->
+        "repository_not_allowed"
+
       :unknown_environment ->
         "unknown_environment"
+
+      :unknown_dependency ->
+        "unknown_dependency"
 
       :invalid_reference ->
         "invalid_reference"
