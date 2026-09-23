@@ -38,7 +38,7 @@ config :omashiki, OmashikiWeb.Endpoint,
   debug_errors: true,
   # Checked into git on purpose: it is the Phoenix generator's dev value, not a
   # secret. Production reads SECRET_KEY_BASE from the environment and refuses to
-  # boot without it (runtime.exs). The one dangerous combination is serving this
+  # boot without it or with fewer than 64 characters (runtime.exs). The one dangerous combination is serving this
   # `:dev` config on a reachable interface — the same config that ships with
   # `check_origin: false` above and pairs with `[auth] enabled = false` in
   # omashiki.toml. Bind to loopback or run a real release; do not "fix" this by

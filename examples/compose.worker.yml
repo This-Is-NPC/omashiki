@@ -47,7 +47,7 @@ services:
       # path, so it sits in the mounted cache, one per worker.
       TMPDIR: ${OMASHIKI_HOST_HOME:-${HOME}}/.cache/omashiki/tmp/${COMPOSE_PROJECT_NAME}
       OMASHIKI_ROLE: worker
-      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-dev-only-change-me}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set SECRET_KEY_BASE to at least 64 characters (openssl rand -base64 48)}
       OMASHIKI_NODE: ${OMASHIKI_NODE:-worker-1}
       OMASHIKI_WORKER_CONFIG: /config/worker.toml
       OMASHIKI_ENROLL_SECRET: ${OMASHIKI_ENROLL_SECRET:?set OMASHIKI_ENROLL_SECRET}

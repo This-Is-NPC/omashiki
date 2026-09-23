@@ -135,7 +135,26 @@ end
 if config_env() == :prod do
   role = System.get_env("OMASHIKI_ROLE")
 
-  unless role == "worker" do
+  # Every role signs with it: the web roles for cookies, sessions and API
+  # tokens, workers for the runtime claims their manager verifies. The cookie
+  # store refuses fewer than 64 bytes on every request, so refuse it here.
+  secret_key_base =
+    System.get_env("SECRET_KEY_BASE") ||
+      raise """
+      environment variable SECRET_KEY_BASE is missing.
+      Generate one with `openssl rand -base64 48`; a worker uses the same value as its manager.
+      """
+
+  if byte_size(secret_key_base) < 64 do
+    raise "SECRET_KEY_BASE must be at least 64 characters; " <>
+            "generate one with `openssl rand -base64 48`"
+  end
+
+  if role == "worker" do
+    config :omashiki, OmashikiWeb.Endpoint,
+      secret_key_base: secret_key_base,
+      server: false
+  else
     database_url =
       System.get_env("DATABASE_URL") ||
         raise """
@@ -151,15 +170,6 @@ if config_env() == :prod do
       pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
       socket_options: maybe_ipv6
 
-    import Config
-
-    secret_key_base =
-      System.get_env("SECRET_KEY_BASE") ||
-        raise """
-        environment variable SECRET_KEY_BASE is missing.
-        You can generate one by calling: mix phx.gen.secret
-        """
-
     config :omashiki, OmashikiWeb.Endpoint,
       http: [
         ip: {0, 0, 0, 0, 0, 0, 0, 0},
@@ -167,19 +177,6 @@ if config_env() == :prod do
       ],
       secret_key_base: secret_key_base,
       server: true
-  end
-
-  if role == "worker" do
-    secret_key_base =
-      System.get_env("SECRET_KEY_BASE") ||
-        raise """
-        environment variable SECRET_KEY_BASE is missing on worker.
-        Workers mint job-scoped runtime tokens verified by the manager; use the same value as the manager.
-        """
-
-    config :omashiki, OmashikiWeb.Endpoint,
-      secret_key_base: secret_key_base,
-      server: false
   end
 end
 

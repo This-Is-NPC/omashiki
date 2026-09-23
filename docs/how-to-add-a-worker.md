@@ -20,7 +20,7 @@ Prepare each required agent image on the worker.
 Set the required values in `.env` on the relevant hosts:
 
 ```dotenv
-SECRET_KEY_BASE=replace-with-a-long-random-secret
+SECRET_KEY_BASE=replace-with-the-output-of-openssl-rand-base64-48
 OMASHIKI_WORKER_TOKEN=replace-with-a-random-worker-token
 OMASHIKI_ENROLL_SECRET=replace-with-a-different-random-secret
 OMASHIKI_UID=1000
@@ -31,6 +31,7 @@ OMASHIKI_WORKER_URL=http://worker.lan:4012
 ```
 
 Use the same `SECRET_KEY_BASE` for the manager and the worker.
+Generate it with `openssl rand -base64 48`. The manager and the worker refuse to start when it has fewer than 64 characters.
 Use the same worker token for the manager and enrollment request.
 Use the same enrollment secret for the worker listener and enrollment request.
 On the worker host, set `OMASHIKI_UID` and `OMASHIKI_GID` to the output of `id -u` and `id -g`.

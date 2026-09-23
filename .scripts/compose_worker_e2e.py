@@ -400,7 +400,7 @@ class Harness:
             "OMASHIKI_ENROLL_PORT": str(ENROLL_PORT),
             "OMASHIKI_WORKER_TOKEN": self.worker_token,
             "OMASHIKI_ENROLL_SECRET": self.enroll_secret,
-            "SECRET_KEY_BASE": "compose-worker-e2e-secret",
+            "SECRET_KEY_BASE": "compose-worker-e2e-secret".ljust(64, "x"),
             "OMASHIKI_CONFIG_DIR": str(E2E_CONFIG.resolve().parent),
             **operator_env(),
         })

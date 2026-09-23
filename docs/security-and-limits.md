@@ -156,6 +156,7 @@ The house derives these values from `SECRET_KEY_BASE`. Changing it invalidates a
 | Secret allowances | Finding fingerprints change, so no allowance matches any more and the findings are refused again. Remove the old allowances on the Config screen and allow the findings again from the next review. |
 
 A worker signs runtime claims that its manager verifies, so it uses the same `SECRET_KEY_BASE` as the manager.
+Every role refuses to start when `SECRET_KEY_BASE` has fewer than 64 characters. Generate it with `openssl rand -base64 48`.
 Keep `SECRET_KEY_BASE` when you back up persistent state.
 
 See [known limitations](what-does-not-work.md) before you rely on an unverified integration or runtime property.

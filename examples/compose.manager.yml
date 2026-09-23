@@ -51,7 +51,7 @@ services:
     environment:
       OMASHIKI_ROLE: manager
       DATABASE_URL: ecto://postgres:postgres@db/omashiki
-      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-dev-only-change-me}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?set SECRET_KEY_BASE to at least 64 characters (openssl rand -base64 48)}
       OMASHIKI_WORKER_TOKEN: ${OMASHIKI_WORKER_TOKEN:-worker-token-change-me}
       OMASHIKI_CONFIG: /config/omashiki.toml
       OMASHIKI_UI_CONFIG: /config/ui.toml

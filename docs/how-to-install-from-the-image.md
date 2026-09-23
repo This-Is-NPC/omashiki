@@ -73,7 +73,7 @@ EOF
 docker compose up -d
 ```
 
-`SECRET_KEY_BASE` is the house secret.
+`SECRET_KEY_BASE` is the house secret. The house refuses to start when it has fewer than 64 characters; `openssl rand -base64 48` prints 64.
 The house runs as the user and group that `OMASHIKI_UID` and `OMASHIKI_GID` name.
 The files that it writes in this directory, in `~/.cache/omashiki`, and in `~/.local/state/omashiki` belong to your account.
 `OMASHIKI_DOCKER_GID` is the group of the Docker socket. It lets the house start the agent containers.
