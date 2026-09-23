@@ -1,13 +1,15 @@
 <header class="bg-surface-container-lowest border-b border-outline-variant px-4 sm:px-6 lg:px-8">
-  <div class="flex items-center justify-between gap-6 py-4 text-sm">
-    <div class="flex items-center gap-8">
+  <%!-- The account block wraps under the logo and nav when one row cannot
+        hold all three, so the nav always stays a single row. --%>
+  <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-3 text-sm sm:py-4">
+    <div class="flex items-center gap-5 sm:gap-8">
       <a
         href="/"
         class="font-headline italic text-xl text-primary-container tracking-tight"
       >
         Omashiki
       </a>
-      <nav class="flex flex-wrap items-center gap-6" aria-label="Primary">
+      <nav class="flex items-center gap-4 sm:gap-6" aria-label="Primary">
         <.link
           navigate="/"
           class={nav_link_class(:home, assigns)}
@@ -33,7 +35,7 @@
     </div>
 
     <%= if assigns[:current_user] do %>
-      <div class="flex items-center gap-4 shrink-0">
+      <div class="ml-auto flex items-center gap-4 shrink-0">
         <span
           class="font-label text-label-md tracking-[0.3em] uppercase text-on-surface max-w-[12rem] truncate inline-block"
           title={@current_user.username}
@@ -46,7 +48,7 @@
           <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
           <button
             type="submit"
-            class="font-label text-label-md tracking-[0.3em] uppercase px-3 py-1 transition-colors text-status-failed border border-status-failed/40 hover:border-status-failed hover:bg-status-failed/10"
+            class="font-label text-label-md tracking-[0.3em] uppercase px-3 py-1 pointer-coarse:min-h-10 transition-colors text-status-failed border border-status-failed/40 hover:border-status-failed hover:bg-status-failed/10"
           >
             Sign out
           </button>

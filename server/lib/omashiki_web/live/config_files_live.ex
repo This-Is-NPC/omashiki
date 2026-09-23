@@ -438,7 +438,7 @@ defmodule OmashikiWeb.ConfigFilesLive do
 
         <section :if={@doc} class="flex min-w-0 flex-col gap-4">
           <header class="flex flex-wrap items-end justify-between gap-4">
-            <div class="min-w-0">
+            <div class="w-full min-w-0 sm:w-auto">
               <h2 class="font-headline italic text-2xl text-on-surface">
                 {@doc.name}
                 <span
@@ -454,7 +454,7 @@ defmodule OmashikiWeb.ConfigFilesLive do
                   include piece
                 </span>
               </h2>
-              <p class="mt-1 break-all font-mono text-xs text-on-surface-variant">
+              <p class="mt-1 wrap-anywhere font-mono text-xs text-on-surface-variant">
                 {@doc.path}
                 <span :if={@dirty?} class="text-status-awaiting">· unsaved changes</span>
               </p>
@@ -537,7 +537,7 @@ defmodule OmashikiWeb.ConfigFilesLive do
             <p :if={@history == []} class="font-mono text-xs text-on-surface-variant">
               No earlier versions.
             </p>
-            <table :if={@history != []} id="history" class="w-full font-mono text-xs">
+            <table :if={@history != []} id="history" class="stack-table w-full font-mono text-xs">
               <thead class="text-left text-on-surface-variant">
                 <tr>
                   <th class="py-2 pr-4 font-normal">version</th>
@@ -548,9 +548,9 @@ defmodule OmashikiWeb.ConfigFilesLive do
               </thead>
               <tbody class="divide-y divide-outline-variant/40 text-on-surface">
                 <tr :for={version <- @history} id={"version-#{version.id}"}>
-                  <td class="py-2 pr-4">{Ops.short_id(version.hash)}</td>
-                  <td class="py-2 pr-4">{Ops.timestamp(version.at)}</td>
-                  <td class="py-2 pr-4">{version.author || "an outside edit"}</td>
+                  <td data-label="version" class="py-2 pr-4">{Ops.short_id(version.hash)}</td>
+                  <td data-label="replaced" class="py-2 pr-4">{Ops.timestamp(version.at)}</td>
+                  <td data-label="by" class="py-2 pr-4">{version.author || "an outside edit"}</td>
                   <td class="py-2 text-right">
                     <button
                       type="button"
@@ -627,14 +627,14 @@ defmodule OmashikiWeb.ConfigFilesLive do
       data-confirm={@dirty? && @doc.name != @selected.name && "Discard unsaved changes?"}
       aria-current={if @doc.name == @selected.name, do: "page", else: nil}
       class={[
-        "flex items-baseline justify-between gap-3 px-2 py-1.5 font-mono text-xs transition-colors hover:bg-surface-container-high",
+        "flex items-baseline justify-between gap-3 px-2 py-1.5 font-mono text-xs transition-colors hover:bg-surface-container-high pointer-coarse:py-3",
         if(@doc.name == @selected.name,
           do: "bg-surface-container-high text-primary-container",
           else: "text-on-surface"
         )
       ]}
     >
-      <span class="min-w-0 break-all">
+      <span class="min-w-0 wrap-anywhere">
         {@doc.name}<span :if={@doc.applied?} class="ml-2 text-status-success">applied</span>
       </span>
       <span class="shrink-0 text-on-surface-variant">{Ops.age(@doc.updated_at)}</span>
@@ -745,7 +745,7 @@ defmodule OmashikiWeb.ConfigFilesLive do
 
   defp action_class(tone) do
     [
-      "border px-3 py-2 font-label text-label-sm uppercase tracking-[0.2em] transition-colors disabled:cursor-not-allowed disabled:opacity-30",
+      "inline-flex items-center justify-center border px-3 py-2 font-label text-label-sm uppercase tracking-[0.2em] transition-colors disabled:cursor-not-allowed disabled:opacity-30 pointer-coarse:min-h-10",
       case tone do
         :neutral ->
           "border-outline-variant text-on-surface hover:bg-surface-container-high"

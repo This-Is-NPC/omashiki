@@ -29,6 +29,50 @@ body {
   font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
+@layer utilities {
+  /* Paths and identifiers break only where a line cannot hold them, so a long
+     value wraps instead of widening the page. */
+  .wrap-anywhere {
+    overflow-wrap: anywhere;
+  }
+}
+
+/* A table that reads as stacked rows on a phone: each row becomes a block and
+   each cell shows its column name from data-label beside the value. Cells
+   without a label (row actions) stay plain blocks. Mirrors Tailwind max-sm. */
+@media not all and (min-width: 640px) {
+  .stack-table,
+  .stack-table tbody,
+  .stack-table tr,
+  .stack-table td {
+    display: block;
+  }
+
+  .stack-table thead {
+    display: none;
+  }
+
+  .stack-table tr {
+    padding-block: var(--space-2);
+  }
+
+  .stack-table td {
+    max-width: none;
+    padding-block: var(--space-1);
+  }
+
+  .stack-table td[data-label] {
+    display: grid;
+    grid-template-columns: 7rem minmax(0, 1fr);
+    gap: var(--space-3);
+  }
+
+  .stack-table td[data-label]::before {
+    content: attr(data-label);
+    color: var(--md-sys-color-on-surface-variant);
+  }
+}
+
 :focus-visible {
   outline: 2px solid var(--md-sys-color-primary-container);
   outline-offset: 3px;

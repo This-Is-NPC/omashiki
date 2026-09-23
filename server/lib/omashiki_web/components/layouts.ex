@@ -14,7 +14,8 @@ defmodule OmashikiWeb.Layouts do
 
   @doc "Resolve the global-nav link class for an operator surface."
   def nav_link_class(target, assigns) do
-    base = "font-label text-label-md tracking-[0.3em] uppercase transition-colors pb-1 border-b"
+    base =
+      "inline-flex items-center pointer-coarse:min-h-10 font-label text-label-md tracking-[0.2em] sm:tracking-[0.3em] uppercase transition-colors pb-1 border-b"
 
     if assigns[:active_tab] == target do
       "#{base} text-primary-container border-primary-container"

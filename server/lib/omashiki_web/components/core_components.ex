@@ -114,7 +114,7 @@ defmodule OmashikiWeb.CoreComponents do
       phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
       role="alert"
       class={[
-        "fixed top-4 right-4 w-80 sm:w-96 z-50 p-4 border font-body text-sm bg-surface-container-high text-on-surface",
+        "fixed top-4 right-4 left-4 sm:left-auto sm:w-96 z-50 p-4 border font-body text-sm bg-surface-container-high text-on-surface",
         @kind == :info && "border-primary-container",
         @kind == :error && "border-status-failed/70"
       ]}

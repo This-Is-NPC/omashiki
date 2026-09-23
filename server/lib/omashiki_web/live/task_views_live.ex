@@ -171,7 +171,7 @@ defmodule OmashikiWeb.TaskViewsLive do
       <header class="flex flex-wrap items-end justify-between gap-4">
         <div class="min-w-0">
           <h1 class="font-headline italic text-3xl text-on-surface">{@view.title}</h1>
-          <p class="mt-1 break-all font-mono text-sm text-on-surface-variant">
+          <p class="mt-1 wrap-anywhere font-mono text-sm text-on-surface-variant">
             {source_note(@views_file)}
           </p>
         </div>
@@ -243,7 +243,7 @@ defmodule OmashikiWeb.TaskViewsLive do
           <span class="sr-only">Close task details</span>
         </.link>
         <aside
-          class="relative flex h-full w-full max-w-xl flex-col gap-6 overflow-y-auto border-l border-outline-variant bg-surface-container-low p-6"
+          class="relative flex h-full w-full max-w-xl flex-col gap-6 overflow-y-auto border-outline-variant bg-surface-container-low p-4 sm:border-l sm:p-6"
           aria-label="Task details"
         >
           <.task_detail detail={@detail} view={@view} now={@now} />
@@ -335,7 +335,7 @@ defmodule OmashikiWeb.TaskViewsLive do
       </header>
       <div class="overflow-x-auto">
         <%!-- Grouped tables share column widths so the groups line up. --%>
-        <table class={["w-full font-mono text-xs", group && "table-fixed"]}>
+        <table class={["stack-table w-full font-mono text-xs", group && "table-fixed"]}>
           <thead>
             <tr class="text-left">
               <th
@@ -356,6 +356,7 @@ defmodule OmashikiWeb.TaskViewsLive do
             >
               <td
                 :for={{field, index} <- Enum.with_index(@view.fields)}
+                data-label={Rows.label(field)}
                 class="max-w-[28rem] px-5 py-3 align-baseline"
               >
                 <.cell
@@ -382,15 +383,16 @@ defmodule OmashikiWeb.TaskViewsLive do
     <%!-- The board fills the viewport below its top edge (BoardHeight hook
           measures that edge; 2.5rem is the bottom padding of main and of this
           screen). Columns stretch to that height and each list scrolls inside
-          its own column. --%>
+          its own column. On a phone one column fills the width and the board
+          snaps column by column; the next column's edge shows there is more. --%>
     <div
       id="task-board"
       phx-hook="BoardHeight"
-      class="flex h-[calc(100dvh_-_var(--board-top,16rem)_-_2.5rem)] min-h-[20rem] gap-4 overflow-x-auto pb-2"
+      class="flex h-[calc(100dvh_-_var(--board-top,16rem)_-_2.5rem)] min-h-[20rem] snap-x snap-mandatory gap-4 overflow-x-auto pb-2 sm:snap-none"
     >
       <section
         :for={{group, rows} <- @groups}
-        class="flex min-h-0 min-w-[14rem] flex-1 basis-0 flex-col border border-outline-variant bg-surface-container"
+        class="flex min-h-0 min-w-[85%] flex-1 basis-0 snap-start flex-col border border-outline-variant bg-surface-container sm:min-w-[14rem]"
         aria-label={group_label(@view.group_by, group)}
       >
         <header class="flex items-center justify-between gap-3 border-b border-outline-variant px-4 py-3">
@@ -474,7 +476,7 @@ defmodule OmashikiWeb.TaskViewsLive do
               <li
                 :for={container <- node.containers}
                 id={dom_id("container", container.id)}
-                class="w-64"
+                class="w-full sm:w-64"
                 phx-mounted={
                   JS.transition(
                     {"transition-all duration-500 ease-out", "opacity-0 -translate-y-1",
@@ -511,7 +513,7 @@ defmodule OmashikiWeb.TaskViewsLive do
 
     ~H"""
     <div class={[
-      "w-60 shrink-0 border bg-surface-container p-4",
+      "w-full shrink-0 border bg-surface-container p-4 sm:w-60",
       if(@node.stale?, do: "border-outline-variant/60 opacity-60", else: "border-outline-variant")
     ]}>
       <div class="flex items-center justify-between gap-3">
@@ -649,7 +651,7 @@ defmodule OmashikiWeb.TaskViewsLive do
     ~H"""
     <header class="flex items-start justify-between gap-4">
       <div class="min-w-0">
-        <p class="break-all font-mono text-xs text-on-surface-variant">task {@detail.job.id}</p>
+        <p class="wrap-anywhere font-mono text-xs text-on-surface-variant">task {@detail.job.id}</p>
         <h2 class="mt-2 break-words font-headline italic text-2xl text-on-surface">
           {Rows.title(@detail.row)}
         </h2>
@@ -771,7 +773,7 @@ defmodule OmashikiWeb.TaskViewsLive do
     ~H"""
     <.link
       patch={view_path(@view.name)}
-      class="shrink-0 font-label text-label-md uppercase tracking-[0.2em] text-on-surface-variant hover:text-on-surface"
+      class="inline-flex shrink-0 items-center font-label text-label-md uppercase tracking-[0.2em] text-on-surface-variant hover:text-on-surface pointer-coarse:min-h-10"
     >
       Close
     </.link>

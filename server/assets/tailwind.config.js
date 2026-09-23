@@ -186,6 +186,8 @@ module.exports = {
     plugin(({addVariant}) => addVariant("phx-change-loading", [".phx-change-loading&", ".phx-change-loading &"])),
     // LiveView puts phx-connected on its container while the socket is up.
     plugin(({addVariant}) => addVariant("phx-connected", [".phx-connected&", ".phx-connected &"])),
+    // Touch screens get finger-sized targets; mouse layouts keep their size.
+    plugin(({addVariant}) => addVariant("pointer-coarse", "@media (pointer: coarse)")),
 
     // Embeds Heroicons (https://heroicons.com) into your app.css bundle
     // See your `CoreComponents.icon/1` for more information.

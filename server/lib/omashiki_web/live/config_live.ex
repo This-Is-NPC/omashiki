@@ -164,7 +164,7 @@ defmodule OmashikiWeb.ConfigLive do
         <div class="flex flex-wrap items-center gap-4">
           <.link
             navigate={~p"/config/files"}
-            class="border border-outline-variant px-4 py-2 font-label text-label-md uppercase tracking-[0.2em] text-on-surface hover:bg-surface-container-high"
+            class="inline-flex items-center border border-outline-variant px-4 py-2 font-label text-label-md uppercase tracking-[0.2em] text-on-surface hover:bg-surface-container-high pointer-coarse:min-h-10"
           >
             Edit files
           </.link>
@@ -172,7 +172,7 @@ defmodule OmashikiWeb.ConfigLive do
             type="button"
             phx-click="reload_config"
             phx-disable-with="Reloading…"
-            class="border border-outline-variant px-4 py-2 font-label text-label-md uppercase tracking-[0.2em] text-on-surface hover:bg-surface-container-high"
+            class="inline-flex items-center border border-outline-variant px-4 py-2 font-label text-label-md uppercase tracking-[0.2em] text-on-surface hover:bg-surface-container-high pointer-coarse:min-h-10"
           >
             Reload configuration
           </button>
@@ -210,7 +210,7 @@ defmodule OmashikiWeb.ConfigLive do
           <article :for={repo <- @repositories} class="border border-outline-variant/60 p-4">
             <h3 class="font-headline italic text-xl text-on-surface">{repo.name}</h3>
             <dl class="mt-4 grid gap-2 font-mono text-xs">
-              <dt class="text-on-surface-variant">path</dt><dd class="break-all text-on-surface">
+              <dt class="text-on-surface-variant">path</dt><dd class="wrap-anywhere text-on-surface">
                 {repo.path}
               </dd><dt class="text-on-surface-variant">base branch</dt><dd class="text-on-surface">
                 {repo.base_branch}
@@ -235,7 +235,7 @@ defmodule OmashikiWeb.ConfigLive do
             <div class="flex flex-wrap items-baseline justify-between gap-3">
               <h3 class="font-headline italic text-xl text-on-surface">{environment.name}</h3><span class="font-mono text-xs text-status-succeeded">read-only</span>
             </div>
-            <dl class="mt-4 grid gap-2 font-mono text-xs sm:grid-cols-[8rem_1fr]">
+            <dl class="mt-4 grid gap-2 font-mono text-xs sm:grid-cols-[8rem_minmax(0,1fr)]">
               <dt class="text-on-surface-variant">runtime</dt><dd class="text-on-surface">
                 {environment.runtime.name}
               </dd>
@@ -248,7 +248,7 @@ defmodule OmashikiWeb.ConfigLive do
               <dt class="text-on-surface-variant">distribution</dt><dd class="text-on-surface">
                 {environment.runtime.distribution}
               </dd>
-              <dt class="text-on-surface-variant">image</dt><dd class="break-all text-on-surface">
+              <dt class="text-on-surface-variant">image</dt><dd class="wrap-anywhere text-on-surface">
                 {environment.runtime.image}
               </dd>
               <dt class="text-on-surface-variant">preset</dt><dd class="text-on-surface">
@@ -260,7 +260,7 @@ defmodule OmashikiWeb.ConfigLive do
               <dt class="text-on-surface-variant">timeout</dt><dd class="text-on-surface">
                 {environment.timeout_ms} ms
               </dd>
-              <dt class="text-on-surface-variant">resources</dt><dd class="break-all text-on-surface">
+              <dt class="text-on-surface-variant">resources</dt><dd class="wrap-anywhere text-on-surface">
                 {Ops.json(environment.resources)}
               </dd>
             </dl>
@@ -295,7 +295,7 @@ defmodule OmashikiWeb.ConfigLive do
               phx-click="purge_cache"
               phx-value-group={row.group.name}
               data-confirm="Purge this inactive cache group?"
-              class="mt-4 border border-status-awaiting/50 px-3 py-2 font-label text-label-sm uppercase tracking-[0.2em] text-status-awaiting hover:border-status-awaiting"
+              class="mt-4 border border-status-awaiting/50 px-3 py-2 font-label text-label-sm uppercase tracking-[0.2em] text-status-awaiting hover:border-status-awaiting pointer-coarse:min-h-10"
             >Purge inactive group</button>
           </article>
         </div>
@@ -316,12 +316,12 @@ defmodule OmashikiWeb.ConfigLive do
           <p class="text-on-surface-variant">
             Copy {@issued_token.name} now. It is not shown again.
           </p>
-          <p class="mt-2 break-all text-on-surface">{@issued_token.plaintext}</p>
+          <p class="mt-2 wrap-anywhere text-on-surface">{@issued_token.plaintext}</p>
         </div>
         <div :if={@tokens == []} class="font-mono text-xs text-on-surface-variant">
           No tokens issued.
         </div>
-        <table :if={@tokens != []} class="w-full font-mono text-xs">
+        <table :if={@tokens != []} class="stack-table w-full font-mono text-xs">
           <thead class="text-left text-on-surface-variant">
             <tr>
               <th class="py-2 pr-4 font-normal">name</th>
@@ -334,11 +334,15 @@ defmodule OmashikiWeb.ConfigLive do
           </thead>
           <tbody class="divide-y divide-outline-variant/40 text-on-surface">
             <tr :for={token <- @tokens} id={"token-#{token.id}"}>
-              <td class="py-2 pr-4">{token.name}</td>
-              <td class="py-2 pr-4">{Enum.join(token.scopes, ", ")}</td>
-              <td class="py-2 pr-4">{Enum.join(token.allowed_environments, ", ")}</td>
-              <td class="py-2 pr-4">{token_expiry(token)}</td>
-              <td class="py-2 pr-4">{if token.webhook_destination, do: "set", else: "not set"}</td>
+              <td data-label="name" class="py-2 pr-4">{token.name}</td>
+              <td data-label="scopes" class="py-2 pr-4">{Enum.join(token.scopes, ", ")}</td>
+              <td data-label="environments" class="py-2 pr-4">
+                {Enum.join(token.allowed_environments, ", ")}
+              </td>
+              <td data-label="expires" class="py-2 pr-4">{token_expiry(token)}</td>
+              <td data-label="webhook" class="py-2 pr-4">
+                {if token.webhook_destination, do: "set", else: "not set"}
+              </td>
               <td class="py-2 text-right">
                 <button
                   :if={Token.status(token) == :active}
@@ -346,7 +350,7 @@ defmodule OmashikiWeb.ConfigLive do
                   phx-click="revoke_token"
                   phx-value-id={token.id}
                   data-confirm="Revoke this token? Clients using it stop working."
-                  class="border border-status-failed/50 px-3 py-1 font-label text-label-sm uppercase tracking-[0.2em] text-status-failed hover:border-status-failed"
+                  class="border border-status-failed/50 px-3 py-1 font-label text-label-sm uppercase tracking-[0.2em] text-status-failed hover:border-status-failed pointer-coarse:min-h-10"
                 >Revoke</button>
               </td>
             </tr>
@@ -382,7 +386,7 @@ defmodule OmashikiWeb.ConfigLive do
             <button
               type="submit"
               phx-disable-with="Creating…"
-              class="border border-outline-variant px-4 py-2 font-label text-label-md uppercase tracking-[0.2em] text-on-surface hover:bg-surface-container-high"
+              class="inline-flex items-center border border-outline-variant px-4 py-2 font-label text-label-md uppercase tracking-[0.2em] text-on-surface hover:bg-surface-container-high pointer-coarse:min-h-10"
             >
               Create token
             </button>
