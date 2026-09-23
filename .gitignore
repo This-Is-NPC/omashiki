@@ -2,6 +2,9 @@
 # Secrets referenced from omashiki.toml as ${env:VAR}. `.env.example` is the
 # tracked template; the real file never is.
 /.env
+# Per-install Compose override (host credential mounts); see
+# docs/how-to-configure-model-access.md.
+compose.override.yml
 
 # --- Generated at runtime or on first boot --------------------------------
 # Local secrets and lock files, generated on first boot.
