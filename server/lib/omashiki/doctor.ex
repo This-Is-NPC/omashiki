@@ -52,7 +52,7 @@ defmodule Omashiki.Doctor do
       Keyword.put_new_lazy(opts, :install, fn -> Application.fetch_env!(:omashiki, :install) end)
 
     docker_checks(probe, environments, opts) ++
-      host_credential_checks(probe, host_credentials, environments) ++
+      host_credential_checks(probe, host_credentials, environments, opts[:install]) ++
       identity_checks(probe, identities)
   end
 
@@ -303,7 +303,7 @@ defmodule Omashiki.Doctor do
   defp start_fix(:release),
     do: "Start the house, for example with `docker compose up -d`, then run `bin/doctor` again."
 
-  defp host_credential_checks(probe, host_credentials, environments) do
+  defp host_credential_checks(probe, host_credentials, environments, install) do
     in_use =
       environments
       |> Enum.flat_map(&Map.get(&1, :host_credentials, []))
@@ -324,7 +324,7 @@ defmodule Omashiki.Doctor do
             id,
             "Host credential #{credential.name} cannot read its origin for " <>
               "#{Enum.join(unreadable, ", ")}. Jobs using it fail with host_credential_unavailable.",
-            host_credential_fix(credential)
+            host_credential_fix(credential, install)
           )
 
         true ->
@@ -332,14 +332,23 @@ defmodule Omashiki.Doctor do
             id,
             "Host credential #{credential.name} cannot read its origin for " <>
               "#{Enum.join(unreadable, ", ")}. No environment uses it yet.",
-            host_credential_fix(credential)
+            host_credential_fix(credential, install)
           )
       end
     end)
   end
 
-  defp host_credential_fix(credential) do
+  defp host_credential_fix(credential, :checkout) do
     "Log in with #{credential.kind} on this machine, or correct " <>
+      "[host_credentials.#{credential.name}] in omashiki.toml."
+  end
+
+  defp host_credential_fix(credential, :release) do
+    "Mount the directory of each origin read-only into the house container, then " <>
+      "restart the house (see https://github.com/This-Is-NPC/omashiki/blob/" <>
+      "v#{Application.spec(:omashiki, :vsn)}/docs/how-to-configure-model-access.md" <>
+      "#mount-the-origins-into-a-container). If an origin is missing on this machine " <>
+      "too, log in with #{credential.kind} first. Or correct " <>
       "[host_credentials.#{credential.name}] in omashiki.toml."
   end
 

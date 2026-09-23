@@ -235,6 +235,28 @@ defmodule Omashiki.DoctorTest do
     assert %{status: :warn} = find(checks, "host-credential:claude-local")
   end
 
+  test "an unreadable host credential names the login in a checkout and the mount in a release" do
+    credential = host_credential("opencode-local", "opencode")
+    FakeProbe.set(%{readable: {:error, :enoent}})
+
+    [checkout, release] =
+      for install <- [:checkout, :release] do
+        checks = run(install: install, host_credentials: [credential])
+        find(checks, "host-credential:opencode-local").fix
+      end
+
+    assert checkout =~ "Log in with opencode on this machine"
+    refute checkout =~ "Mount"
+
+    assert release =~ "Mount the directory of each origin read-only into the house container"
+
+    assert release =~
+             "/blob/v#{Application.spec(:omashiki, :vsn)}/docs/how-to-configure-model-access.md" <>
+               "#mount-the-origins-into-a-container"
+
+    assert release =~ "[host_credentials.opencode-local]"
+  end
+
   test "a readable host credential is ok" do
     credential = host_credential("opencode-local", "opencode")
 
