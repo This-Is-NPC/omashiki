@@ -50,9 +50,9 @@ defmodule OmashikiWeb.LoggerFilterTest do
 
     setup do
       # Capture every log line for the duration of the test.
+      previous_level = Logger.level()
       Logger.configure(level: :info)
-      previous_meta = Logger.metadata()
-      on_exit(fn -> Logger.metadata(previous_meta) end)
+      on_exit(fn -> Logger.configure(level: previous_level) end)
       :ok
     end
 
