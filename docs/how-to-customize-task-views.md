@@ -74,9 +74,9 @@ fields = ["title", "error", "context.issue_url"]
 | `fields` | `status`, `title`, `environment`, `worker`, `step`, `duration` | Fields in display order. |
 | `filter` | No filter | Table of filter keys. A task must match all keys. |
 | `sort` | `"-submitted"` | `submitted`, `started`, `finished`, or `priority`. Add the `-` prefix for descending order. |
-| `group_by` | None for a list, `status` for a board | `status`, `environment`, `repository`, `plugin`, `sink`, `priority`, or `worker`. |
+| `group_by` | None for a list, `status` for a board | `status`, `environment`, `repository`, `plugin`, `sink`, `priority`, or `worker`. `status` requires `filter.status`. See [status order](#status-order). |
 | `limit` | `100` | Maximum number of tasks, from 1 through 500. |
-| `blocks` | None | Summary blocks above the tasks: `status_counts`, `slots`, and `workers`. |
+| `blocks` | None | Summary blocks above the tasks: `status_counts`, `slots`, and `workers`. `status_counts` requires `filter.status`. See [status order](#status-order). |
 | `show_idle_workers` | `true` | Graph only. `false` hides nodes without a visible container. |
 | `show_stale_workers` | `true` | Graph only. `false` hides workers that stopped polling. |
 
@@ -95,6 +95,27 @@ No key starts an action, such as cancel or retry.
 | `since` | A duration, such as `"30m"`, `"24h"`, or `"7d"`. | Jobs admitted within this duration. |
 
 The statuses are `blocked`, `queued`, `provisioning`, `running`, `succeeded`, `failed`, and `cancelled`.
+
+## Status order
+
+The views file sets which statuses a view shows and their order.
+A view shows the statuses of its `filter.status` list, in the order of that list:
+
+- A view with `group_by = "status"` shows one group for each listed status, also when the group is empty.
+  A board groups by status when `group_by` is not set.
+- The `status_counts` block shows one count for each listed status.
+
+A view that groups by status or lists the `status_counts` block must declare `filter.status`.
+Without it, the screen rejects the file and names the view.
+
+```toml
+[[views]]
+name = "board"
+layout = "board"
+filter = { status = ["queued", "provisioning", "running", "succeeded", "failed", "blocked", "cancelled"], since = "24h" }
+```
+
+This board shows seven columns, from `queued` on the left to `cancelled` on the right.
 
 ## Fields
 

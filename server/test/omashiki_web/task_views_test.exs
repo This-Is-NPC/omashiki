@@ -3,7 +3,7 @@ defmodule OmashikiWeb.TaskViewsTest do
   use ExUnit.Case, async: false
 
   alias OmashikiWeb.TaskViews
-  alias OmashikiWeb.TaskViews.View
+  alias OmashikiWeb.TaskViews.{Rows, View}
 
   @example Path.expand("../../../examples/ui.toml", __DIR__)
 
@@ -161,9 +161,68 @@ defmodule OmashikiWeb.TaskViewsTest do
     end
   end
 
+  test "status columns and counts follow the declared filter order" do
+    assert {:ok, [view], "a"} =
+             TaskViews.parse("""
+             [[views]]
+             name = "a"
+             layout = "board"
+             filter = { status = ["failed", "queued", "cancelled", "running"] }
+             blocks = ["status_counts"]
+             """)
+
+    rows = [row("running"), row("failed"), row("running")]
+
+    assert [{"failed", [_]}, {"queued", []}, {"cancelled", []}, {"running", [_, _]}] =
+             Rows.groups(rows, view)
+
+    assert Rows.status_counts(rows, view) ==
+             [{"failed", 1}, {"queued", 0}, {"cancelled", 0}, {"running", 2}]
+  end
+
+  test "a view that shows statuses must declare filter.status" do
+    for view <- [
+          ~s(layout = "board"),
+          ~s(layout = "board"\ngroup_by = "status"),
+          ~s(group_by = "status"\nfilter = { since = "24h" })
+        ] do
+      assert {:error, [message]} = TaskViews.parse(~s([[views]]\nname = "a"\n#{view}\n))
+
+      assert message ==
+               ~s(views[1] "a": filter: status is required to group by status ) <>
+                 ~s[(a board groups by status unless group_by is set); list the statuses ] <>
+                 ~s(in column order, such as filter = { status = ["queued", "running", "failed"] })
+    end
+
+    assert {:error, [message]} =
+             TaskViews.parse(~s([[views]]\nname = "a"\nblocks = ["status_counts"]\n))
+
+    assert message ==
+             ~s(views[1] "a": filter: status is required by the status_counts block; ) <>
+               ~s(list the statuses in display order, such as ) <>
+               ~s(filter = { status = ["queued", "running", "failed"] })
+
+    assert {:ok, [%View{group_by: :environment}], _} =
+             TaskViews.parse(
+               ~s([[views]]\nname = "a"\nlayout = "board"\ngroup_by = "environment"\n)
+             )
+  end
+
   test "the built-in views and the example file are valid" do
-    assert {[%View{name: "board", layout: :board} | _], "board"} = TaskViews.builtin()
-    assert {:ok, [_ | _], "board"} = @example |> File.read!() |> TaskViews.parse()
+    assert {[board, active | _], "board"} = TaskViews.builtin()
+
+    assert %View{name: "board", layout: :board, group_by: :status} = board
+
+    assert board.filter.status ==
+             ~w(queued provisioning running succeeded failed blocked cancelled)
+
+    assert %View{name: "active", blocks: [:status_counts | _]} = active
+    assert active.filter.status == ~w(queued provisioning running blocked)
+
+    assert {:ok, [%View{name: "board"} = example_board | _], "board"} =
+             @example |> File.read!() |> TaskViews.parse()
+
+    assert example_board.filter.status == board.filter.status
   end
 
   test "a missing file uses the built-in views", %{path: path} do
@@ -251,4 +310,6 @@ defmodule OmashikiWeb.TaskViewsTest do
 
   defp restore_env(name, nil), do: System.delete_env(name)
   defp restore_env(name, value), do: System.put_env(name, value)
+
+  defp row(status), do: %{job: %{status: status}}
 end

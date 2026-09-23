@@ -54,8 +54,9 @@ defmodule OmashikiWeb.TaskViews.Rows do
   end
 
   @doc """
-  Split rows into `{group, rows}` pairs. Status groups follow the lifecycle
-  order and include empty statuses, so a board keeps stable columns.
+  Split rows into `{group, rows}` pairs. Status groups follow the order of
+  the view's `filter.status` and include empty statuses, so a board keeps
+  stable columns.
   """
   def groups(rows, %View{group_by: nil}), do: [{nil, rows}]
 
@@ -70,14 +71,14 @@ defmodule OmashikiWeb.TaskViews.Rows do
     |> Enum.sort_by(fn {group, _rows} -> group end)
   end
 
-  @doc "Count rows by status, for the statuses the view can show."
+  @doc "Count rows by status, for the statuses of the view's `filter.status`, in that order."
   def status_counts(rows, %View{} = view) do
     counts = Enum.frequencies_by(rows, & &1.job.status)
     Enum.map(view_statuses(view), &{&1, Map.get(counts, &1, 0)})
   end
 
-  defp view_statuses(%View{filter: filter}),
-    do: filter |> Map.get(:status, Api.statuses()) |> Enum.uniq()
+  # Validation rejects a view that shows statuses without filter.status.
+  defp view_statuses(%View{filter: %{status: statuses}}), do: Enum.uniq(statuses)
 
   def group_value(%{job: job}, :status), do: job.status
   def group_value(%{job: job}, :environment), do: job.environment

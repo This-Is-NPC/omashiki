@@ -162,6 +162,7 @@ defmodule OmashikiWeb.TaskViewsLiveTest do
     name = "second"
     title = "Second view"
     layout = "board"
+    filter = { status = ["running"] }
     """)
 
     {:ok, _lv, html} = live(conn, ~p"/?view=second")
@@ -179,9 +180,15 @@ defmodule OmashikiWeb.TaskViewsLiveTest do
     assert text =~ "Active"
   end
 
-  test "a board groups tasks by status in lifecycle order",
+  test "a board shows one column per filtered status in the declared order",
        %{conn: conn, user: user, token: token, ui_path: path} do
-    File.write!(path, ~s([[views]]\nname = "board"\nlayout = "board"\n))
+    File.write!(path, """
+    [[views]]
+    name = "board"
+    layout = "board"
+    filter = { status = ["failed", "running", "blocked", "queued"] }
+    """)
+
     insert_job(user, token, "queued", "waiting-task")
     insert_job(user, token, "running", "busy-task")
 
@@ -189,7 +196,7 @@ defmodule OmashikiWeb.TaskViewsLiveTest do
     document = Floki.parse_document!(html)
 
     assert Floki.attribute(document, "section[aria-label]", "aria-label") ==
-             ~w(blocked queued provisioning running succeeded failed cancelled)
+             ~w(failed running blocked queued)
 
     assert document |> Floki.find("section[aria-label=\"queued\"]") |> Floki.text() =~
              "waiting-task"
@@ -199,7 +206,12 @@ defmodule OmashikiWeb.TaskViewsLiveTest do
   end
 
   test "summary blocks render when a view lists them", %{conn: conn, ui_path: path} do
-    File.write!(path, ~s([[views]]\nname = "a"\nblocks = ["status_counts", "slots", "workers"]\n))
+    File.write!(path, """
+    [[views]]
+    name = "a"
+    filter = { status = ["running", "queued", "blocked"] }
+    blocks = ["status_counts", "slots", "workers"]
+    """)
 
     {:ok, _lv, html} = live(conn, ~p"/")
     text = visible_text(html)
@@ -207,6 +219,9 @@ defmodule OmashikiWeb.TaskViewsLiveTest do
     assert text =~ "Status"
     assert text =~ "Slots"
     assert text =~ "Workers"
+
+    counted = html |> Floki.parse_document!() |> Floki.find("dl dt") |> Enum.map(&Floki.text/1)
+    assert Enum.map(counted, &String.trim/1) == ~w(running queued blocked)
   end
 
   test "a changed file applies without a page reload", %{conn: conn, ui_path: path} do

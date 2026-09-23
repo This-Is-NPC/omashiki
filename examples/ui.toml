@@ -6,18 +6,21 @@
 
 default_view = "board"
 
+# A board grouped by status shows one column for each status in
+# filter.status, in the order written there.
 [[views]]
 name = "board"
 title = "Board"
 layout = "board"
 group_by = "status"
-filter = { since = "24h" }
+filter = { status = ["queued", "provisioning", "running", "succeeded", "failed", "blocked", "cancelled"], since = "24h" }
 fields = ["title", "environment", "worker", "step", "duration"]
 
+# The status_counts block counts the statuses in filter.status, in that order.
 [[views]]
 name = "active"
 title = "In progress"
-filter = { status = ["blocked", "queued", "provisioning", "running"] }
+filter = { status = ["queued", "provisioning", "running", "blocked"] }
 sort = "-submitted"
 fields = ["status", "title", "environment", "plugin", "worker", "step", "wait", "duration"]
 blocks = ["status_counts", "slots", "workers"]

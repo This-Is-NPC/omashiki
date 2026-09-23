@@ -75,6 +75,7 @@ defmodule OmashikiWeb.TaskViews do
   @default_limit 100
   @max_limit 500
   @max_title 60
+  @status_example ~s(filter = { status = ["queued", "running", "failed"] })
 
   @builtin """
   default_view = "board"
@@ -84,13 +85,13 @@ defmodule OmashikiWeb.TaskViews do
   title = "Board"
   layout = "board"
   group_by = "status"
-  filter = { since = "24h" }
+  filter = { status = ["queued", "provisioning", "running", "succeeded", "failed", "blocked", "cancelled"], since = "24h" }
   fields = ["title", "environment", "worker", "step", "duration"]
 
   [[views]]
   name = "active"
   title = "Active"
-  filter = { status = ["blocked", "queued", "provisioning", "running"] }
+  filter = { status = ["queued", "provisioning", "running", "blocked"] }
   fields = ["status", "title", "environment", "worker", "step", "wait", "duration"]
   blocks = ["status_counts", "slots", "workers"]
 
@@ -287,13 +288,38 @@ defmodule OmashikiWeb.TaskViews do
           message <- List.wrap(messages),
           do: "#{where}: #{key}: #{message}"
 
-    case unknown_keys(entry, @view_keys, where) ++ value_errors do
+    status_errors = for message <- status_errors(results), do: "#{where}: filter: #{message}"
+
+    case unknown_keys(entry, @view_keys, where) ++ value_errors ++ status_errors do
       [] -> {:ok, struct!(View, for({key, {:ok, value}} <- results, do: {key, value}))}
       errors -> {:error, errors}
     end
   end
 
   defp validate_view(_entry, index), do: {:error, ["views[#{index}]: must be a table"]}
+
+  # Status groups and status counts show exactly filter.status, in the order
+  # written, so a view that shows statuses must declare them.
+  defp status_errors(results) do
+    case ok_value(results[:filter], nil) do
+      %{status: _statuses} ->
+        []
+
+      # A rejected filter reports its own problem.
+      nil ->
+        []
+
+      _filter ->
+        needs = [
+          {ok_value(results[:group_by], nil) == :status,
+           "status is required to group by status (a board groups by status unless group_by is set); list the statuses in column order"},
+          {:status_counts in ok_value(results[:blocks], []),
+           "status is required by the status_counts block; list the statuses in display order"}
+        ]
+
+        for {true, message} <- needs, do: "#{message}, such as #{@status_example}"
+    end
+  end
 
   defp view_where(%{"name" => name}, index) when is_binary(name),
     do: ~s(views[#{index}] "#{name}")
