@@ -60,14 +60,14 @@ This example uses the `opencode` environment from `deploy/omashiki.toml`, which 
 ```bash
 cat > /tmp/omashiki-job.json <<'JSON'
 {
-  "idempotency_key": "token-rotation-checklist-001",
-  "correlation_id": "maintenance:token-rotation-checklist",
+  "idempotency_key": "release-checklist-001",
+  "correlation_id": "maintenance:release-checklist",
   "environment": "opencode",
   "priority": 1,
   "payload": {
-    "instruction": "Write a one-page checklist for rotating API tokens in English. Save it as token-rotation.md.",
-    "title": "token-rotation-checklist",
-    "context": {"reason": "Operators rotate tokens every quarter."}
+    "instruction": "Write a one-page release checklist in English. Save it as release-checklist.md.",
+    "title": "release-checklist",
+    "context": {"reason": "Operators cut a release every month."}
   }
 }
 JSON
