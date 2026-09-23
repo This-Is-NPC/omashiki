@@ -19,6 +19,16 @@ defmodule Omashiki.Worker.Managers do
     |> merge(State.managers())
   end
 
+  @doc """
+  The house ids of every configured manager that has sent an offer: the
+  owners of the containers this worker runs.
+  """
+  @spec houses() :: [String.t()]
+  def houses do
+    known = State.houses()
+    configured() |> Enum.map(&known[&1.id]) |> Enum.reject(&is_nil/1)
+  end
+
   @spec present?() :: boolean()
   def present?, do: configured() != []
 

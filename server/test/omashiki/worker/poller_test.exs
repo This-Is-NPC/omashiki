@@ -6,9 +6,18 @@ defmodule Omashiki.Worker.PollerTest do
   import Omashiki.Await, only: [until: 1]
 
   @poll_interval_ms 60_000
+  @house "5b3c1c9e-0a4f-4d53-9d8e-2f1b7c6a1e01"
 
   setup do
+    # An accepted offer records its house in the worker state file.
+    state_path =
+      Path.join(System.tmp_dir!(), "poller-state-#{System.unique_integer([:positive])}.json")
+
+    put_env(:worker_state_path, state_path)
+
     on_exit(fn ->
+      File.rm(state_path)
+      restore_env(:worker_state_path)
       restore_env(:manager_url)
       restore_env(:worker_token)
       restore_env(:worker_executor)
@@ -548,6 +557,72 @@ defmodule Omashiki.Worker.PollerTest do
       assert_receive {:complete_from, :b}, 2_000
     end
 
+    test "reclaims a container only when the house that owns it names it dead", %{
+      bypass_a: bypass_a,
+      bypass_b: bypass_b,
+      parent: parent,
+      managers: managers,
+      slots: slots
+    } do
+      put_env(:worker_reclaim_grace_ms, 0)
+      house_a = Ecto.UUID.generate()
+      house_b = Ecto.UUID.generate()
+
+      offer_a =
+        Map.merge(sample_offer("none"), %{
+          "attempt_id" => Ecto.UUID.generate(),
+          "house_id" => house_a
+        })
+
+      offer_b =
+        Map.merge(sample_offer("none"), %{
+          "attempt_id" => Ecto.UUID.generate(),
+          "house_id" => house_b
+        })
+
+      expect_register(bypass_a)
+      expect_register(bypass_b)
+      expect_accept(bypass_a, parent)
+      expect_accept(bypass_b, parent)
+      expect_poll_sequence(bypass_a, [offer_a], parent)
+      expect_poll_sequence(bypass_b, [offer_b], parent)
+
+      # House A runs its attempt; house B names dead everything it hears of,
+      # and house A's container too.
+      stub_report(bypass_a, parent, :a, fn _reported -> [] end)
+      stub_report(bypass_b, parent, :b, fn reported -> ["aaaaaaaaaaaa" | reported] end)
+
+      on_exit(fn ->
+        for id <- ["aaaaaaaaaaaa", "bbbbbbbbbbbb"],
+            do: Omashiki.Runtime.ContainerEvents.publish(:removed, id)
+      end)
+
+      assert {:ok, poller} =
+               start_supervised(
+                 {Poller,
+                  name: unique_poller_name(),
+                  slots: slots,
+                  managers: managers,
+                  runtime: Omashiki.Worker.PollerTest.FakeRuntime}
+               )
+
+      assert_receive {:accept, _}, 2_000
+      send(poller, :tick)
+      assert_receive {:accept, _}, 2_000
+
+      # Each house id is kept with the manager that sent it, before any
+      # container of that house exists.
+      until(fn -> Omashiki.Worker.State.houses() == %{"mgr-a" => house_a, "mgr-b" => house_b} end)
+
+      publish_container("aaaaaaaaaaaa", "job-" <> offer_a["attempt_id"])
+      publish_container("bbbbbbbbbbbb", "job-" <> offer_b["attempt_id"])
+
+      assert_receive {:report, :a, ["aaaaaaaaaaaa"]}, 2_000
+      assert_receive {:report, :b, ["bbbbbbbbbbbb"]}, 2_000
+      assert_receive {:destroyed, "bbbbbbbbbbbb"}, 2_000
+      refute_receive {:destroyed, "aaaaaaaaaaaa"}, 200
+    end
+
     test "uploads files blob to the originating manager only", %{
       bypass_a: bypass_a,
       bypass_b: bypass_b,
@@ -757,6 +832,7 @@ defmodule Omashiki.Worker.PollerTest do
       "attempt_id" => "attempt_#{n}",
       "lease_token" => "lease_#{n}",
       "sink" => sink,
+      "house_id" => @house,
       "payload" => %{"instruction" => "do work"},
       "admitted_environment" => %{"sink" => sink},
       "admitted_repository" => nil,
@@ -872,6 +948,18 @@ defmodule Omashiki.Worker.PollerTest do
       conn
       |> Plug.Conn.put_resp_content_type("application/json")
       |> Plug.Conn.resp(200, ~s({"cancel":false}))
+    end)
+  end
+
+  defp stub_report(bypass, parent, house, dead) do
+    Bypass.stub(bypass, "POST", "/internal/work/report", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      reported = Enum.map(Jason.decode!(body)["containers"], & &1["id"])
+      send(parent, {:report, house, reported})
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, Jason.encode!(%{reclaim: dead.(reported)}))
     end)
   end
 

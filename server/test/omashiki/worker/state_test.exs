@@ -63,6 +63,18 @@ defmodule Omashiki.Worker.StateTest do
     assert State.managers() == [%{id: "joao", url: "http://joao.test", token: "j"}]
   end
 
+  test "a manager's house id is kept across enrollments and forgotten with it" do
+    {:ok, _} = State.enroll(%{id: "ana", url: "http://ana.test", token: "a"})
+    assert :ok = State.remember_house("ana", "house-a")
+    assert :ok = State.remember_house("joao", "house-j")
+
+    {:ok, _} = State.enroll(%{id: "ana", url: "http://ana.test", token: "a2"})
+    assert State.houses() == %{"ana" => "house-a", "joao" => "house-j"}
+
+    {:ok, _} = State.remove("ana")
+    assert State.houses() == %{"joao" => "house-j"}
+  end
+
   test "an id is derived from the host when none is given" do
     assert {:ok, [%{id: "manager.test"}]} =
              State.enroll(%{manager_url: "http://manager.test:9090/", worker_token: "secret"})

@@ -22,6 +22,7 @@ defmodule Omashiki.Runtime.ContainerManager do
 
   @docker_api_version "v1.43"
   @container_label "omashiki"
+  @house_label "omashiki.house"
   @stop_timeout 10
   @agent_home "/tmp/agent-home"
   @host_socket "/run/omashiki/host.sock"
@@ -86,14 +87,18 @@ defmodule Omashiki.Runtime.ContainerManager do
     GenServer.call(__MODULE__, {:cancel_scope, scope_id}, call_timeout_ms())
   end
 
-  @doc "Lists and destroys Docker containers that no longer belong to a job."
+  @doc """
+  Destroys the containers of this node's houses that no longer belong to a
+  live attempt. Containers of other houses on the same Docker daemon are
+  never listed, so never destroyed.
+  """
   @impl true
   def cleanup_orphans do
     GenServer.call(__MODULE__, :cleanup_orphans, call_timeout_ms())
   end
 
   @doc """
-  Read-only census of every labelled container on this host. Destroys nothing.
+  Read-only census of every container of this node's houses. Destroys nothing.
 
   `cleanup_orphans/0` reads the same list, but reclaiming is the only thing it
   can do with what it finds. Looking without reclaiming is what an operator
@@ -539,6 +544,7 @@ defmodule Omashiki.Runtime.ContainerManager do
 
         container_config =
           build_container_config(group,
+            house: owning_house(opts),
             worktree_path: container_workdir,
             repo_root: repo_root,
             host_port: host_port,
@@ -1331,6 +1337,7 @@ defmodule Omashiki.Runtime.ContainerManager do
   touching the Docker API.
 
   Required opts:
+    * `:house` (string) — the id of the house the attempt belongs to.
     * `:worktree_path` (string, absolute) — agent's WORKDIR.
     * `:repo_root` (string, absolute) — parent repo root used as RO bind.
     * `:host_port` (integer) — host TCP port to map to the container's :4096.
@@ -1340,6 +1347,7 @@ defmodule Omashiki.Runtime.ContainerManager do
       user, regardless of the image's default `USER`.
   """
   def build_container_config(job_scope, opts) do
+    house = Keyword.fetch!(opts, :house)
     worktree_path = Keyword.fetch!(opts, :worktree_path)
     repo_root = Keyword.fetch!(opts, :repo_root)
     host_port = Keyword.get(opts, :host_port)
@@ -1391,6 +1399,7 @@ defmodule Omashiki.Runtime.ContainerManager do
     labels =
       %{
         @container_label => "true",
+        @house_label => house,
         "omashiki.job_scope_id" => job_scope.id,
         "omashiki.protocol" => protocol,
         "omashiki.runtime" => runtime.name,
@@ -1711,33 +1720,51 @@ defmodule Omashiki.Runtime.ContainerManager do
   end
 
   defp do_cleanup_orphans do
-    filter = Jason.encode!(%{"label" => ["#{@container_label}=true"]})
+    with {:ok, containers} <- list_house_containers() do
+      active_ids = active_job_scope_ids()
+      HostCredentials.sweep(active_ids)
 
-    case docker_get("/containers/json?all=true&filters=#{URI.encode_www_form(filter)}") do
-      {:ok, containers} when is_list(containers) ->
-        active_ids = active_job_scope_ids()
-        HostCredentials.sweep(active_ids)
+      orphans = Enum.filter(containers, &(orphan_status(&1, active_ids) == :orphan))
 
-        orphans = Enum.filter(containers, &(orphan_status(&1, active_ids) == :orphan))
+      Enum.each(orphans, fn %{"Id" => id} = container -> do_destroy(id, container) end)
 
-        Enum.each(orphans, fn %{"Id" => id} = container -> do_destroy(id, container) end)
-
-        {:ok, Enum.map(orphans, & &1["Id"])}
-
-      err ->
-        err
+      {:ok, Enum.map(orphans, & &1["Id"])}
     end
   end
 
   defp do_census do
+    with {:ok, containers} <- list_house_containers(),
+         do: {:ok, Enum.map(containers, &census_entry/1)}
+  end
+
+  # The Omashiki containers of the houses this node runs attempts for. Other
+  # houses may share the Docker daemon; their containers never appear here, so
+  # nothing on this node counts, cancels or reclaims them. Neither does a
+  # container without a house label: it belongs to no house.
+  defp list_house_containers do
     filter = Jason.encode!(%{"label" => ["#{@container_label}=true"]})
 
     case docker_get("/containers/json?all=true&filters=#{URI.encode_www_form(filter)}") do
-      {:ok, containers} when is_list(containers) -> {:ok, Enum.map(containers, &census_entry/1)}
-      {:ok, other} -> {:error, {:unexpected_census_shape, other}}
+      {:ok, containers} when is_list(containers) -> {:ok, house_containers(containers, houses())}
+      {:ok, other} -> {:error, {:unexpected_container_list, other}}
       {:error, reason} -> {:error, reason}
     end
   end
+
+  # The houses this node runs attempts for: those of the managers a worker is
+  # enrolled with, or this house.
+  defp houses do
+    if Omashiki.Application.boot_role() == :worker,
+      do: Omashiki.Worker.Managers.houses(),
+      else: [Omashiki.House.id()]
+  end
+
+  # The house a new container belongs to: the one a worker's offer came from,
+  # or this house.
+  defp owning_house(opts), do: Keyword.get_lazy(opts, :house, &Omashiki.House.id/0)
+
+  defp house_containers(containers, houses),
+    do: Enum.filter(containers, &(label(&1, @house_label) in houses))
 
   # Normalises one `/containers/json` row down to what a reader needs. The raw
   # Docker row carries mounts, command lines and the full environment; none of
@@ -1755,18 +1782,10 @@ defmodule Omashiki.Runtime.ContainerManager do
   end
 
   defp do_cancel_scope(scope_id) do
-    filter = Jason.encode!(%{"label" => ["#{@container_label}=true"]})
-
-    case docker_get("/containers/json?all=true&filters=#{URI.encode_www_form(filter)}") do
-      {:ok, containers} when is_list(containers) ->
-        containers
-        |> Enum.filter(&(job_scope_id_from_container(&1) == scope_id))
-        |> Enum.each(fn %{"Id" => id} = container -> do_destroy(id, container) end)
-
-        :ok
-
-      {:error, reason} ->
-        {:error, reason}
+    with {:ok, containers} <- list_house_containers() do
+      containers
+      |> Enum.filter(&(job_scope_id_from_container(&1) == scope_id))
+      |> Enum.each(fn %{"Id" => id} = container -> do_destroy(id, container) end)
     end
   end
 
@@ -1865,7 +1884,13 @@ defmodule Omashiki.Runtime.ContainerManager do
   end
 
   @doc false
-  def job_scope_id_from_container(container) when is_map(container) do
+  def job_scope_id_from_container(container) when is_map(container),
+    do: label(container, "omashiki.job_scope_id") || label(container, :job_scope_id)
+
+  def job_scope_id_from_container(_), do: nil
+
+  # A non-empty label of a `/containers/json` row or an inspected container.
+  defp label(container, key) do
     labels =
       Map.get(container, "Labels") ||
         Map.get(container, :Labels) ||
@@ -1873,13 +1898,11 @@ defmodule Omashiki.Runtime.ContainerManager do
         get_in(container, [:Config, :Labels]) ||
         %{}
 
-    case Map.get(labels, "omashiki.job_scope_id") || Map.get(labels, :job_scope_id) do
-      job_scope_id when is_binary(job_scope_id) and job_scope_id != "" -> job_scope_id
+    case Map.get(labels, key) do
+      value when is_binary(value) and value != "" -> value
       _ -> nil
     end
   end
-
-  def job_scope_id_from_container(_), do: nil
 
   @doc """
   Composes the Docker `HostConfig` block for an agent container.

@@ -252,10 +252,11 @@ defmodule Omashiki.Worker.Snapshot do
 
   defp check_dependency_base(_), do: :ok
 
-  defp provision_opts(opts, %Offer{manager_url: url, manager_id: id}) do
+  defp provision_opts(opts, %Offer{manager_url: url, manager_id: id, house_id: house}) do
     opts
     |> maybe_kw(:host_base_url, url)
     |> maybe_kw(:manager_id, id)
+    |> maybe_kw(:house, house)
   end
 
   defp maybe_kw(opts, _key, nil), do: opts

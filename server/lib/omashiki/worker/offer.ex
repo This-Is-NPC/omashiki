@@ -1,6 +1,10 @@
 defmodule Omashiki.Worker.Offer do
   @moduledoc """
   JSON-serialisable execution offer for a claimed attempt.
+
+  An offer sent to a remote worker names the house it comes from
+  (`house_id`, `Omashiki.House.id/0`). The worker labels the attempt's
+  container with it; an offer without it is refused.
   """
 
   alias Omashiki.Jobs.{Job, JobAttempt}
@@ -23,6 +27,7 @@ defmodule Omashiki.Worker.Offer do
           admitted_environment_digest: String.t(),
           admitted_repository_digest: String.t() | nil,
           admitted_plugin_digest: String.t(),
+          house_id: String.t() | nil,
           manager_id: String.t() | nil,
           manager_url: String.t() | nil
         }
@@ -45,6 +50,7 @@ defmodule Omashiki.Worker.Offer do
     :admitted_environment_digest,
     :admitted_repository_digest,
     :admitted_plugin_digest,
+    :house_id,
     :manager_id,
     :manager_url
   ]
@@ -97,12 +103,13 @@ defmodule Omashiki.Worker.Offer do
     }
 
     base
+    |> maybe_put("house_id", offer.house_id)
     |> maybe_put("manager_id", offer.manager_id)
     |> maybe_put("manager_url", offer.manager_url)
   end
 
   @doc "Decode an offer from JSON transport."
-  def from_map(map) when is_map(map) do
+  def from_map(%{"house_id" => house_id} = map) when is_binary(house_id) and house_id != "" do
     {:ok,
      %__MODULE__{
        job_id: map["job_id"],
@@ -122,10 +129,13 @@ defmodule Omashiki.Worker.Offer do
        admitted_environment_digest: map["admitted_environment_digest"],
        admitted_repository_digest: Map.get(map, "admitted_repository_digest"),
        admitted_plugin_digest: map["admitted_plugin_digest"],
+       house_id: house_id,
        manager_id: Map.get(map, "manager_id"),
        manager_url: Map.get(map, "manager_url")
      }}
   end
+
+  def from_map(map) when is_map(map), do: {:error, :missing_house_id}
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)

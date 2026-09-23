@@ -8,6 +8,7 @@ The image is `ghcr.io/this-is-npc/omashiki`.
 
 You need a Linux host with Docker and Compose support.
 Your account must have access to the Docker daemon.
+Other houses can use the same Docker daemon. A house removes only its own agent containers.
 You need a free TCP port. The house uses `4010` by default.
 
 ## 1. Download the files
@@ -123,6 +124,7 @@ docker compose stop
 
 `docker compose down` removes the containers and keeps the database volume.
 `docker compose down -v` also deletes the database volume, with the queue and the accounts.
+A new database is a new house. It does not remove agent containers that the old house left, so let running jobs finish first.
 
 ## Publish the image package
 

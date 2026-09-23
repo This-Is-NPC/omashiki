@@ -52,6 +52,8 @@ The worker shares one local slot limit across all enrolled houses.
 A limit of four means four concurrent jobs in total.
 
 The worker stores mirrors and execution state separately for each house.
+Each house sends its own house id with its offers, and the worker labels that house's containers with it.
+Two houses with similar URLs or manager IDs never share containers.
 An unavailable house does not remove the other enrollments.
 
 ## Remove one enrollment

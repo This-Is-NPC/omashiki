@@ -29,7 +29,8 @@ defmodule Omashiki.Runtime.ContainerManager.Behaviour do
   @callback fetch_logs(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
 
   @doc """
-  Read-only census of every sandbox this host is running, reclaimable or not.
+  Read-only census of every sandbox this node runs for its houses, reclaimable
+  or not.
 
   `cleanup_orphans/0` already classifies the same set, but it destroys what it
   classifies, so it cannot be used to look. Separating the two is what lets an

@@ -8,12 +8,17 @@ defmodule Omashiki.Worker.State do
   the poller is (re)configured. Enrolling the same id again replaces that
   entry; removing an id stops polling that house without touching the rest.
 
+  Beside the entries the file keeps, per manager id, the house id that
+  manager sends with its offers. The worker labels each container with it,
+  so it only ever lists or removes containers of the houses it serves. A
+  manager configured by environment has its house id kept here too.
+
   The pre-list file shape (`manager_url` + `worker_token`) still loads as a
   single entry so an already-enrolled worker keeps working after upgrade.
   """
 
   @type entry :: %{id: String.t(), url: String.t(), token: String.t()}
-  @type t :: %{managers: [entry()]}
+  @type t :: %{managers: [entry()], houses: %{String.t() => String.t()}}
 
   @doc "Resolved on-disk enrollment path."
   @spec path() :: String.t()
@@ -51,6 +56,25 @@ defmodule Omashiki.Worker.State do
     end
   end
 
+  @doc "House ids by manager id, as the managers' offers named them."
+  @spec houses() :: %{String.t() => String.t()}
+  def houses do
+    case load() do
+      {:ok, %{houses: houses}} -> houses
+      :error -> %{}
+    end
+  end
+
+  @doc "Keep the house id a manager's offer named. Unchanged ids are not rewritten."
+  @spec remember_house(String.t(), String.t()) :: :ok | :error
+  def remember_house(manager_id, house_id) when is_binary(manager_id) and is_binary(house_id) do
+    state = current()
+
+    if state.houses[manager_id] == house_id,
+      do: :ok,
+      else: write(%{state | houses: Map.put(state.houses, manager_id, house_id)})
+  end
+
   @doc "Replace the whole enrollment. Accepts the list shape or one legacy entry."
   @spec save(map()) :: :ok | :error
   def save(%{} = state) do
@@ -61,12 +85,14 @@ defmodule Omashiki.Worker.State do
   @spec enroll(map()) :: {:ok, [entry()]} | :error
   def enroll(%{} = params) do
     with {:ok, entry} <- normalize_entry(params) do
+      state = current()
+
       merged =
-        managers()
+        state.managers
         |> Enum.reject(&(&1.id == entry.id))
         |> Kernel.++([entry])
 
-      case write(%{managers: merged}) do
+      case write(%{state | managers: merged}) do
         :ok -> {:ok, merged}
         :error -> :error
       end
@@ -76,9 +102,10 @@ defmodule Omashiki.Worker.State do
   @doc "Forget one house by id. Unknown ids are a no-op."
   @spec remove(String.t()) :: {:ok, [entry()]} | :error
   def remove(id) when is_binary(id) do
-    remaining = Enum.reject(managers(), &(&1.id == id))
+    state = current()
+    remaining = Enum.reject(state.managers, &(&1.id == id))
 
-    case write(%{managers: remaining}) do
+    case write(%{managers: remaining, houses: Map.delete(state.houses, id)}) do
       :ok -> {:ok, remaining}
       :error -> :error
     end
@@ -98,10 +125,18 @@ defmodule Omashiki.Worker.State do
     :ok
   end
 
-  defp write(%{managers: managers}) do
+  defp current do
+    case load() do
+      {:ok, state} -> state
+      :error -> %{managers: [], houses: %{}}
+    end
+  end
+
+  defp write(%{managers: managers, houses: houses}) do
     encoded =
       Jason.encode!(%{
-        "managers" => Enum.map(managers, &%{"id" => &1.id, "url" => &1.url, "token" => &1.token})
+        "managers" => Enum.map(managers, &%{"id" => &1.id, "url" => &1.url, "token" => &1.token}),
+        "houses" => houses
       })
 
     with :ok <- ensure_dir(),
@@ -113,9 +148,12 @@ defmodule Omashiki.Worker.State do
     end
   end
 
-  defp normalize(%{"managers" => list}) when is_list(list), do: normalize(%{managers: list})
+  defp normalize(%{"managers" => list} = state) when is_list(list),
+    do: normalize(%{managers: list, houses: Map.get(state, "houses", %{})})
 
-  defp normalize(%{managers: list}) when is_list(list) do
+  defp normalize(%{managers: list} = state) when is_list(list) do
+    houses = Map.get(state, :houses, %{})
+
     entries = Enum.map(list, &normalize_entry/1)
 
     if Enum.any?(entries, &(&1 == :error)) do
@@ -124,7 +162,9 @@ defmodule Omashiki.Worker.State do
       entries = Enum.map(entries, fn {:ok, entry} -> entry end)
       ids = Enum.map(entries, & &1.id)
 
-      if ids == Enum.uniq(ids), do: {:ok, %{managers: entries}}, else: :error
+      if ids == Enum.uniq(ids) and valid_houses?(houses),
+        do: {:ok, %{managers: entries, houses: houses}},
+        else: :error
     end
   end
 
@@ -134,11 +174,16 @@ defmodule Omashiki.Worker.State do
 
   defp normalize(%{manager_url: url, worker_token: token}) do
     with {:ok, entry} <- normalize_entry(%{url: url, token: token}) do
-      {:ok, %{managers: [entry]}}
+      {:ok, %{managers: [entry], houses: %{}}}
     end
   end
 
   defp normalize(_), do: :error
+
+  defp valid_houses?(houses) when is_map(houses),
+    do: Enum.all?(houses, fn {id, house} -> is_binary(id) and is_binary(house) end)
+
+  defp valid_houses?(_), do: false
 
   defp normalize_entry(%{} = params) do
     url = fetch(params, :url) || fetch(params, :manager_url)

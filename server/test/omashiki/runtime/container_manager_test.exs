@@ -217,6 +217,7 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
 
     config =
       ContainerManager.build_container_config(%{id: "job-test"},
+        house: "house-test",
         worktree_path: "/repo/.omashiki-worktrees/job-test",
         repo_root: "/repo",
         host_uid: 1000,
@@ -228,6 +229,7 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
         job: %{correlation_id: "correlation-test"}
       )
 
+    assert config["Labels"]["omashiki.house"] == "house-test"
     assert config["Labels"]["omashiki.protocol"] == "cli"
     assert config["Labels"]["omashiki.correlation_id"] == "correlation-test"
     assert config["Labels"]["omashiki.runtime"] == "docker.runc.debian"
@@ -271,6 +273,7 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
 
     config =
       ContainerManager.build_container_config(%{id: "job-kata"},
+        house: "house-test",
         worktree_path: "/repo/.omashiki-worktrees/job-kata",
         repo_root: "/repo",
         host_uid: 1000,
@@ -513,6 +516,114 @@ defmodule Omashiki.Runtime.ContainerManagerTest do
         _ -> nil
       end
     end)
+  end
+
+  describe "a Docker daemon shared by several houses" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "cm-houses-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      socket = Path.join(root, "docker.sock")
+      mine = Omashiki.House.id()
+
+      containers = [
+        docker_row("aaaaaaaaaaaa", mine),
+        docker_row("bbbbbbbbbbbb", "another-house"),
+        docker_row("cccccccccccc", nil)
+      ]
+
+      # The Docker client reads its reply from the calling process's mailbox,
+      # so the fake daemon records calls in an agent instead of sending them.
+      calls = start_supervised!({Agent, fn -> [] end})
+
+      start_supervised!(
+        {Bandit,
+         plug: {__MODULE__.FakeDocker, calls: calls, containers: containers},
+         ip: {:local, socket},
+         port: 0,
+         startup_log: false}
+      )
+
+      previous_socket = Application.get_env(:omashiki, :docker_socket_path)
+      Application.put_env(:omashiki, :docker_socket_path, socket)
+      Application.put_env(:omashiki, :host_credential_root, Path.join(root, "credentials"))
+
+      on_exit(fn ->
+        Application.put_env(:omashiki, :docker_socket_path, previous_socket)
+        Application.delete_env(:omashiki, :host_credential_root)
+        File.rm_rf!(root)
+      end)
+
+      {:ok, calls: calls, root: root}
+    end
+
+    test "cleanup reclaims this house's orphans and leaves every other container alone", %{
+      calls: calls
+    } do
+      assert {:ok, ["aaaaaaaaaaaa"]} = ContainerManager.op_cleanup_orphans()
+
+      assert Enum.reverse(Agent.get(calls, & &1)) == [
+               {"POST", ["aaaaaaaaaaaa", "stop"]},
+               {"DELETE", ["aaaaaaaaaaaa"]}
+             ]
+    end
+
+    test "the census counts only this house's containers" do
+      assert {:ok, [%{id: "aaaaaaaaaaaa"}]} = ContainerManager.op_census()
+    end
+
+    test "a worker reclaims only for the houses that sent it work, whatever their manager ids",
+         %{calls: calls, root: root} do
+      Application.put_env(:omashiki, :boot_role, :worker)
+      Application.put_env(:omashiki, :worker_state_path, Path.join(root, "worker-state.json"))
+
+      on_exit(fn ->
+        Application.put_env(:omashiki, :boot_role, :embedded)
+        Application.delete_env(:omashiki, :worker_state_path)
+      end)
+
+      # This worker knows "another-house" as localhost. The house of the first
+      # container may be called localhost by another worker; it is not this
+      # worker's.
+      {:ok, _} =
+        Omashiki.Worker.State.enroll(%{id: "localhost", url: "http://localhost:4000", token: "t"})
+
+      :ok = Omashiki.Worker.State.remember_house("localhost", "another-house")
+
+      assert {:ok, ["bbbbbbbbbbbb"]} = ContainerManager.op_cleanup_orphans()
+
+      assert Enum.reverse(Agent.get(calls, & &1)) == [
+               {"POST", ["bbbbbbbbbbbb", "stop"]},
+               {"DELETE", ["bbbbbbbbbbbb"]}
+             ]
+    end
+  end
+
+  defmodule FakeDocker do
+    @behaviour Plug
+
+    import Plug.Conn
+
+    @impl true
+    def init(opts), do: opts
+
+    @impl true
+    def call(%{method: "GET", path_info: [_version, "containers", "json"]} = conn, opts) do
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(200, Jason.encode!(opts[:containers]))
+    end
+
+    def call(%{path_info: [_version, "containers" | rest]} = conn, opts) do
+      Agent.update(opts[:calls], &[{conn.method, rest} | &1])
+      send_resp(conn, 204, "")
+    end
+  end
+
+  # A `/containers/json` row of an attempt that is no longer live.
+  defp docker_row(id, house) do
+    labels = %{"omashiki" => "true", "omashiki.job_scope_id" => "job-#{Ecto.UUID.generate()}"}
+    labels = if house, do: Map.put(labels, "omashiki.house", house), else: labels
+    %{"Id" => id, "State" => "exited", "Status" => "Exited (0)", "Labels" => labels}
   end
 
   defp job_fixture do

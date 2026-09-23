@@ -106,5 +106,13 @@ The event ID supports receiver deduplication across retries.
 Recovery finds expired active leases and stranded dispatch state.
 It records failure once and releases the reservation.
 A stale worker cannot complete with an expired fence.
+An embedded house removes the containers of attempts that are not live when it starts and after it recovers stale attempts.
 The worker removes the container of a failed attempt when its manager answers the next fleet report.
 See [distributed execution](distributed-execution.md) for worker-local leases and slots.
+
+Several houses can share one Docker host.
+A house id is created with the database.
+Each container that a house runs carries that id in the `omashiki.house` label.
+A house lists, counts, and removes only containers with its own id.
+A remote worker labels each container with the id of the house that offered the attempt.
+A container without the label belongs to no house, and no house removes it.

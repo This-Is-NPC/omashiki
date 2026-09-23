@@ -24,7 +24,8 @@ defmodule Omashiki.Worker.Inbox do
 
       {:ok, %JobAttempt{} = attempt} ->
         job = Repo.get!(Job, attempt.job_id)
-        {:ok, %{offer: Offer.to_map(Offer.from_claimed(job, attempt))}}
+        offer = %{Offer.from_claimed(job, attempt) | house_id: Omashiki.House.id()}
+        {:ok, %{offer: Offer.to_map(offer)}}
 
       {:error, :capacity_exhausted} ->
         {:ok, %{offer: nil}}

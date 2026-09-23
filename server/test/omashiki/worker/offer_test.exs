@@ -28,7 +28,9 @@ defmodule Omashiki.Worker.OfferTest do
     assert offer.admitted_repository_digest == job.admitted_repository_digest
     assert offer.admitted_plugin_digest == job.admitted_plugin_digest
 
-    map = Offer.to_map(offer)
+    house = Ecto.UUID.generate()
+    map = Offer.to_map(%{offer | house_id: house})
+    assert map["house_id"] == house
     assert map["payload"] == payload
     assert map["attempt_number"] == attempt.number
     assert map["user_id"] == job.user_id
@@ -43,5 +45,8 @@ defmodule Omashiki.Worker.OfferTest do
     assert round.environment == job.environment
     assert round.admitted_environment_digest == job.admitted_environment_digest
     assert round.admitted_plugin_digest == job.admitted_plugin_digest
+    assert round.house_id == house
+
+    assert {:error, :missing_house_id} = Offer.from_map(Map.delete(map, "house_id"))
   end
 end

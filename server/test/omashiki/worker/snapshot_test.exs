@@ -14,8 +14,9 @@ defmodule Omashiki.Worker.SnapshotTest do
   defmodule GitContainer do
     @remote "https://example.com/repo.git"
 
-    def provision(job, _attempt, _environment, _opts) do
+    def provision(job, _attempt, _environment, opts) do
       send(self(), {:provision, job})
+      send(self(), {:provision_opts, opts})
       {:ok, %{id: "git-fake", artifact: %{task_branch: "feat-runner"}}}
     end
 
@@ -183,6 +184,25 @@ defmodule Omashiki.Worker.SnapshotTest do
     assert job.admitted_repository["path"] == mirror_path(@remote, "mgr-a")
     refute job.admitted_repository["path"] == mirror_path(@remote, "mgr-b")
     assert_receive :destroyed
+  end
+
+  test "the container is labelled with the house the offer came from" do
+    house = Ecto.UUID.generate()
+
+    offer =
+      base_offer(%{
+        sink: "git",
+        manager_id: "localhost",
+        house_id: house,
+        admitted_environment: environment_for("git"),
+        admitted_repository: git_repository()
+      })
+
+    assert {:ok, %Complete{kind: :git}} = Snapshot.run(offer)
+
+    assert_receive {:provision_opts, opts}
+    assert opts[:house] == house
+    assert opts[:manager_id] == "localhost"
   end
 
   test "files offer completes with files metadata" do

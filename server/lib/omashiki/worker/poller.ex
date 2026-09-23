@@ -7,7 +7,7 @@ defmodule Omashiki.Worker.Poller do
 
   alias Omashiki.Jobs.{AttemptResult, Failure}
   alias Omashiki.Runtime.{ContainerManager, ContainerTracker}
-  alias Omashiki.Worker.{Client, Complete, Execution, Managers, Offer, Slots}
+  alias Omashiki.Worker.{Client, Complete, Execution, Managers, Offer, Slots, State}
 
   # A container change is reported to the managers almost at once; the
   # keepalive report keeps slots current while the worker is too busy to poll.
@@ -167,6 +167,7 @@ defmodule Omashiki.Worker.Poller do
             state
 
           :ok ->
+            remember_house(offer)
             poller_pid = self()
 
             {:ok, task_pid} =
@@ -192,6 +193,14 @@ defmodule Omashiki.Worker.Poller do
             send(self(), :tick)
             %{state | in_flight: in_flight, owners: owners}
         end
+    end
+  end
+
+  # Kept before the container exists, so every container this worker labels
+  # with a house is one it will list again, after a restart too.
+  defp remember_house(%Offer{manager_id: manager_id, house_id: house_id}) do
+    if State.remember_house(manager_id, house_id) == :error do
+      Logger.warning("Worker.Poller could not record house #{house_id} of #{manager_id}")
     end
   end
 

@@ -86,6 +86,9 @@ Use an explicit `--manager-id` when several houses have similar URLs.
 If work waits, check worker logs, enrollment, available slots, and manager access.
 If provisioning fails, check the image catalog and credential paths on the worker.
 When the manager fails an attempt, the worker removes its container at its next report and logs the removal.
+Each container carries the id of its house in the `omashiki.house` label.
+The worker removes only containers of the houses it serves, so other houses and workers can use the same Docker daemon.
+Run the manager and the worker at the same release. A worker refuses an offer that does not name its house.
 
 To stop the deployment, run the applicable command on each host:
 
